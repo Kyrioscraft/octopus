@@ -1,0 +1,106 @@
+:root {
+  /* ===== Brand colors ===== */
+  --main-color: #237804;
+  --main-700: #237804;
+  --main-600: #389e0d;
+  --main-500: #4caf50;
+  --main-400: #66d66a;
+  --main-200: #a5e8a7;
+  --main-100: #c8f0ca;
+  --main-50: #e6ffe6;
+  --main-20: #f6fff0;
+  --main-10: #fafff5;
+  --main-5: #fcfff5;
+
+  /* ===== Gray scale ===== */
+  --gray-0: #ffffff;
+  --gray-10: #fbfcfc;
+  --gray-25: #f7f9f9;
+  --gray-50: #f2f4f4;
+  --gray-100: #eff2f2;
+  --gray-150: #eef0f0;
+  --gray-200: #dfe1e1;
+  --gray-300: #b6b9b9;
+  --gray-400: #bdbfbf;
+  --gray-500: #979999;
+  --gray-600: #6c6e6e;
+  --gray-700: #4c4d4d;
+  --gray-900: #1e1f1f;
+  --gray-1000: #151616;
+
+  /* ===== Shadow stack (black at varying opacity) ===== */
+  --shadow-0: rgba(0, 0, 0, 0.02);
+  --shadow-1: rgba(0, 0, 0, 0.05);
+  --shadow-2: rgba(0, 0, 0, 0.08);
+  --shadow-3: rgba(0, 0, 0, 0.12);
+
+  /* ===== Error colors ===== */
+  --color-error-50: #fff2f0;
+  --color-error-100: #ffccc7;
+  --color-error-500: #ff4d4f;
+  --color-error-700: #cf1322;
+
+  /* ===== Sizes ===== */
+  --sidebar-width: 252px;
+  --header-height: 45px;
+
+  /* ===== Typography ===== */
+  font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', Roboto,
+    'HarmonyOS Sans SC', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  color: var(--gray-900);
+  background: var(--gray-0);
+  font-size: 15px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ===== Scrollbar (4px thin) ===== */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--gray-100); border-radius: 2px; }
+::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--gray-300); }
+
+/* ===== Generating wave animation (shimmer through text) ===== */
+@keyframes waveFlash {
+  0% { background-position: 200% center; }
+  100% { background-position: -200% center; }
+}
+
+@keyframes dotPulse {
+  0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+  40% { transform: scale(1.1); opacity: 1; }
+}
+
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== Shared utility classes ===== */
+.sidebar-item {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  height: 36px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 450;
+  color: var(--gray-700);
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+.sidebar-item:hover {
+  background-color: var(--main-20);
+  color: var(--main-color);
+}
+.sidebar-item.active {
+  background-color: color-mix(in srgb, var(--main-color) 6%, var(--gray-0));
+  color: var(--main-color);
+  font-weight: 600;
+}

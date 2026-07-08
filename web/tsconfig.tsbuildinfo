@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/components/agentconfigsidebar.tsx","./src/components/approvaldialog.tsx","./src/components/sidebar.tsx","./src/layouts/applayout.tsx","./src/pages/chat.tsx","./src/stores/chat.ts"],"version":"5.9.3"}
