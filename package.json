@@ -1,0 +1,24 @@
+{
+  "name": "octopus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r --filter=./core --filter=./tentacle --filter=./tui run build && pnpm -r --filter=./server --filter=./web run build",
+    "dev": "pnpm -r --parallel run dev",
+    "lint": "pnpm -r run lint",
+    "build:libs": "pnpm --filter @octopus/core --filter @octopus/tentacle run build",
+    "build:tui": "pnpm build:libs && pnpm --filter @octopus/tui run build",
+    "build:server": "pnpm --filter @octopus/server run build",
+    "build:web": "pnpm --filter @octopus/web run build",
+    "dev:tui": "pnpm --filter @octopus/tui run dev",
+    "dev:server": "pnpm --filter @octopus/server run dev",
+    "dev:web": "pnpm --filter @octopus/web run dev",
+    "start:tui": "pnpm build:tui && node tui/dist/cli.js",
+    "start:tui:dev": "pnpm build:libs && node --watch tui/dist/cli.js"
+  },
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22"
+  }
+}

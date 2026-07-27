@@ -40,6 +40,23 @@
   --color-error-500: #ff4d4f;
   --color-error-700: #cf1322;
 
+  /* ===== Success colors ===== */
+  --color-success-50: #f6ffed;
+  --color-success-100: #d9f7be;
+  --color-success-500: #52c41a;
+  --color-success-700: #389e0d;
+
+  /* ===== Warning colors ===== */
+  --color-warning-50: #fffbe6;
+  --color-warning-100: #ffe58f;
+  --color-warning-500: #faad14;
+  --color-warning-700: #d48806;
+
+  /* ===== Info colors ===== */
+  --color-info-50: #e6f7ff;
+  --color-info-100: #bae7ff;
+  --color-info-700: #096dd9;
+
   /* ===== Sizes ===== */
   --sidebar-width: 252px;
   --header-height: 45px;
@@ -47,6 +64,76 @@
   /* ===== Typography ===== */
   font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', Roboto,
     'HarmonyOS Sans SC', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* =============================================================================
+ * Dark theme — applied when <html data-theme="dark"> (set by stores/theme.ts).
+ * Only the variables that need to change are redefined; brand hue stays green
+ * but is brightened so text-on-background contrast holds on dark surfaces.
+ * Gray scale is inverted: --gray-0 (was white) becomes the deepest background,
+ * --gray-1000 (was near-black) becomes the lightest text.
+ * ===========================================================================*/
+[data-theme="dark"] {
+  /* Gray scale (inverted + tuned for ~AA contrast on dark surfaces) */
+  --gray-0: #151616;     /* primary background */
+  --gray-10: #1a1b1b;
+  --gray-25: #1e1f1f;    /* code block / secondary surface */
+  --gray-50: #232424;    /* card / elevated surface */
+  --gray-100: #2a2b2b;   /* borders / dividers */
+  --gray-150: #303232;
+  --gray-200: #3a3c3c;   /* scrollbar thumb */
+  --gray-300: #4c4e4e;
+  --gray-400: #6c6e6e;
+  --gray-500: #9a9c9c;   /* secondary text */
+  --gray-600: #b8baba;
+  --gray-700: #dadcdc;   /* primary-ish text on muted surfaces */
+  --gray-800: #eef0f0;   /* (was missing in :root — InfoRow relies on it) */
+  --gray-900: #f2f4f4;   /* body text */
+  --gray-1000: #fbfcfc;  /* headings / strong text */
+
+  /* Shadows: stronger black overlays (subtle on white, need weight on dark) */
+  --shadow-0: rgba(0, 0, 0, 0.20);
+  --shadow-1: rgba(0, 0, 0, 0.32);
+  --shadow-2: rgba(0, 0, 0, 0.44);
+  --shadow-3: rgba(0, 0, 0, 0.56);
+
+  /* Brand: brighten greens so they read well on dark backgrounds */
+  --main-color: #52c41a;
+  --main-700: #95de64;
+  --main-600: #73d13d;
+  --main-500: #5cb85c;
+  --main-400: #7bd882;
+  --main-200: #2e5e2e;
+  --main-100: #1f4a1f;
+  --main-50: #182d18;
+  --main-20: #15241a;
+  --main-10: #141f18;
+  --main-5: #131d16;
+
+  /* Semantic: dark backgrounds + light text per antd dark palette convention */
+  --color-error-50: #2a1215;
+  --color-error-100: #58181c;
+  --color-error-500: #ff7875;
+  --color-error-700: #ffa39e;
+
+  --color-success-50: #162312;
+  --color-success-100: #23480f;
+  --color-success-500: #73d13d;
+  --color-success-700: #95de64;
+
+  --color-warning-50: #2b2111;
+  --color-warning-100: #594214;
+  --color-warning-500: #ffc53d;
+  --color-warning-700: #ffd666;
+
+  --color-info-50: #111d2c;
+  --color-info-100: #15395b;
+  --color-info-700: #69b1ff;
+}
+
+/* Let native controls (form inputs, scrollbars) render in dark mode too */
+[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -104,3 +191,7 @@ body {
   color: var(--main-color);
   font-weight: 600;
 }
+
+/* ===== Thread list item: reveal more-actions only on row hover ===== */
+.thread-more { opacity: 0; transition: opacity 0.15s ease; }
+.thread-item:hover .thread-more { opacity: 1; }

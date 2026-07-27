@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 import { ModelConfig } from "./model_config.js";
+import { clearCaches } from "./model_config.js";
 
 // =============================================================================
 // Schema
@@ -85,6 +86,10 @@ const HARDCODED_DEFAULT_MODEL = "anthropic:claude-sonnet-4-6";
  * Equivalent to Python `cortex.server_config.ServerConfig.from_env()`.
  */
 export function loadConfig(overrides?: Partial<ServerConfig>): ServerConfig {
+  // Force-reload config to avoid stale cache (the cache may have been
+  // populated before config.json was written).
+  clearCaches();
+
   // 1. OCTOPUS_MODEL (highest priority)
   const explicitModel = process.env["OCTOPUS_MODEL"];
 

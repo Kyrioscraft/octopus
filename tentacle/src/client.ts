@@ -1,17 +1,43 @@
 import { parseNDJSONStream } from "./stream.js";
 import {
   StreamHttpError,
+  type BuiltinSkillSpec,
   type ChatRequest,
   type FirstRunResponse,
+  type GeneralSettingsResponse,
+  type GeneralTools,
   type InitRequest,
   type LoginRequest,
   type LoginResponse,
+  type McpServerEntry,
+  type McpWriteRequest,
+  type ModelProviderDetail,
+  type ModelProviderEntry,
+  type ModelProviderPatch,
+  type ModelSettingsResponse,
+  type RemoteModel,
+  type ResumeRequestBody,
+  type SkillDetail,
+  type SkillEntry,
+  type SkillWriteRequest,
   type StreamCallOptions,
   type StreamEvent,
+  type SubagentEntry,
+  type SubagentWriteRequest,
   type Thread,
   type ThreadListResponse,
   type ThreadHistoryResponse,
   type User,
+  type Workspace,
+  type WorkspaceEntry,
+  type WorkspaceFileContent,
+  type WorkspaceListResponse,
+  type WorkspaceTreeResponse,
+  type WorkspaceUploadResult,
+  type WorkspaceWriteRequest,
+  type HostBrowseResult,
+  type SandboxSettings,
+  type SandboxSettingsPatch,
 } from "./types.js";
 
 // =============================================================================
@@ -23,7 +49,10 @@ export class OctopusClient {
   #token: string | null = null;
 
   constructor(opts: { baseUrl?: string; token?: string } = {}) {
-    this.#baseUrl = opts.baseUrl?.replace(/\/$/, "") ?? "http://127.0.0.1:5050";
+    // Default to same-origin (relative) so requests go through the dev proxy
+    // (Vite: /api → 127.0.0.1:5050) and the production reverse proxy.
+    // Pass an explicit baseUrl only for non-browser / cross-origin use.
+    this.#baseUrl = opts.baseUrl?.replace(/\/$/, "") ?? "";
     this.#token = opts.token ?? null;
   }
 
@@ -68,8 +97,15 @@ export class OctopusClient {
   // =========================================================================
 
   /** List threads for the current user. */
-  async listThreads(): Promise<Thread[]> {
-    const res = await this.#get<ThreadListResponse>("/api/chat/threads");
+  /**
+   * List threads for the current user. Pass a workspace scope to filter:
+   *   - { workspaceId: "<id>" } → only that workspace's threads
+   *   - { workspaceId: "unbound" } → only threads with no workspace
+   *   - omitted → all threads
+   */
+  async listThreads(scope?: { workspaceId?: string }): Promise<Thread[]> {
+    const qs = scope?.workspaceId ? `?workspace_id=${encodeURIComponent(scope.workspaceId)}` : "";
+    const res = await this.#get<ThreadListResponse>(`/api/chat/threads${qs}`);
     return res.threads;
   }
 
@@ -86,6 +122,242 @@ export class OctopusClient {
   /** Rename a thread. */
   async renameThread(threadId: string, title: string): Promise<void> {
     await this.#put(`/api/chat/thread/${threadId}`, { title });
+  }
+
+  // =========================================================================
+  // Config — Skills (/api/config/skills)
+  // =========================================================================
+
+  /** List all skill entries (builtin + file + user-defined, merged). */
+  async listSkills(): Promise<SkillEntry[]> {
+    const res = await this.#get<{ skills: SkillEntry[] }>("/api/config/skills");
+    return res.skills;
+  }
+
+  /** Get a single skill's detail (content + origin). */
+  async getSkill(name: string): Promise<SkillDetail> {
+    return this.#get<SkillDetail>(`/api/config/skills/${encodeURIComponent(name)}`);
+  }
+
+  /** Create a user-defined skill. */
+  async createSkill(body: SkillWriteRequest): Promise<SkillEntry> {
+    const res = await this.#post<{ skill: SkillEntry }>("/api/config/skills", body);
+    return res.skill;
+  }
+
+  /** Update a user-defined skill (partial). */
+  async updateSkill(name: string, body: SkillWriteRequest): Promise<SkillEntry> {
+    const res = await this.#put<{ skill: SkillEntry }>(
+      `/api/config/skills/${encodeURIComponent(name)}`,
+      body,
+    );
+    return res.skill;
+  }
+
+  /** Delete a user-defined skill. */
+  async deleteSkill(name: string): Promise<void> {
+    await this.#delete(`/api/config/skills/${encodeURIComponent(name)}`);
+  }
+
+  /** Import a skill from an uploaded .zip or .md file (multipart). */
+  async importSkill(file: File): Promise<SkillEntry> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch(`${this.#baseUrl}/api/config/skills/import`, {
+      method: "POST",
+      headers: this.#authHeader(),
+      body: formData,
+    });
+    if (!res.ok) throw await this.#httpError(res);
+    const data = (await res.json()) as { skill: SkillEntry };
+    return data.skill;
+  }
+
+  /** List builtin skills with install status. */
+  async listBuiltinSkills(): Promise<BuiltinSkillSpec[]> {
+    const res = await this.#get<{ skills: BuiltinSkillSpec[] }>(
+      "/api/config/skills/builtin",
+    );
+    return res.skills;
+  }
+
+  /** Install a builtin skill (creates an editable user-defined copy). */
+  async installBuiltinSkill(name: string): Promise<SkillEntry> {
+    const res = await this.#post<{ skill: SkillEntry }>(
+      `/api/config/skills/${encodeURIComponent(name)}/install`,
+      {},
+    );
+    return res.skill;
+  }
+
+  // =========================================================================
+  // Config — MCP servers (/api/config/mcp)
+  // =========================================================================
+
+  /**
+   * List all MCP server entries (file + user-defined, merged). Pass
+   * `probe=true` to populate connection `status`/`error` per server
+   * (slower — actually connects to each server).
+   */
+  async listMcp(probe = false): Promise<McpServerEntry[]> {
+    const res = await this.#get<{ servers: McpServerEntry[] }>(
+      `/api/config/mcp${probe ? "?probe=true" : ""}`,
+    );
+    return res.servers;
+  }
+
+  /** Get a single MCP server's detail. */
+  async getMcp(name: string): Promise<McpServerEntry> {
+    return this.#get<McpServerEntry>(`/api/config/mcp/${encodeURIComponent(name)}`);
+  }
+
+  /** Create a user-defined MCP server. */
+  async createMcp(body: McpWriteRequest): Promise<McpServerEntry> {
+    const res = await this.#post<{ server: McpServerEntry }>("/api/config/mcp", body);
+    return res.server;
+  }
+
+  /** Update a user-defined MCP server (partial). */
+  async updateMcp(name: string, body: McpWriteRequest): Promise<McpServerEntry> {
+    const res = await this.#put<{ server: McpServerEntry }>(
+      `/api/config/mcp/${encodeURIComponent(name)}`,
+      body,
+    );
+    return res.server;
+  }
+
+  /** Delete a user-defined MCP server. */
+  async deleteMcp(name: string): Promise<void> {
+    await this.#delete(`/api/config/mcp/${encodeURIComponent(name)}`);
+  }
+
+  /** Enable/disable an MCP server at runtime (works for any origin). */
+  async setMcpEnabled(name: string, enabled: boolean): Promise<boolean> {
+    const res = await this.#put<{ success: boolean; enabled: boolean }>(
+      `/api/config/mcp/${encodeURIComponent(name)}/enabled`,
+      { enabled },
+    );
+    return res.enabled;
+  }
+
+  // =========================================================================
+  // Config — Subagents (/api/config/subagents)
+  // =========================================================================
+
+  /** List all subagent entries (file + user-defined, merged). */
+  async listSubagents(): Promise<SubagentEntry[]> {
+    const res = await this.#get<{ subagents: SubagentEntry[] }>(
+      "/api/config/subagents",
+    );
+    return res.subagents;
+  }
+
+  /** Get a single subagent's detail. */
+  async getSubagent(name: string): Promise<SubagentEntry> {
+    return this.#get<SubagentEntry>(`/api/config/subagents/${encodeURIComponent(name)}`);
+  }
+
+  /** Create a user-defined subagent. */
+  async createSubagent(body: SubagentWriteRequest): Promise<SubagentEntry> {
+    const res = await this.#post<{ subagent: SubagentEntry }>(
+      "/api/config/subagents",
+      body,
+    );
+    return res.subagent;
+  }
+
+  /** Update a user-defined subagent (partial). */
+  async updateSubagent(name: string, body: SubagentWriteRequest): Promise<SubagentEntry> {
+    const res = await this.#put<{ subagent: SubagentEntry }>(
+      `/api/config/subagents/${encodeURIComponent(name)}`,
+      body,
+    );
+    return res.subagent;
+  }
+
+  /** Delete a user-defined subagent. */
+  async deleteSubagent(name: string): Promise<void> {
+    await this.#delete(`/api/config/subagents/${encodeURIComponent(name)}`);
+  }
+
+  /** Enable/disable a user-defined subagent at runtime. */
+  async setSubagentEnabled(name: string, enabled: boolean): Promise<boolean> {
+    const res = await this.#put<{ success: boolean; enabled: boolean }>(
+      `/api/config/subagents/${encodeURIComponent(name)}/enabled`,
+      { enabled },
+    );
+    return res.enabled;
+  }
+
+  // =========================================================================
+  // Settings — model providers + general (/api/config/models, /api/config/settings)
+  // =========================================================================
+
+  /** List all model providers with the current default model. */
+  async listModelSettings(): Promise<ModelSettingsResponse> {
+    return this.#get<ModelSettingsResponse>("/api/config/models");
+  }
+
+  /** Get a single provider's detail (includes hasApiKeyLiteral). */
+  async getModelProvider(name: string): Promise<ModelProviderDetail> {
+    return this.#get<ModelProviderDetail>(`/api/config/models/${encodeURIComponent(name)}`);
+  }
+
+  /** Set the default model spec (`provider:model`). */
+  async setDefaultModel(spec: string): Promise<string> {
+    const res = await this.#put<{ default_model: string }>(
+      "/api/config/models/default",
+      { default_model: spec },
+    );
+    return res.default_model;
+  }
+
+  /** Patch a provider's config (api key, base url, models, enabled). */
+  async updateModelProvider(name: string, patch: ModelProviderPatch): Promise<ModelProviderEntry> {
+    const res = await this.#put<{ provider: ModelProviderEntry }>(
+      `/api/config/models/${encodeURIComponent(name)}`,
+      patch,
+    );
+    return res.provider;
+  }
+
+  /** Enable/disable a provider. */
+  async setModelProviderEnabled(name: string, enabled: boolean): Promise<boolean> {
+    const res = await this.#put<{ enabled: boolean }>(
+      `/api/config/models/${encodeURIComponent(name)}/enabled`,
+      { enabled },
+    );
+    return res.enabled;
+  }
+
+  /** Fetch a provider's live model list (no persistence). */
+  async fetchRemoteModels(name: string): Promise<RemoteModel[]> {
+    const res = await this.#get<{ models: RemoteModel[] }>(
+      `/api/config/models/${encodeURIComponent(name)}/remote`,
+    );
+    return res.models;
+  }
+
+  /** Fetch general settings (persisted + effective tool toggles + system info). */
+  async getGeneralSettings(): Promise<GeneralSettingsResponse> {
+    return this.#get<GeneralSettingsResponse>("/api/config/settings");
+  }
+
+  /** Update persisted general tool toggles. */
+  async updateGeneralSettings(tools: GeneralTools): Promise<GeneralSettingsResponse> {
+    return this.#put<GeneralSettingsResponse>("/api/config/settings", tools);
+  }
+
+  // --- Sandbox settings (config.json `sandbox` section) ---
+
+  /** Get sandbox backend configuration (credentials are write-only). */
+  async getSandboxSettings(): Promise<SandboxSettings> {
+    return this.#get<SandboxSettings>("/api/config/sandbox");
+  }
+
+  /** Update sandbox configuration. `apiKey` is write-only. */
+  async updateSandboxSettings(patch: SandboxSettingsPatch): Promise<SandboxSettings> {
+    return this.#put<SandboxSettings>("/api/config/sandbox", patch);
   }
 
   // =========================================================================
@@ -142,13 +414,17 @@ export class OctopusClient {
    * Resume a chat after HITL interrupt.
    * Returns the same async iterable of stream events as `streamAgentChat`.
    *
-   * `approved` translates to `{"approved": true|false}` on the wire, which
-   * the server normalizes into a LangGraph `Command(resume=...)` decision
-   * list (see chat_service.py::_normalize_resume_input).
+   * Sends a structured resume body. New callers should pass a
+   * `ResumeRequestBody` (with `kind` + `decisions`/`answers`); the legacy
+   * `streamAgentResumeLegacy(threadId, approved)` wrapper below preserves the
+   * old `{approved: boolean}` shape for gradual migration.
+   *
+   * The server normalizes the body into a LangGraph `Command(resume=...)`
+   * value (see chat.service.ts::normalizeResumeInput).
    */
   async streamAgentResume(
     threadId: string,
-    approved: boolean,
+    body: ResumeRequestBody,
     opts: StreamCallOptions = {}
   ): Promise<AsyncGenerator<StreamEvent>> {
     const response = await fetch(`${this.#baseUrl}/api/chat/thread/${threadId}/resume`, {
@@ -158,7 +434,7 @@ export class OctopusClient {
         ...this.#authHeader(),
         Accept: "application/x-ndjson",
       },
-      body: JSON.stringify({ approved }),
+      body: JSON.stringify(body),
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
 
@@ -173,6 +449,163 @@ export class OctopusClient {
     return parseNDJSONStream(response.body, opts);
   }
 
+  /**
+   * Legacy resume wrapper — the pre-unification API took a single boolean.
+   * Kept for gradual migration; new code should call `streamAgentResume`
+   * with a full `ResumeRequestBody`.
+   */
+  async streamAgentResumeLegacy(
+    threadId: string,
+    approved: boolean,
+    opts?: StreamCallOptions
+  ): Promise<AsyncGenerator<StreamEvent>> {
+    return this.streamAgentResume(threadId, { approved, kind: "tool_approval" }, opts ?? {});
+  }
+
+  // =========================================================================
+  // Workspaces (/api/workspace) — filesystem-backed, DB-tracked directories
+  // =========================================================================
+
+  /** List all workspaces for the current user. */
+  async listWorkspaces(): Promise<Workspace[]> {
+    const res = await this.#get<WorkspaceListResponse>("/api/workspace");
+    return res.workspaces;
+  }
+
+  /**
+   * Browse host directories for the 本机目录 picker. Pass an absolute path to
+   * list its subdirectories; omit to list the first browsable root. Returns the
+   * listed path, its subdirs, and the configured browsable roots.
+   */
+  async browseHostDirs(path?: string): Promise<HostBrowseResult> {
+    const qs = path ? `?path=${encodeURIComponent(path)}` : "";
+    return this.#get<HostBrowseResult>(`/api/workspace/browse${qs}`);
+  }
+
+  /** Create a new workspace. */
+  async createWorkspace(body: WorkspaceWriteRequest): Promise<Workspace> {
+    const res = await this.#post<{ workspace: Workspace }>("/api/workspace", body);
+    return res.workspace;
+  }
+
+  /**
+   * Open (or reopen) a host directory as a workspace — the IDE-style "Open
+   * Folder" action. Dedupes by path (reuses an existing row) and bumps its
+   * last-opened timestamp. Returns the bound workspace.
+   */
+  async openWorkspace(path: string): Promise<Workspace> {
+    const res = await this.#post<{ workspace: Workspace }>("/api/workspace/open", { path });
+    return res.workspace;
+  }
+
+  /** Get a single workspace's detail. */
+  async getWorkspace(id: string): Promise<Workspace> {
+    const res = await this.#get<{ workspace: Workspace }>(
+      `/api/workspace/${encodeURIComponent(id)}`,
+    );
+    return res.workspace;
+  }
+
+  /** Update a workspace (name/description). */
+  async updateWorkspace(id: string, body: WorkspaceWriteRequest): Promise<Workspace> {
+    const res = await this.#put<{ workspace: Workspace }>(
+      `/api/workspace/${encodeURIComponent(id)}`,
+      body,
+    );
+    return res.workspace;
+  }
+
+  /** Delete a workspace (threads are kept, their binding is cleared). */
+  async deleteWorkspace(id: string): Promise<void> {
+    await this.#delete(`/api/workspace/${encodeURIComponent(id)}`);
+  }
+
+  /** List a directory inside a workspace. */
+  async getWorkspaceTree(
+    id: string,
+    path?: string,
+    recursive = false,
+  ): Promise<WorkspaceEntry[]> {
+    const params = new URLSearchParams();
+    if (path) params.set("path", path);
+    if (recursive) params.set("recursive", "true");
+    const qs = params.toString();
+    const res = await this.#get<WorkspaceTreeResponse>(
+      `/api/workspace/${encodeURIComponent(id)}/tree${qs ? `?${qs}` : ""}`,
+    );
+    return res.entries;
+  }
+
+  /** Read a file's content + preview type. */
+  async getWorkspaceFile(id: string, path: string): Promise<WorkspaceFileContent> {
+    const qs = new URLSearchParams({ path });
+    return this.#get<WorkspaceFileContent>(
+      `/api/workspace/${encodeURIComponent(id)}/file?${qs}`,
+    );
+  }
+
+  /** Write (create/overwrite) an editable file (.md/.markdown/.mdx/.txt). */
+  async saveWorkspaceFile(
+    id: string,
+    path: string,
+    content: string,
+  ): Promise<{ path: string }> {
+    return this.#put<{ path: string }>(
+      `/api/workspace/${encodeURIComponent(id)}/file`,
+      { path, content },
+    );
+  }
+
+  /** Delete a file or directory inside a workspace. */
+  async deleteWorkspacePath(id: string, path: string): Promise<void> {
+    const qs = new URLSearchParams({ path });
+    await this.#delete(`/api/workspace/${encodeURIComponent(id)}/file?${qs}`);
+  }
+
+  /** Create a directory inside a workspace. */
+  async createWorkspaceDirectory(
+    id: string,
+    name: string,
+    parentPath?: string,
+  ): Promise<{ path: string }> {
+    return this.#post<{ path: string }>(
+      `/api/workspace/${encodeURIComponent(id)}/directory`,
+      { name, parentPath },
+    );
+  }
+
+  /** Download a file as a Blob (used for image/pdf preview). */
+  async downloadWorkspaceFile(id: string, path: string): Promise<Blob> {
+    const qs = new URLSearchParams({ path });
+    const res = await fetch(
+      `${this.#baseUrl}/api/workspace/${encodeURIComponent(id)}/download?${qs}`,
+      { headers: this.#authHeader() },
+    );
+    if (!res.ok) throw await this.#httpError(res);
+    return res.blob();
+  }
+
+  /** Upload a single file into a workspace (multipart). */
+  async uploadWorkspaceFile(
+    id: string,
+    file: File,
+    parentPath?: string,
+  ): Promise<WorkspaceUploadResult> {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (parentPath !== undefined) formData.append("parentPath", parentPath);
+    const res = await fetch(
+      `${this.#baseUrl}/api/workspace/${encodeURIComponent(id)}/upload`,
+      {
+        method: "POST",
+        headers: this.#authHeader(),
+        body: formData,
+      },
+    );
+    if (!res.ok) throw await this.#httpError(res);
+    return res.json() as Promise<WorkspaceUploadResult>;
+  }
+
   // =========================================================================
   // Internal helpers
   // =========================================================================
@@ -185,7 +618,7 @@ export class OctopusClient {
    * Normalize a non-2xx streaming response into a `StreamHttpError`.
    *
    * The server replies with a JSON `{detail: "..."}` body for both auth
-   * failures (401) and chat-level rejections (e.g. invalid agent_config_id
+   * failures (401) and chat-level rejections (e.g. invalid agent_id
    * → 400). On connection/setup errors the streaming endpoint may also
    * surface an `error` chunk *inside* the 200 stream — that's handled by
    * the caller via `StreamServerError`, not here.

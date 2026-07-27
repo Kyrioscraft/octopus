@@ -57,7 +57,16 @@ export interface ChatMessage {
 export interface ChatRequest {
   messages: ChatMessage[];
   thread_id?: string;
-  agent_config_id?: number;
+  /** Agent/subagent id to scope the conversation (aligns with server's ChatRequest.agent_id). */
+  agent_id?: string;
+  /** Workspace to bind the thread to (its dir becomes the agent's cwd). */
+  workspace_id?: string;
+  /** Optional per-request model override ("provider:model"). Applied server-side
+   *  via the configurable_model middleware; omitted = use config default. */
+  model?: string;
+  /** Workspace access mode hint: "plan" | "confirm" | "auto". Logged server-side
+   *  only this iteration — does not yet alter graph behavior. */
+  mode?: "plan" | "confirm" | "auto";
   /** Optional client-generated request id, used for optimistic UI correlation. */
   request_id?: string;
 }
@@ -80,6 +89,8 @@ export interface Thread {
   userId: string;
   title: string;
   agentId: string;
+  /** Workspace this thread is bound to (optional for back-compat). */
+  workspaceId?: string | null;
   createdAt: string;
 }
 
@@ -99,6 +110,104 @@ export interface MessageRow {
 
 export interface ThreadHistoryResponse {
   history: MessageRow[];
+}
+
+// =============================================================================
+// Ask-the-user protocol — unified surface for all human-in-the-loop requests.
+//
+// Three `kind` of requests share the same NDJSON status
+// (`ask_user_question_required`) and the same input-area UI on the client:
+//   - tool_approval : LangChain humanInTheLoopMiddleware interrupt (execute /
+//                     write_file / web_search / ...). The user approves or
+//                     rejects one or more pending tool calls.
+//   - discussion    : the agent called the `ask_user_question` tool with a
+//                     fixed list of options; the user picks one (or several
+//                     when multi_select). Optional free-text via allow_other.
+//   - clarify       : the agent called `ask_user_question` without options;
+//                     the user types a free-text answer.
+//
+// The discriminant flows through `interrupt.value.kind` (set by the agent) and
+// is inferred server-side when absent (actionRequests → tool_approval,
+// options → discussion, else clarify). `question_id` is stable across
+// interrupt + resume so answers can be paired back to their questions.
+// =============================================================================
+
+/** Discriminator for the three request kinds. */
+export type AskKind = "tool_approval" | "discussion" | "clarify";
+
+/** A single selectable option inside a question. */
+export interface QuestionOption {
+  label: string;
+  /** Value returned to the agent on selection. */
+  value: string;
+  /** Optional helper text shown beneath the label. */
+  description?: string;
+}
+
+/**
+ * One question posed to the user. `question_id` is the correlation key for
+ * the matching answer in the resume body.
+ */
+export interface AskQuestion {
+  /** Stable id (assigned by the agent at interrupt time, NOT regenerated per emit). */
+  question_id: string;
+  /** Full question text. */
+  question: string;
+  /** Short label (≤12 chars) for the header chip. */
+  header?: string;
+  /** Options list; omitted means a free-text (clarify) question. */
+  options?: QuestionOption[];
+  /** Allow multiple selections (discussion only). Defaults to false. */
+  multi_select?: boolean;
+  /** Show an "Other…" free-text input alongside the options. Defaults to false. */
+  allow_other?: boolean;
+  /** tool_approval only — the pending tool calls awaiting a decision. */
+  context?: {
+    actionRequests?: Array<{
+      name: string;
+      args: Record<string, unknown>;
+      description?: string;
+    }>;
+    /** Which tool triggered the interrupt (for the header chip). */
+    source?: string;
+    /** Per-action allowed decisions surfaced from reviewConfigs. */
+    reviewConfigs?: Array<{ actionName: string; allowedDecisions: string[] }>;
+  };
+}
+
+/** The full payload carried by an `ask_user_question_required` chunk. */
+export interface AskUserQuestionPayload {
+  kind: AskKind;
+  questions: AskQuestion[];
+  thread_id: string;
+}
+
+/**
+ * Resume request body for `POST /api/chat/thread/:id/resume`.
+ *
+ * Backwards-compatible: a legacy client sending only `{ approved: boolean }`
+ * is treated as `kind: "tool_approval"` with a single all-approve/all-reject
+ * decision. New clients send the structured form.
+ */
+export interface ResumeRequestBody {
+  /** Legacy field — kept for old clients; server folds it into `decisions`. */
+  approved?: boolean;
+  /** Discriminator; inferred server-side when omitted. */
+  kind?: AskKind;
+  /** tool_approval answers (one per actionRequest, in order). */
+  decisions?: Array<
+    | { type: "approve" }
+    | { type: "reject"; message?: string }
+    | { type: "edit"; editedAction: { name: string; args: Record<string, unknown> } }
+  >;
+  /** discussion / clarify answers, keyed by question_id. */
+  answers?: Array<{
+    question_id: string;
+    /** Single value (radio) or values (checkbox). */
+    selection?: string | string[];
+    /** Free-text — clarify answer, or the "Other…" supplement when allow_other. */
+    text?: string;
+  }>;
 }
 
 // =============================================================================
@@ -137,7 +246,16 @@ export interface StreamEvent {
   /** `loading`/`reasoning` carry the token fragment here. */
   response?: unknown;
 
-  /** LangChain message dump (`{role, content, id, additional_kwargs, ...}`). */
+  /**
+   * LangChain message dump. Common keys: `{ type, content }`. The server may
+   * also attach:
+   * - `agent_ns` — subagent type (e.g. "general-purpose") when the message
+   *   originated inside a subagent.
+   * - `tool_calls` — array of `{ id, name, args }` on AIMessages.
+   * - `tool_call_id` / `name` — on ToolMessages, identify which tool ran.
+   * - `type: "subagent_started"` — synthetic chunk announcing a subagent is
+   *   about to run; carries `agent_ns`, `description`, `system_prompt`.
+   */
   msg?: Record<string, unknown>;
 
   /** Per-chunk request id; omitted on the first `init` (see chat_service). */
@@ -154,8 +272,20 @@ export interface StreamEvent {
   /** `warning`/`interrupted` carry a free-text message here. */
   message?: string;
 
-  /** `ask_user_question_required` carries the yuxi-shaped questions array. */
-  questions?: unknown[];
+  /**
+   * `ask_user_question_required` payload. `questions` is the typed array;
+   * `kind` / `actionRequests` / `source` / `thread_id` are also lifted to
+   * top-level fields for direct access (the server emits them via spread).
+   */
+  questions?: AskQuestion[];
+  /** Discriminator for the ask payload (see AskUserQuestionPayload). */
+  kind?: AskKind;
+  /** tool_approval — the pending tool calls (mirror of questions[].context). */
+  actionRequests?: NonNullable<NonNullable<AskQuestion["context"]>["actionRequests"]>;
+  /** tool_approval — the source tool name. */
+  source?: string;
+  /** thread_id the ask is bound to. */
+  thread_id?: string;
 
   /** `agent_state` carries `{todos, files, artifacts}`. */
   agent_state?: Record<string, unknown>;
@@ -198,4 +328,314 @@ export class StreamServerError extends Error {
     this.errorType = event.error_type ?? "unexpected_error";
     this.event = event;
   }
+}
+
+// =============================================================================
+// Config management — skills + MCP servers
+//
+// Mirrors the shared contract in core/src/config_types.ts. `origin` drives
+// editability in the web/tui UI (only "user-defined" entries are editable).
+// =============================================================================
+
+/** Where a skill entry came from — determines editability. */
+export type SkillOrigin = "builtin" | "file" | "user-defined";
+
+/** Where an MCP server entry came from — determines editability. */
+export type McpOrigin = "file" | "user-defined";
+
+/** A skill entry in the unified config view. */
+export interface SkillEntry {
+  name: string;
+  /** file/builtin entries carry the source path; user-defined omit it. */
+  path?: string;
+  source?: string;
+  origin: SkillOrigin;
+  editable: boolean;
+  description: string;
+}
+
+/** Skill detail (GET /api/config/skills/:name). */
+export interface SkillDetail {
+  content: string;
+  origin: SkillOrigin;
+  editable: boolean;
+  description: string;
+}
+
+/** An MCP server entry in the unified config view. */
+export interface McpServerEntry {
+  name: string;
+  origin: McpOrigin;
+  editable: boolean;
+  transport: "stdio" | "sse" | "http" | "streamable-http";
+  /** command/args/env (stdio) or url/headers (sse/http). */
+  config: Record<string, unknown>;
+  /** Disabled state (runtime, persisted server-side). */
+  enabled: boolean;
+  /** Connection status — only populated when list is called with probe=true. */
+  status?: string;
+  /** Error detail when status !== "ok". */
+  error?: string;
+}
+
+/** Create/update skill request body. */
+export interface SkillWriteRequest {
+  name?: string;
+  description?: string;
+  content?: string;
+}
+
+/** Create/update MCP server request body. */
+export interface McpWriteRequest {
+  name?: string;
+  transport?: "stdio" | "sse" | "http" | "streamable-http";
+  config?: Record<string, unknown>;
+}
+
+// =============================================================================
+// Config management — builtin skills + subagents
+// =============================================================================
+
+/** A builtin skill surfaced for installation in the UI. */
+export interface BuiltinSkillSpec {
+  slug: string;
+  name: string;
+  description: string;
+  /** "installed" if a user-defined copy exists; "not_installed" otherwise. */
+  status: "installed" | "not_installed";
+  /** The installed user-defined entry, when status === "installed". */
+  installed_record: SkillEntry | null;
+}
+
+/** Where a subagent entry came from — determines editability. */
+export type SubagentOrigin = "file" | "user-defined";
+
+/** A subagent entry in the unified config view. */
+export interface SubagentEntry {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  /** Optional model override in 'provider:model-name' format. */
+  model?: string | null;
+  /** Tool name whitelist (strings). */
+  tools: string[];
+  origin: SubagentOrigin;
+  editable: boolean;
+  /** Runtime enabled state (user-defined only; file entries are always enabled). */
+  enabled: boolean;
+  source?: string;
+  path?: string;
+}
+
+/** Create/update subagent request body. */
+export interface SubagentWriteRequest {
+  name?: string;
+  description?: string;
+  systemPrompt?: string;
+  tools?: string[];
+  /** Pass null to clear the model override. */
+  model?: string | null;
+}
+
+// =============================================================================
+// Settings — model providers + general (tool toggles, system info)
+// =============================================================================
+
+/** A model provider row (secrets never surfaced — only credential presence). */
+export interface ModelProviderEntry {
+  name: string;
+  /** Friendly display name (falls back to `name`). */
+  displayName: string;
+  /** Protocol/SDK type if set, else null. */
+  apiType: string | null;
+  enabled: boolean;
+  /** true if a key is set, false if env is known but empty, null if unknown. */
+  hasCredentials: boolean | null;
+  apiKeyEnv: string | null;
+  baseUrl: string | null;
+  models: string[];
+}
+
+/** Single-provider detail view (adds literal-key presence flag). */
+export interface ModelProviderDetail extends ModelProviderEntry {
+  hasApiKeyLiteral: boolean;
+}
+
+/** Response for `GET /api/config/models`. */
+export interface ModelSettingsResponse {
+  providers: ModelProviderEntry[];
+  default_model: string | null;
+}
+
+/** A model discovered from a provider's live `/models` endpoint. */
+export interface RemoteModel {
+  id: string;
+  displayName: string;
+  type: "chat" | "embedding" | "rerank";
+  contextLength: number | null;
+}
+
+/** Patch body for `PUT /api/config/models/:name`. All fields optional. */
+export interface ModelProviderPatch {
+  enabled?: boolean;
+  /** Write-only — overwrites config.json `api_key`. Empty string clears it. */
+  apiKey?: string;
+  apiKeyEnv?: string;
+  baseUrl?: string;
+  models?: string[];
+  /** Friendly display name. */
+  displayName?: string;
+  /** Protocol/SDK type (openai / anthropic / ollama / openai-compatible ...). */
+  apiType?: string;
+  /** New provider key — renames the entry when different. */
+  newName?: string;
+}
+
+/** Persisted general tool toggles (config.json `settings.tools`). */
+export interface GeneralTools {
+  enableShell?: boolean;
+  enableWebSearch?: boolean;
+  interactive?: boolean;
+  autoApprove?: boolean;
+}
+
+/** Read-only system/environment info. */
+export interface SystemInfo {
+  configPath: string;
+  defaultModel: string | null;
+  providersCount: number;
+  nodeVersion: string;
+  platform: string;
+}
+
+/** Response for `GET /api/config/settings`. */
+export interface GeneralSettingsResponse {
+  /** Persisted user intent. */
+  tools: GeneralTools;
+  /** Effective values (env wins over config). */
+  effective: GeneralTools;
+  system_info: SystemInfo;
+}
+
+// =============================================================================
+// Workspaces — filesystem-backed, DB-tracked directories bound to threads.
+//
+// A workspace is a per-user directory whose path the agent uses as `cwd`. The
+// directory tree IS the file tree; only workspace metadata (id/name/path) is
+// stored as rows. See server/src/services/workspace.service.ts.
+// =============================================================================
+
+export interface Workspace {
+  id: string;
+  userId: string;
+  name: string;
+  /** Absolute host filesystem path of the workspace directory. */
+  path: string;
+  /** "local" = host dir the agent operates in; "sandbox" = future isolated
+   *  container (placeholder this iteration — file ops unavailable). */
+  environment: "local" | "sandbox";
+  description?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  /** Timestamp the user last opened this workspace (recents ordering). */
+  lastOpenedAt?: string | null;
+}
+
+/** Create/update workspace request body. */
+export interface WorkspaceWriteRequest {
+  name?: string;
+  description?: string | null;
+  /** "local" creates a real host dir; "sandbox" is a placeholder row only. */
+  environment?: "local" | "sandbox";
+  /** Optional absolute host path to bind as the workspace root (local only). */
+  path?: string;
+}
+
+/** A subdirectory entry returned by the host directory browser. */
+export interface HostDirEntry {
+  name: string;
+  /** Absolute path of the directory. */
+  path: string;
+}
+
+/** Response from GET /api/workspace/browse — powers the 本机目录 picker. */
+export interface HostBrowseResult {
+  /** The absolute path that was listed. */
+  current: string;
+  /** Subdirectories (files excluded). */
+  entries: HostDirEntry[];
+  /** Configured browsable roots for the picker's root selector. */
+  roots: string[];
+}
+
+// =============================================================================
+// Sandbox settings — config.json `sandbox` section. Credentials are write-only.
+// =============================================================================
+
+/** Response from GET /api/config/sandbox. */
+export interface SandboxSettings {
+  enabled: boolean;
+  provider: "langsmith";
+  hasCredentials: boolean;
+  apiKeyEnv: string | null;
+  templateName: string | null;
+  snapshotId: string | null;
+}
+
+/** Patch body for PUT /api/config/sandbox. `apiKey` is write-only. */
+export interface SandboxSettingsPatch {
+  enabled?: boolean;
+  provider?: "langsmith";
+  /** Set to "" to clear the stored literal key. */
+  apiKey?: string;
+  apiKeyEnv?: string | null;
+  templateName?: string | null;
+  snapshotId?: string | null;
+}
+
+/** A node in a workspace file tree listing. */
+export interface WorkspaceEntry {
+  name: string;
+  /** Forward-slash relative path within the workspace root ("" = root). */
+  path: string;
+  isDir: boolean;
+  size: number;
+  modifiedAt: string;
+}
+
+/** Preview classification returned by the read-file endpoint. */
+export type PreviewType =
+  | "image"
+  | "pdf"
+  | "markdown"
+  | "text"
+  | "html"
+  | "code"
+  | "unsupported";
+
+/** Response from GET /api/workspace/:id/file. */
+export interface WorkspaceFileContent {
+  name: string;
+  path: string;
+  content: string | null;
+  previewType: PreviewType;
+  supported: boolean;
+  message?: string;
+}
+
+/** Response from GET /api/workspace/:id/tree. */
+export interface WorkspaceTreeResponse {
+  entries: WorkspaceEntry[];
+}
+
+/** Response from list workspaces. */
+export interface WorkspaceListResponse {
+  workspaces: Workspace[];
+}
+
+/** Result of an upload. */
+export interface WorkspaceUploadResult {
+  path: string;
+  name: string;
+  size: number;
 }

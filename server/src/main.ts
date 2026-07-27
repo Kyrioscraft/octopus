@@ -16,13 +16,44 @@ configure();
 const logger = getLogger("server.main");
 
 const port = parseInt(process.env["OCTOPUS_WEB_PORT"] ?? "5050", 10);
+// Bind explicitly to an IPv4 address. Without this @hono/node-server falls
+// back to the dual-stack IPv6 wildcard "::", which on Windows creates two
+// separate listen sockets (0.0.0.0:port and [::]:port). Killing one of them
+// leaves the other holding the port, so the next start fails with EADDRINUSE
+// even after "the" process appears to be gone. Pinning to 127.0.0.1 keeps the
+// log line below truthful and makes the dev server loopback-only (Vite proxy
+// already targets 127.0.0.1:5050). Set OCTOPUS_HOST to override.
+const hostname = process.env["OCTOPUS_HOST"] ?? "127.0.0.1";
 const app = createApp();
 
-logger.info(`Octopus server starting at http://127.0.0.1:${port}`);
+logger.info(`Octopus server starting at http://${hostname}:${port}`);
 
-serve({
-  fetch: app.fetch,
-  port,
-}, (info) => {
-  logger.info(`Listening on http://127.0.0.1:${info.port}`);
-});
+// Friendly guidance when the port is taken. The actual error surfaces as an
+// 'error' event on the returned http.Server — that's the "Unhandled 'error'
+// event" stack the user sees — so we listen for it instead of try/catch.
+const handleListenError = (err: NodeJS.ErrnoException) => {
+  if (err.code === "EADDRINUSE") {
+    logger.error(
+      `端口 ${port} 已被占用（EADDRINUSE）。` +
+        `常见原因：上一次 \`node --watch\` 子进程未退出。` +
+        `请用以下命令查找并结束占用进程后重启：\n` +
+        `  netstat -ano | findstr :${port}\n` +
+        `  taskkill /PID <上面找到的PID> /F`,
+    );
+  } else {
+    logger.exception(`服务器监听失败 (${err.code ?? "unknown"})`, err);
+  }
+  // Exit non-zero so `node --watch` / process managers surface the failure.
+  process.exit(1);
+};
+
+serve(
+  {
+    fetch: app.fetch,
+    hostname,
+    port,
+  },
+  (info) => {
+    logger.info(`Listening on http://${hostname}:${info.port}`);
+  },
+).on("error", handleListenError);

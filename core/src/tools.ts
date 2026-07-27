@@ -4,11 +4,12 @@
  * Equivalent to Python `cortex.tools`.
  *
  * Two callable functions (`fetchUrl`, `webSearch`) that the agent can invoke.
- * These are plain functions, not LangChain StructuredTool instances — the
- * deepagents SDK wraps them as tools via its middleware stack.
+ * Exports both plain async functions (for direct use) and LangChain
+ * StructuredTool wrappers (for passing to `createDeepAgent`).
  */
 
 import { resolveEnvVar } from "./model_config.js";
+import { z } from "zod";
 
 // =============================================================================
 // Types
@@ -299,7 +300,7 @@ export async function webSearch(
       return { error: `Web search error: HTTP ${res.status} - ${errText}`, query };
     }
 
-    const data = await res.json();
+    const data = (await res.json()) as { results?: WebSearchResultItem[] };
     return { results: data.results ?? [], query };
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
@@ -308,7 +309,94 @@ export async function webSearch(
 }
 
 // =============================================================================
-// getBuiltinTools — equivalent to Python `get_builtin_tools()`.
+// StructuredTool wrappers — for passing to `createDeepAgent({ tools: [...] })`.
+// Equivalent to Python's deepagents Tool wrapping convention.
+// =============================================================================
+
+/** Zod schema for `fetchUrl` parameters. */
+const FetchUrlSchema = z.object({
+  url: z.string().describe("The URL to fetch (must be a valid HTTP/HTTPS URL)"),
+  timeout: z.number().optional().default(30).describe("Request timeout in seconds"),
+});
+
+/** LangChain StructuredTool wrapper for fetchUrl. */
+export async function _fetchUrlWrapped(input: { url: string; timeout?: number }): Promise<string> {
+  const result = await fetchUrl(input.url, input.timeout);
+  return JSON.stringify(result);
+}
+
+/** Zod schema for `webSearch` parameters. */
+const WebSearchSchema = z.object({
+  query: z.string().describe("The search query (be specific and detailed)"),
+  max_results: z.number().optional().default(5).describe("Number of results to return"),
+  topic: z.enum(["general", "news", "finance"]).optional().default("general").describe("Search topic type"),
+  include_raw_content: z.boolean().optional().default(false).describe("Include full page content"),
+});
+
+/** LangChain StructuredTool wrapper for webSearch. */
+export async function _webSearchWrapped(input: {
+  query: string;
+  max_results?: number;
+  topic?: "general" | "news" | "finance";
+  include_raw_content?: boolean;
+}): Promise<string> {
+  const result = await webSearch(input.query, input.max_results, input.topic, input.include_raw_content);
+  return JSON.stringify(result);
+}
+
+/** Tool descriptor for `tool()` wrapping. */
+interface ToolDescriptor {
+  schema: z.ZodType<any>;
+  func: (...args: any[]) => Promise<any>;
+  name: string;
+  description: string;
+}
+
+/** All built-in tool descriptors (for `tool()` wrapping). */
+const BUILTIN_TOOL_DESCRIPTORS: ToolDescriptor[] = [
+  {
+    schema: FetchUrlSchema,
+    func: _fetchUrlWrapped as any,
+    name: "fetch_url",
+    description:
+      "Fetch content from a URL and convert HTML to markdown. " +
+      "After receiving results, you MUST synthesize the information into a natural, " +
+      "helpful response for the user. NEVER show the raw JSON to the user.",
+  },
+  {
+    schema: WebSearchSchema,
+    func: _webSearchWrapped as any,
+    name: "web_search",
+    description:
+      "Search the web using Tavily for current information and documentation. " +
+      "After receiving results, you MUST synthesize the information into a natural, " +
+      "helpful response for the user. Cite sources by mentioning page titles or URLs.",
+  },
+];
+
+/**
+ * Return built-in tools as LangChain StructuredTool instances.
+ *
+ * Uses the `tool()` factory from `@langchain/core/tools` to create proper
+ * StructuredTool instances with Zod schemas, suitable for passing to
+ * `createDeepAgent({ tools: [...] })`.
+ *
+ * Equivalent to Python `get_builtin_tools()` wrapped by deepagents' Tool convention.
+ */
+export async function getBuiltinToolsAsStructuredTools(): Promise<any[]> {
+  const { tool: toolFactory } = await import("@langchain/core/tools");
+  return BUILTIN_TOOL_DESCRIPTORS.map((desc) =>
+    toolFactory(desc.func, {
+      name: desc.name,
+      description: desc.description,
+      schema: desc.schema,
+    }),
+  );
+}
+
+// =============================================================================
+// getBuiltinTools — plain callable descriptors (for backward compat).
+// Equivalent to Python `get_builtin_tools()`.
 // =============================================================================
 
 /**
@@ -328,13 +416,13 @@ export function getBuiltinTools(): Array<{
   return [
     {
       name: "fetch_url",
-      func: fetchUrl,
-      description: "Fetch content from a URL and convert HTML to markdown",
+      func: _fetchUrlWrapped,
+      description: BUILTIN_TOOL_DESCRIPTORS[0].description,
     },
     {
       name: "web_search",
-      func: webSearch,
-      description: "Search the web using Tavily for current information",
+      func: _webSearchWrapped,
+      description: BUILTIN_TOOL_DESCRIPTORS[1].description,
     },
   ];
 }

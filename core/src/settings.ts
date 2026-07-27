@@ -1,20 +1,13 @@
 /**
  * Settings — environment-based configuration.
  *
- * Equivalent to Python `cortex.config.Settings` (core env vars + API keys only).
- * Omitted from the Python original (2541 lines total):
- *   - Model profile system (context_limit, unsupported_modalities)
- *   - Path methods (get_agent_dir, get_user_skills_dir, etc.)
- *   - Interpreter settings (enable_interpreter, timeout, memory, etc.)
- *   - Sandbox settings
- *   - create_model() / detect_provider() (moved to agent.ts)
- *   - Rich Console singleton
+ * Equivalent to Python `cortex.config.Settings` (core env vars + API keys).
  */
 
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { resolveEnvVar } from "./model_config.js";
+import { resolveEnvVar, ModelConfig } from "./model_config.js";
 import { DEFAULT_CONFIG_DIR } from "./constants.js";
 
 // =============================================================================
@@ -35,6 +28,11 @@ export interface Settings {
   modelName?: string;
   /** The resolved provider portion of modelName. */
   modelProvider?: string;
+
+  /** Max input tokens from the model profile (from config.toml). */
+  modelContextLimit?: number | null;
+  /** Input modalities not supported by this model (from config.toml). */
+  modelUnsupportedModalities: ReadonlySet<string>;
 
   /** Absolute path to the project root. */
   projectRoot?: string;
@@ -150,6 +148,35 @@ export function fromEnvironment(): Settings {
     .map((s) => s.trim())
     .filter(Boolean);
 
+  // Model profile: context limit and unsupported modalities from config.toml
+  let modelContextLimit: number | null = null;
+  let modelUnsupportedModalities: ReadonlySet<string> = new Set();
+  try {
+    const config = ModelConfig.load();
+    // Try to extract profile overrides for known providers
+    // The providers key gives us provider-level profile overrides
+    const providers = config.providers;
+    for (const [, providerCfg] of Object.entries(providers)) {
+      if (providerCfg.profile) {
+        // Check for flat context_limit / unsupported_modalities
+        const profile = providerCfg.profile as Record<string, unknown>;
+        if (typeof profile["context_limit"] === "number") {
+          modelContextLimit = profile["context_limit"] as number;
+        }
+        if (typeof profile["unsupported_modalities"] === "string") {
+          modelUnsupportedModalities = new Set(
+            (profile["unsupported_modalities"] as string)
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean),
+          );
+        }
+      }
+    }
+  } catch {
+    // Config parse failure — profile unavailable, leave defaults
+  }
+
   return {
     openaiApiKey,
     anthropicApiKey,
@@ -161,6 +188,8 @@ export function fromEnvironment(): Settings {
     projectRoot,
     shellAllowList,
     extraSkillsDirs,
+    modelContextLimit,
+    modelUnsupportedModalities,
 
     // Convenience accessors
     get hasOpenai() { return this.openaiApiKey !== undefined; },

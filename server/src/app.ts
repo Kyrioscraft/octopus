@@ -3,6 +3,8 @@ import { cors } from "hono/cors";
 import { getLogger, getLogContext } from "@octopus/core";
 import { authRouter } from "./routes/auth.js";
 import { chatRouter } from "./routes/chat.js";
+import { configRouter } from "./routes/config.js";
+import { workspaceRouter } from "./routes/workspace.js";
 import { initDb, listUsers, createUser } from "./db/index.js";
 import { hashPassword } from "./auth/password.js";
 import { v4 as uuid } from "uuid";
@@ -53,6 +55,8 @@ export function createApp(): Hono {
   // --- Routes ---
   app.route("/api/auth", authRouter);
   app.route("/api/chat", chatRouter);
+  app.route("/api/config", configRouter);
+  app.route("/api/workspace", workspaceRouter);
 
   // --- Health check ---
   app.get("/api/system/health", (c) =>

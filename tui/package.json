@@ -1,0 +1,40 @@
+{
+  "name": "@octopus/tui",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/cli.js",
+  "types": "dist/cli.d.ts",
+  "bin": {
+    "octopus": "dist/cli.js",
+    "octopus-tui": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "tsc --noEmit",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "@octopus/core": "workspace:*",
+    "@octopus/tentacle": "workspace:*",
+    "@octopus/tui": "link:",
+    "chalk": "^5.4.0",
+    "commander": "^13.0.0",
+    "diff": "^7.0.0",
+    "ink": "^7.1.0",
+    "ink-spinner": "^5.0.0",
+    "react": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.2.0",
+    "typescript": "^5.7.0"
+  }
+}

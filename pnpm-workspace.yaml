@@ -1,0 +1,16 @@
+packages:
+  - "core"
+  - "server"
+  - "web"
+  - "tentacle"
+  - "tui"
+
+# pnpm 10 moved the allow-list for dependency build scripts here from
+# package.json's "pnpm" field (which is no longer read). Without this,
+# native postinstall scripts such as better-sqlite3's node-gyp build are
+# silently skipped — the .node binary is never compiled and importing the
+# package throws "Could not locate the bindings file", crashing the server
+# on every request (see ~/.deepagents/logs/server.log).
+onlyBuiltDependencies:
+  - "better-sqlite3"
+  - "esbuild"

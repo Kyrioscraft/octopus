@@ -6,7 +6,7 @@ import { join } from "node:path";
 // =============================================================================
 
 export const DEFAULT_CONFIG_DIR = join(homedir(), ".deepagents");
-export const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, "config.toml");
+export const DEFAULT_CONFIG_PATH = join(DEFAULT_CONFIG_DIR, "config.json");
 export const DEFAULT_STATE_DIR = join(DEFAULT_CONFIG_DIR, ".state");
 
 // =============================================================================
