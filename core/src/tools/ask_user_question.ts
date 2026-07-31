@@ -106,11 +106,32 @@ export function createAskUserQuestionTool() {
     },
     {
       name: "ask_user_question",
-      description:
-        "Ask the user a question to clarify requirements or gather a decision among options. " +
-        "Use this when you need information only the user can provide (preferences, ambiguous " +
-        "requirements, choosing between approaches) rather than guessing. " +
-        "Omit `options` for a free-text clarification; provide `options` for a selection.",
+      description: [
+        "Ask the user a question and WAIT for their answer before continuing.",
+        "",
+        "You MUST call this tool (rather than writing the question as plain text)",
+        "whenever you need input only the user can provide. The user answers via a",
+        "dedicated UI, so calling this tool is the only way to actually pause and",
+        "collect a decision — a plain-text question will NOT pause the conversation.",
+        "",
+        "Call this tool when ANY of these apply:",
+        "- Choosing between approaches, technologies, or design options (e.g.",
+        "  React vs Vue, REST vs GraphQL, which library to use).",
+        "- The request is ambiguous and the answer materially changes your work",
+        "  (scope, target stack, data format, success criteria).",
+        "- You are about to make an irreversible or high-impact decision and the",
+        "  user's preference is unknown.",
+        "- You need a confirmation that is more consequential than a simple yes/no",
+        "  approval handled by the tool-call review.",
+        "",
+        "Do NOT call it for: yes/no approvals already handled by tool review;",
+        "questions you can answer by reading the codebase; or trivial clarifications",
+        "you can reasonably assume.",
+        "",
+        "Schema guidance: omit `options` for a free-text clarification; provide",
+        "`options` (2-4, concise) for a selection. Use `allow_other` when the user",
+        "might pick something you didn't list.",
+      ].join("\n"),
       schema: AskUserQuestionInputSchema,
     },
   );

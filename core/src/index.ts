@@ -4,7 +4,7 @@ export type { Logger, LogContext } from "./logging.js";
 
 // Agent graph
 export { createAgent, makeGraph, getCheckpointer, clearGraphCache, buildChatModel, generateTitle, TITLE_MAX_LENGTH } from "./agent.js";
-export type { AgentGraph, CompiledAgent, SubagentRegistryEntry } from "./agent.js";
+export type { AgentGraph, CompiledAgent, SubagentRegistryEntry, ExternalSubagentSpec } from "./agent.js";
 
 // Agent engine (standardized event model — decouples server from LangGraph)
 export { wrapAgentStream } from "./engine.js";
@@ -25,8 +25,8 @@ export { ShellAllowListMiddleware, isShellCommandAllowed, ShellAllowAll } from "
 export { LocalContextMiddleware, buildDetectScript, buildMcpContext } from "./middleware/local_context.js";
 
 // ServerConfig
-export { loadConfig, fromDict, toDict, ServerConfigSchema } from "./config.js";
-export type { ServerConfig } from "./config.js";
+export { loadConfig, fromDict, toDict, ServerConfigSchema, interruptOnForMode, DESTRUCTIVE_TOOLS } from "./config.js";
+export type { ServerConfig, AccessMode } from "./config.js";
 
 // ModelConfig (config.toml reader)
 export { ModelConfig, resolveEnvVar, clearCaches } from "./model_config.js";
@@ -54,6 +54,15 @@ export type { FetchUrlResult, WebSearchResult, WebSearchResultItem } from "./too
 // Subagents
 export { listSubagents } from "./subagents.js";
 export type { SubagentMetadata } from "./subagents.js";
+
+// Built-in subagents (Explore, general-purpose, ...) — unified registry
+export {
+  EXPLORE_SUBAGENT,
+  GENERAL_PURPOSE_BUILTIN,
+  BUILTIN_SUBAGENTS,
+  READONLY_TOOL_NAMES,
+} from "./built_in_subagents.js";
+export type { BuiltInSubagent, BuiltinSubagentInjector } from "./built_in_subagents.js";
 
 // Skills
 export { listSkills, loadSkillContent, validateSkillName, generateSkillTemplate } from "./skills.js";

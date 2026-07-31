@@ -12,6 +12,13 @@ import { SubagentFormModal } from "../components/extensions/SubagentFormModal.js
 
 const sdk = new OctopusClient();
 
+/** Friendly Chinese label for a subagent's origin. */
+const ORIGIN_LABEL: Record<SubagentEntry["origin"], string> = {
+  builtin: "内置",
+  file: "文件",
+  "user-defined": "自定义",
+};
+
 /**
  * Subagent detail page. Top bar with back + enable/disable switch +
  * edit/delete (user-defined only). Body: system prompt (code panel),
@@ -97,20 +104,23 @@ export function SubagentDetailPage() {
           <div style={{ minWidth: 0 }}>
             <div style={titleStyle}>{name}</div>
             <div style={subtitleStyle}>
-              {subagent ? `来源：${subagent.origin}` : ""}
+              {subagent ? `来源：${ORIGIN_LABEL[subagent.origin]}` : ""}
             </div>
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--gray-700)" }}>
-            启用
-            <Switch
-              checked={subagent?.enabled ?? false}
-              loading={toggling}
-              onChange={toggle}
-              size="small"
-            />
-          </div>
+          {/* Only user-defined subagents can be toggled; builtin/file are read-only. */}
+          {editable && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--gray-700)" }}>
+              启用
+              <Switch
+                checked={subagent?.enabled ?? false}
+                loading={toggling}
+                onChange={toggle}
+                size="small"
+              />
+            </div>
+          )}
           {editable && (
             <>
               <Tooltip title="编辑">
@@ -181,7 +191,7 @@ export function SubagentDetailPage() {
             <div style={panelStyle}>
               <div style={panelHeaderStyle}>元信息</div>
               <div style={{ padding: "4px 0" }}>
-                <DetailRow label="类型" value={subagent.origin} />
+                <DetailRow label="类型" value={ORIGIN_LABEL[subagent.origin]} />
                 <DetailRow label="来源" value={subagent.source ?? "—"} />
               </div>
             </div>

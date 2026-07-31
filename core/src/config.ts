@@ -14,6 +14,66 @@ import { ModelConfig } from "./model_config.js";
 import { clearCaches } from "./model_config.js";
 
 // =============================================================================
+// Access modes — workspace access mode (plan / confirm / auto).
+//
+// Drives two orthogonal behaviors at graph-build and runtime:
+//   - plan   : destructive tools are removed from the toolset (read-only).
+//   - confirm: per-tool HITL interrupts apply (the compiled default).
+//   - auto   : all HITL interrupts are suppressed at runtime via context.
+// The front-end sends `mode` per request; the server resolves it to one of
+// these and threads it into makeGraph (tool filtering) and the runtime
+// context (HITL override). Defined here (not in tentacle) to keep
+// architecture boundaries: server → core only.
+// =============================================================================
+
+export type AccessMode = "plan" | "confirm" | "auto";
+
+/**
+ * Tool names with side effects — file writes, shell execution, subagent/task
+ * delegation, and conversation compaction. In `plan` mode these are stripped
+ * from the toolset so the agent can only read/search, not modify anything.
+ *
+ * Read-only tools (read_file, ls, glob, grep, web_search, fetch_url) are
+ * intentionally excluded — they are safe in every mode.
+ */
+export const DESTRUCTIVE_TOOLS = new Set<string>([
+  "write_file",
+  "edit_file",
+  "execute",
+  "task",
+  "start_async_task",
+  "update_async_task",
+  "cancel_async_task",
+  "compact_conversation",
+]);
+
+/**
+ * Compute the runtime `interruptOn` override for a given access mode.
+ *
+ * The langchain `humanInTheLoopMiddleware` merges its compiled `interruptOn`
+ * with `runtime.context` (the latter wins — see hitl.js config assembly), so
+ * injecting `{ interruptOn: { <tool>: false } }` into the runtime context
+ * auto-approves those tools for the whole run without recompiling the graph.
+ *
+ * @returns The override object, or `null` to keep the compiled default.
+ */
+export function interruptOnForMode(
+  mode: AccessMode,
+): Record<string, boolean> | null {
+  if (mode === "auto") {
+    // Suppress every gated tool (destructive + the read-only-but-gated
+    // web_search/fetch_url) so the run is fully autonomous.
+    const all = [...DESTRUCTIVE_TOOLS, "web_search", "fetch_url"];
+    return Object.fromEntries(all.map((n) => [n, false]));
+  }
+  // plan: destructive tools are already absent from the toolset, so there is
+  //   nothing to interrupt — no override needed.
+  // confirm: the compiled `_addInterruptOn()` already gates every destructive
+  //   tool — keep the default.
+  return null;
+}
+
+// =============================================================================
 // Schema
 // =============================================================================
 

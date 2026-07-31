@@ -19,10 +19,11 @@
  *   - Backward-compatible `createAgent` alias
  */
 
-import { createDeepAgent, GENERAL_PURPOSE_SUBAGENT } from "deepagents";
+import { createDeepAgent } from "deepagents";
+import { BUILTIN_SUBAGENTS } from "./built_in_subagents.js";
 import { CompositeBackend, FilesystemBackend, LocalShellBackend, LangSmithSandbox } from "deepagents";
 import { MemorySaver } from "@langchain/langgraph-checkpoint";
-import type { ServerConfig } from "./config.js";
+import { type ServerConfig, type AccessMode, DESTRUCTIVE_TOOLS } from "./config.js";
 import {
   ModelConfig,
   resolveEnvVar,
@@ -43,8 +44,6 @@ import { LocalContextMiddleware } from "./middleware/local_context.js";
 import { ConfigurableModelMiddleware } from "./middleware/configurable_model.js";
 import { getBuiltinToolsAsStructuredTools } from "./tools.js";
 import { createAskUserQuestionTool } from "./tools/ask_user_question.js";
-import { listSubagents } from "./subagents.js";
-import type { SubagentMetadata } from "./subagents.js";
 import { listSkills } from "./skills.js";
 import { resolveAndLoadMcpTools } from "./mcp_tools.js";
 import type { MCPServerInfo } from "./mcp_tools.js";
@@ -84,7 +83,7 @@ export interface SubagentRegistryEntry {
   name: string;
   description: string;
   systemPrompt: string;
-  source: "user" | "project" | "builtin";
+  source: "user" | "project" | "user-defined" | "builtin";
 }
 
 /**
@@ -97,13 +96,32 @@ export interface CompiledAgent {
   subagentRegistry: Map<string, SubagentRegistryEntry>;
 }
 
+/**
+ * An external subagent spec injected by the server (file-source or user-defined).
+ * core is DB-free, so the server discovers/merges these and passes the data in.
+ * `source` is surfaced to the registry so the UI can label provenance.
+ */
+export interface ExternalSubagentSpec {
+  name: string;
+  description: string;
+  systemPrompt: string;
+  /** Tool-name whitelist (empty/undefined = inherit all main-agent tools). */
+  tools?: string[];
+  /** Optional model override in 'provider:model-name' format. */
+  model?: string | null;
+  /** Runtime enabled flag — disabled subagents are filtered out by the caller. */
+  enabled?: boolean;
+  /** Provenance: 'file' (AGENTS.md) or 'user-defined' (DB). */
+  source?: "file" | "user-defined";
+}
+
 const _graphCache = new Map<string, Promise<CompiledAgent>>();
 
 export function clearGraphCache(): void {
   _graphCache.clear();
 }
 
-function _cacheKey(config: ServerConfig, mcpSignature?: string): string {
+function _cacheKey(config: ServerConfig, mcpSignature?: string, subagentSignature?: string): string {
   return JSON.stringify([
     config.model,
     config.systemPrompt ?? "",
@@ -111,6 +129,7 @@ function _cacheKey(config: ServerConfig, mcpSignature?: string): string {
     config.enableShell,
     config.enableWebSearch,
     mcpSignature ?? "",
+    subagentSignature ?? "",
   ]);
 }
 
@@ -350,13 +369,39 @@ export async function makeGraph(
     cwd?: string;
     /** Workspace environment hint — "sandbox" selects the sandbox backend. */
     workspace?: { environment?: "local" | "sandbox" };
+    /**
+     * Workspace access mode. `plan` strips destructive tools from the
+     * toolset (read-only); `confirm`/`auto` keep them (HITL gating is then
+     * controlled at runtime via the server-injected context). Part of the
+     * cache key so different modes compile separate graphs.
+     */
+    accessMode?: AccessMode;
+    /**
+     * External subagents (file-source + user-defined), already merged by the
+     * server. core is a pure library with no DB access, so the server owns
+     * discovery/merge and injects the result here. Built-in subagents
+     * (Explore, general-purpose) are added by core itself — do not include
+     * them in this list. Part of the cache key.
+     */
+    userSubagents?: ExternalSubagentSpec[];
   },
 ): Promise<CompiledAgent> {
   const mcpSignature = options?.mcpConfigPath ?? "";
   // Include workspace environment in the cache key so local vs sandbox graphs
   // are not reused for each other.
   const wsSignature = options?.workspace?.environment === "sandbox" ? ":sandbox" : "";
-  const key = _cacheKey(config, mcpSignature) + wsSignature;
+  // accessMode changes the toolset (plan removes destructive tools), so it
+  // must distinguish cache entries — otherwise a confirm-compiled graph would
+  // be wrongly reused for a plan request.
+  const modeSignature = options?.accessMode ?? "confirm";
+  // Subagent shape (names + tool whitelists + model + enabled) affects the
+  // compiled graph, so it must be part of the cache key — otherwise graphs
+  // compiled for different user subagent configs would be wrongly reused.
+  const subagentSignature = (options?.userSubagents ?? [])
+    .map((s) => `${s.name}:${(s.tools ?? []).slice().sort().join(",")}:${s.model ?? ""}:${s.enabled ?? true}`)
+    .sort()
+    .join("|");
+  const key = _cacheKey(config, mcpSignature, subagentSignature) + wsSignature + ":" + modeSignature;
 
   // Return cached graph if available
   const cached = _graphCache.get(key);
@@ -384,6 +429,10 @@ async function _makeGraphUncached(
      * directory. Falls back to local if sandbox is unconfigured/failed.
      */
     workspace?: { environment?: "local" | "sandbox" };
+    /** Access mode — `plan` strips destructive tools. See makeGraph. */
+    accessMode?: AccessMode;
+    /** External subagents (file + user-defined), injected by the server. */
+    userSubagents?: ExternalSubagentSpec[];
   },
 ): Promise<CompiledAgent> {
   const cwd = options?.cwd ?? process.cwd();
@@ -429,6 +478,22 @@ async function _makeGraphUncached(
     } catch (err) {
       logger.warn(`Failed to load MCP tools: ${String(err)}`);
     }
+  }
+
+  // ---- 3b. plan mode — strip destructive tools (read-only enforcement) ----
+  // Done AFTER MCP loading so MCP-registered destructive tools are also removed.
+  // plan mode means the agent may only research/plan: it cannot write, edit,
+  // execute, delegate, or compact. The toolset reduction is what makes the
+  // mode enforceable (vs. relying on prompt guidance alone).
+  if (options?.accessMode === "plan") {
+    const before = tools.length;
+    for (let i = tools.length - 1; i >= 0; i--) {
+      if (DESTRUCTIVE_TOOLS.has(tools[i].name)) tools.splice(i, 1);
+    }
+    logger.info(
+      `plan mode: removed ${before - tools.length} destructive tool(s) ` +
+      `(built-in + MCP); ${tools.length} read-only tool(s) remain`,
+    );
   }
 
   // ---- 4. Build CompositeBackend with temp-directory routing ----
@@ -523,21 +588,86 @@ async function _makeGraphUncached(
     middleware.push(new LocalContextMiddleware(backend, mcpServerInfos));
   }
 
-  // ---- 6. Load subagents ----
-  const userAgentsDir = join(homedir(), ".deepagents", "agents");
-  const projectAgentsDir = projectContext.projectAgentsDir;
-  const customSubagents = listSubagents({
-    userAgentsDir,
-    projectAgentsDir,
-  });
+  // ---- 6. Assemble subagents (external + built-in) ----
+  // External subagents (file-source + user-defined) are discovered/merged by
+  // the server and injected via options.userSubagents — core stays DB-free.
+  // Built-in subagents (Explore, general-purpose) come from BUILTIN_SUBAGENTS.
+  // Filter out disabled external subagents; built-ins are always enabled.
+  const externalSubagents = (options?.userSubagents ?? []).filter((s) => s.enabled !== false);
 
-  // Build subagent specs for createDeepAgent
-  const subagentSpecs: any[] = customSubagents.map((sa: SubagentMetadata) => ({
-    name: sa.name,
-    description: sa.description,
-    systemPrompt: sa.systemPrompt,
-    ...(sa.model ? { model: sa.model } : {}),
-  }));
+  /**
+   * Resolve a tool-name whitelist into StructuredTool instances from the main
+   * agent's compiled toolset. Enables the SDK's `SubAgent.tools` capability
+   * (previously unused). Unknown tool names (e.g. an MCP tool that wasn't
+   * loaded) are skipped with a warning rather than failing the build.
+   */
+  const resolveToolWhitelist = (names: string[] | undefined): any[] | undefined => {
+    if (!names || names.length === 0) return undefined;
+    const byName = new Map<string, any>();
+    for (const t of tools) {
+      if (t?.name) byName.set(t.name, t);
+    }
+    const resolved: any[] = [];
+    for (const n of names) {
+      const t = byName.get(n);
+      if (t) {
+        resolved.push(t);
+      } else {
+        logger.warn(
+          `Subagent tool whitelist references unknown tool "${n}" — ` +
+          `it is not in the main agent toolset and will be ignored. ` +
+          `Available tools: ${[...byName.keys()].join(", ")}`,
+        );
+      }
+    }
+    return resolved.length > 0 ? resolved : undefined;
+  };
+
+  // Build the createDeepAgent `subagents` array. Two groups:
+  //   - external subagents (file + user-defined): always injected explicitly.
+  //   - built-in subagents with injectedBy === "explicit" (Explore): injected.
+  // Built-ins with injectedBy === "sdk" (general-purpose) are auto-injected by
+  // the SDK itself — including them here would create duplicates, so they are
+  // skipped (but still mirrored into the registry below).
+  //
+  // Every subagent spec carries a `middleware` field with the
+  // BinaryContentSanitizerMiddleware. The SDK merges it via
+  // `...input.middleware ?? []` (see normalizeSubagentSpec), but the main
+  // agent's middleware stack is NOT inherited by subagents — so without this,
+  // a subagent's `read_file` on a binary file yields a `{type:"file"}` block
+  // that crashes the Rust checkpointer on the next turn (400 deserialization
+  // error). Explore (which exists to read files) is especially vulnerable.
+  const subagentMiddleware = [new BinaryContentSanitizerMiddleware()];
+  const subagentSpecs: any[] = [];
+  for (const sa of externalSubagents) {
+    const spec: Record<string, unknown> = {
+      name: sa.name,
+      description: sa.description,
+      systemPrompt: sa.systemPrompt,
+      // Propagate the binary-content sanitizer — see comment above.
+      middleware: subagentMiddleware,
+    };
+    const whitelist = resolveToolWhitelist(sa.tools);
+    if (whitelist) spec.tools = whitelist;
+    if (sa.model) spec.model = sa.model;
+    subagentSpecs.push(spec);
+  }
+  for (const sa of BUILTIN_SUBAGENTS) {
+    if (sa.injectedBy !== "explicit") continue;
+    const spec: Record<string, unknown> = {
+      name: sa.name,
+      description: sa.description,
+      systemPrompt: sa.systemPrompt,
+      // Propagate the binary-content sanitizer — see comment above.
+      middleware: subagentMiddleware,
+    };
+    // Built-in explicit subagents force their own whitelist (Explore is
+    // read-only by construction) — the value on the BuiltInSubagent wins.
+    const whitelist = resolveToolWhitelist(sa.tools);
+    if (whitelist) spec.tools = whitelist;
+    if (sa.model) spec.model = sa.model;
+    subagentSpecs.push(spec);
+  }
 
   // ---- 7. Load skills ----
   const userSkillsDir = join(homedir(), ".deepagents", config.assistantId ?? "agent", "skills");
@@ -639,25 +769,31 @@ async function _makeGraphUncached(
 
   // ---- 12. Build subagent registry ----
   // The registry lets callers (e.g. the server) look up a subagent's system
-  // prompt at runtime when it is invoked via the `task` tool. Custom subagents
-  // come from AGENTS.md files; the general-purpose subagent is auto-injected
-  // by deepagents — we mirror it here so callers don't need a deepagents import.
+  // prompt at runtime when it is invoked via the `task` tool. We mirror every
+  // subagent — external (file/user-defined) AND built-in — so wrapAgentStream
+  // can resolve the systemPrompt regardless of who injected the subagent.
+  // Built-ins with injectedBy === "sdk" (general-purpose) are NOT in
+  // subagentSpecs (the SDK auto-injects them), but we still mirror them here.
   const subagentRegistry = new Map<string, SubagentRegistryEntry>();
-  for (const sa of customSubagents) {
+  for (const sa of externalSubagents) {
     subagentRegistry.set(sa.name, {
       name: sa.name,
       description: sa.description,
       systemPrompt: sa.systemPrompt,
-      source: (sa.source === "project" ? "project" : "user") as "user" | "project",
+      source: (sa.source === "file" ? "user" : "user-defined") as
+        | "user"
+        | "project"
+        | "user-defined",
     });
   }
-  // deepagents auto-injects general-purpose unless a custom subagent already
-  // claims that name. Mirror the same logic for the registry.
-  if (!subagentRegistry.has(GENERAL_PURPOSE_SUBAGENT.name)) {
-    subagentRegistry.set(GENERAL_PURPOSE_SUBAGENT.name, {
-      name: GENERAL_PURPOSE_SUBAGENT.name,
-      description: GENERAL_PURPOSE_SUBAGENT.description,
-      systemPrompt: GENERAL_PURPOSE_SUBAGENT.systemPrompt,
+  for (const sa of BUILTIN_SUBAGENTS) {
+    // Don't clobber a user-provided subagent that intentionally shadows a
+    // built-in name (e.g. a custom "general-purpose").
+    if (subagentRegistry.has(sa.name)) continue;
+    subagentRegistry.set(sa.name, {
+      name: sa.name,
+      description: sa.description,
+      systemPrompt: sa.systemPrompt,
       source: "builtin",
     });
   }

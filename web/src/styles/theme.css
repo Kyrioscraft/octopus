@@ -149,9 +149,18 @@ body {
 
 /* ===== Scrollbar (4px thin) ===== */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: var(--gray-100); border-radius: 2px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--gray-300); }
+
+/* ===== Tool call cards: constrain width so long commands wrap, not overflow =====
+   Ant Design <Collapse> defaults to display:block with no max-width, so a long
+   command line in the header (nowrap spans) inflates the whole card beyond its
+   column. Force the card + collapse chain to respect the parent column width. */
+.tool-call-card { max-width: 100%; min-width: 0; }
+.tool-call-card > .ant-collapse { max-width: 100%; }
+.tool-call-card .ant-collapse-header { max-width: 100%; min-width: 0; }
+.tool-call-card .ant-collapse-header-text { max-width: 100%; min-width: 0; overflow: hidden; }
 
 /* ===== Generating wave animation (shimmer through text) ===== */
 @keyframes waveFlash {

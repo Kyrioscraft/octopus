@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import { v4 as uuid } from "uuid";
 import { getOptionalUser } from "../auth/middleware.js";
 import { makeGraph, loadConfig, getLogger, getLogContext } from "@octopus/core";
+import { type AccessMode, type ExternalSubagentSpec, type SubagentEntry, interruptOnForMode } from "@octopus/core";
 import {
   listUserThreads,
   listUserThreadsByWorkspace,
@@ -33,8 +34,37 @@ import {
   ensureThreadOutputs,
   resolveAgentCwd,
 } from "../services/workspace.service.js";
+import { listAllSubagents } from "../services/subagent.service.js";
 
 export const chatRouter = new Hono();
+
+/**
+ * Resolve the user's subagents (file-source + user-defined, merged) into the
+ * shape core's makeGraph expects. Filters to enabled entries only. Built-in
+ * subagents (Explore, general-purpose) are added by core itself, so they are
+ * excluded here to avoid duplication.
+ */
+function resolveUserSubagents(userId: string): ExternalSubagentSpec[] {
+  try {
+    const all = listAllSubagents(userId);
+    return all
+      .filter((s) => s.enabled && s.origin !== "builtin")
+      .map((s: SubagentEntry) => ({
+        name: s.name,
+        description: s.description,
+        systemPrompt: s.systemPrompt,
+        tools: s.tools,
+        model: s.model ?? null,
+        enabled: s.enabled,
+        source: s.origin === "user-defined" ? ("user-defined" as const) : ("file" as const),
+      }));
+  } catch (err) {
+    // Subagent resolution must never block the chat — log and proceed with none.
+    const log = getLogger("chat.route");
+    log.exception("Failed to resolve user subagents; proceeding without them", err as Error);
+    return [];
+  }
+}
 
 const logger = getLogger("chat.router");
 
@@ -106,8 +136,9 @@ interface ChatRequest {
   /** Optional per-request model override ("provider:model"). Applied via the
    *  configurable_model middleware at runtime; falls back to config default. */
   model?: string;
-  /** Workspace access mode hint from the client: "plan" | "confirm" | "auto".
-   *  Logged only this iteration — does not yet alter graph behavior. */
+  /** Workspace access mode from the client: "plan" | "confirm" | "auto".
+   *  plan = read-only (destructive tools removed); confirm = per-step HITL
+   *  approval; auto = fully autonomous (no HITL interrupts). */
   mode?: string;
 }
 
@@ -153,7 +184,12 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
 
   const config = loadConfig();
   const modelOverride = body.model?.trim() || undefined;
-  const accessMode = body.mode?.trim() || undefined;
+  // Resolve the workspace access mode. The client sends "plan" | "confirm" |
+  // "auto"; anything missing or unrecognized falls back to "confirm" (the
+  // per-step-approval default), which matches pre-existing behavior.
+  const rawMode = body.mode?.trim();
+  const accessMode: AccessMode =
+    rawMode === "plan" || rawMode === "auto" ? rawMode : "confirm";
   logger.info("Chat request — resolved config", {
     model: modelOverride ?? config.model,
     thread_id: threadId,
@@ -170,6 +206,13 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
     const compiled = await makeGraph(config, {
       cwd: agentCwd,
       workspace: { environment: workspace.environment },
+      // accessMode drives toolset filtering at build time (plan strips
+      // destructive tools). It is part of the graph cache key, so each mode
+      // compiles its own graph.
+      accessMode,
+      // Inject the user's file-source + user-defined subagents (merged). core
+      // adds built-ins (Explore, general-purpose) itself. Part of cache key.
+      userSubagents: resolveUserSubagents(userId),
     });
     agent = compiled.agent;
     subagentRegistry = compiled.subagentRegistry;
@@ -179,11 +222,19 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
   }
   // `model` in configurable is read by the configurable_model middleware to
   // rebuild the chat model for this run. Omitted → uses config default.
+  //
+  // `accessMode` controls HITL at runtime: `auto` injects an `interruptOn`
+  // override into the langchain agent's runtime context, which
+  // humanInTheLoopMiddleware merges over its compiled config (see hitl.js) so
+  // every gated tool auto-approves. `plan`/`confirm` need no override here —
+  // plan has no destructive tools to gate, confirm keeps the compiled default.
+  const interruptOverride = interruptOnForMode(accessMode);
   const langgraphConfig = {
     configurable: {
       thread_id: threadId,
       ...(modelOverride ? { model: modelOverride } : {}),
     },
+    ...(interruptOverride ? { context: { interruptOn: interruptOverride } } : {}),
   };
 
   logger.info("Stream started", {
@@ -244,6 +295,9 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
   const compiled = await makeGraph(config, {
     cwd: agentCwd,
     workspace: { environment: workspace.environment },
+    // Inject the same user subagents as the original turn so delegation works
+    // consistently on resume.
+    userSubagents: resolveUserSubagents(userId),
   });
   const agent = compiled.agent;
   const subagentRegistry = compiled.subagentRegistry;

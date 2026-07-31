@@ -45,6 +45,15 @@ export type AgentEvent =
       agentNs: string;
       description: string;
       systemPrompt: string;
+      /** Display name (subagent TYPE, e.g. "Explore") — distinct from agentNs
+       *  which is now a per-invocation instance key (placeholder or tools:<id>). */
+      subagentName?: string;
+      requestId?: string;
+    }
+  | {
+      type: "subagent_finished";
+      /** The subagent type that just returned its result to the main agent. */
+      agentNs: string;
       requestId?: string;
     }
   | { type: "finished"; threadId: string; title?: string }
@@ -84,10 +93,26 @@ export interface AgentEngine {
 // Stream adapter — wraps a raw LangGraph stream into AgentEvent[]
 // =============================================================================
 
-/** Unpack a LangGraph v1 stream chunk into the message + stream metadata. */
+/**
+ * Unpack a LangGraph v1 stream chunk into the message + stream metadata.
+ *
+ * In `messages` stream mode, each chunk is `["messages", [message, metadata]]`.
+ * The metadata carries two independent subagent indicators:
+ *   - `lc_agent_name` — set by the deepagents SDK on every subagent's config
+ *     metadata (`lc_agent_name: subagent_type`), propagated verbatim onto each
+ *     streamed message's metadata by LangGraph's StreamMessagesHandler. This is
+ *     the authoritative, unambiguous subagent identifier.
+ *   - `langgraph_checkpoint_ns` / `checkpoint_ns` — a `|`-joined namespace path
+ *     whose first segment is the subagent name (e.g. `"Explore"` or
+ *     `"Explore:taskId"`). Parsing this is fragile: the segment may or may not
+ *     carry a `:` suffix, so a naive `includes(":")` check misses bare names.
+ *
+ * We return the full metadata object so callers can read either field.
+ */
 function unpackChunk(chunk: unknown): {
   message: any;
   ns?: string;
+  meta?: Record<string, unknown>;
 } | null {
   // Multi-mode shape: ["messages", [message, metadata]]
   if (Array.isArray(chunk) && chunk.length === 2 && chunk[0] === "messages") {
@@ -98,7 +123,7 @@ function unpackChunk(chunk: unknown): {
       const ns =
         (meta.langgraph_checkpoint_ns as string | undefined) ??
         (meta.checkpoint_ns as string | undefined);
-      return { message, ns };
+      return { message, ns, meta };
     }
     const msg = payload ?? null;
     return msg ? { message: msg } : null;
@@ -164,9 +189,13 @@ function extractContent(msg: any): ExtractedContent {
           if (typeof b.reasoning === "string") reasoningParts.push(b.reasoning);
           break;
         case "tool_call": {
-          // Complete tool call embedded as a content block.
+          // Complete tool call embedded as a content block. Skip entries with
+          // a missing/empty name — they're streaming artifacts (see
+          // normalizeToolCall) and would render as "unknown" on the client.
+          const name = typeof b.name === "string" ? b.name : "";
+          if (!name) break;
           const args = typeof b.args === "string" ? safeParse(b.args) : (b.args ?? {});
-          out.toolCalls.push({ name: b.name ?? "unknown", args, id: b.id });
+          out.toolCalls.push({ name, args, id: b.id });
           break;
         }
         case "tool_call_chunk": {
@@ -258,18 +287,26 @@ function safeParse(s: string): Record<string, unknown> {
  *   - OpenAI nested without wrapper: { id, function:{ name, arguments } }
  *
  * Returns null for entries that have neither a flat `name` nor a nested
- * `function.name` (e.g. malformed/partial chunks).
+ * `function.name`, OR where the name is an empty string. An empty name is
+ * significant: under OpenAI's streaming protocol only the *first* delta for a
+ * tool call carries `function.name`; subsequent deltas collapse to
+ * `{ name: "" }` (LangChain's `collapseToolCallChunks` does `name ?? ""`).
+ * If we let the empty-name entry through, the client renders "unknown" for
+ * the rest of the stream — the incremental `tool_call_chunks` path is the
+ * correct source of truth for streaming args, so we drop the empty-name
+ * `tool_calls` entry here and let the chunks accumulate on the client.
  */
 function normalizeToolCall(tc: any): { name: string; args: Record<string, unknown>; id?: string } | null {
   if (!tc || typeof tc !== "object") return null;
-  // Flat shape (already normalized by LangChain).
-  if (typeof tc.name === "string") {
+  // Flat shape (already normalized by LangChain). Reject empty-string names
+  // (streaming deltas after the first one carry name: "").
+  if (typeof tc.name === "string" && tc.name.length > 0) {
     const args = typeof tc.args === "string" ? safeParse(tc.args) : (tc.args ?? {});
     return { name: tc.name, args, ...(tc.id != null ? { id: tc.id } : {}) };
   }
   // OpenAI nested shape (raw streaming chunk, pre-parser).
   const fn = tc.function;
-  if (fn && typeof fn === "object" && typeof fn.name === "string") {
+  if (fn && typeof fn === "object" && typeof fn.name === "string" && fn.name.length > 0) {
     const args =
       typeof fn.arguments === "string" ? safeParse(fn.arguments) : (fn.arguments ?? {});
     return { name: fn.name, args, ...(tc.id != null ? { id: tc.id } : {}) };
@@ -293,10 +330,25 @@ export async function* wrapAgentStream(
   eventStream: AsyncIterable<unknown>,
   ctx: { requestId: string; subagentRegistry: Map<string, SubagentRegistryEntry> },
 ): AsyncGenerator<AgentEvent> {
+  // Track active subagents by the main agent's `task` tool_call_id so we can
+  // emit `subagent_finished` when the matching ToolMessage (the subagent's
+  // final result) arrives back at the main agent. This drives the UI's
+  // "collapse on completion" behavior for nested subagent timelines.
+  const activeSubagentByCallId = new Map<string, string>();
+  // Placeholder counter for task calls without an id (rare).
+  let placeholderSeq = 0;
+  // Map: placeholder key (from subagent_started) → resolved tools:<run-id> (the
+  // real instance key, learned from the first internal chunk). Used so
+  // subagent_finished can emit the SAME key the frontend rebinds to.
+  const placeholderToInstance = new Map<string, string>();
+  // Reverse map: tools:<run-id> → placeholder key, so we can look up which
+  // pending subagent an internal chunk belongs to (for binding on first sight).
+  const instanceToPlaceholder = new Map<string, string>();
+
   for await (const chunk of eventStream) {
     const unpacked = unpackChunk(chunk);
     if (!unpacked) continue;
-    const { message: msg, ns } = unpacked;
+    const { message: msg, ns, meta } = unpacked;
     const type = msg._getType?.() ?? msg.type ?? "";
     if (type === "human" || type === "user") continue;
 
@@ -311,13 +363,64 @@ export async function* wrapAgentStream(
 
     if (!text && !reasoning && !hasAnyToolCalls && type !== "tool") continue;
 
-    // Resolve subagent namespace.
-    const nsHasColon = ns?.includes(":") ?? false;
-    const nsPrefix = nsHasColon ? (ns!.split(":")[0]) : "";
-    const agentNs = nsHasColon && ctx.subagentRegistry.has(nsPrefix) ? nsPrefix : undefined;
+    // Resolve subagent identity from the LangGraph checkpoint namespace.
+    //
+    // Two distinct dimensions are needed to correctly nest a subagent's stream:
+    //
+    //   1. CALL INSTANCE KEY — which invocation produced this chunk. Multiple
+    //      invocations of the same subagent TYPE can be in flight (e.g. two
+    //      Explore calls), and their chunks must NOT be merged. The reliable
+    //      per-instance key is the FIRST segment of `langgraph_checkpoint_ns`
+    //      when it starts with `tools:` — LangGraph assigns a unique run id to
+    //      every subagent (subgraph) invocation, and all of that invocation's
+    //      chunks share the same `tools:<run-id>` prefix. Diagnostic confirmed:
+    //      one invocation → one fixed `tools:<uuid>` prefix across all its
+    //      chunks (tokens, tool calls, tool results); different invocations →
+    //      different uuids.
+    //
+    //   2. DISPLAY NAME — which subagent TYPE this is (e.g. "Explore"). This is
+    //      `metadata.lc_agent_name`, set by the deepagents SDK on the subagent's
+    //      config. It is for UI display only, NOT for nesting (same name can
+    //      repeat across invocations).
+    //
+    // Namespace shapes observed:
+    //   - main agent:     "model_request:<uuid>"            → no subagent
+    //   - subagent token: "tools:<run-id>|model_request:<uuid>"
+    //   - subagent tool:  "tools:<run-id>|tools:<tool-id>"
+    //
+    // We extract the leading `tools:<run-id>` as the instance key. Anything
+    // after the first `|` (model_request / inner tools) belongs to the SAME
+    // invocation and must nest under the same key.
+    const lcAgentName = meta?.lc_agent_name as string | undefined;
+    let agentNs: string | undefined;
+    if (ns) {
+      const firstSeg = ns.split("|")[0];
+      if (firstSeg.startsWith("tools:")) {
+        agentNs = firstSeg; // unique per-invocation instance key
+        // Bind this instance key to its pending placeholder (FIFO: the earliest
+        // unresolved placeholder corresponds to the earliest-started subagent).
+        // This lets subagent_finished emit the instance key the frontend uses.
+        if (!instanceToPlaceholder.has(agentNs)) {
+          for (const [callId, placeholder] of activeSubagentByCallId) {
+            if (!placeholderToInstance.has(placeholder)) {
+              placeholderToInstance.set(placeholder, agentNs);
+              instanceToPlaceholder.set(agentNs, placeholder);
+              break;
+            }
+          }
+        }
+      }
+    }
 
     // Emit subagent_started when the main agent invokes the `task` tool.
     // Check both content-block tool_calls and the top-level array.
+    //
+    // NOTE: at this point we do NOT yet know the subagent's `tools:<run-id>`
+    // instance key (that appears only once the subgraph starts streaming). So
+    // we emit `subagent_started` with the requested `subagent_type` as a
+    // PLACEHOLDER agentNs plus a display name. The frontend rebinds the
+    // placeholder to the real `tools:<run-id>` when the first internal chunk
+    // arrives (see TurnEventAccumulator.rebindPendingSubagent).
     if (!agentNs && type === "ai") {
       const allCalls = toolCalls.length > 0 ? toolCalls : (msg.tool_calls as Array<Record<string, unknown>> | undefined) ?? [];
       for (const tc of allCalls) {
@@ -325,14 +428,39 @@ export async function* wrapAgentStream(
           const tcArgs = (tc.args ?? {}) as Record<string, unknown>;
           const saType = (tcArgs.subagent_type as string) ?? "general-purpose";
           const entry = ctx.subagentRegistry.get(saType);
+          // Placeholder key unique per task call (so two concurrent task calls
+          // get two distinct placeholders). The frontend rebinds this to the
+          // real `tools:<run-id>` once the subagent's stream begins.
+          const placeholderKey = `pending:${tc.id ?? `noid_${placeholderSeq++}`}`;
+          if (typeof tc.id === "string" && tc.id) {
+            activeSubagentByCallId.set(tc.id, placeholderKey);
+          }
           yield {
             type: "subagent_started",
-            agentNs: saType,
+            agentNs: placeholderKey,
             description: (tcArgs.description as string) ?? "",
             systemPrompt: entry?.systemPrompt ?? "",
+            subagentName: saType,
             requestId: ctx.requestId,
           };
         }
+      }
+    }
+
+    // Emit subagent_finished when the main agent receives the `task` tool's
+    // result (the subagent's final report). Match by tool_call_id against the
+    // active subagents tracked above. Signals the UI to collapse the nested
+    // subagent timeline from "streaming" to "done".
+    if (type === "tool" && msg.tool_call_id) {
+      const finishedNs = activeSubagentByCallId.get(msg.tool_call_id);
+      if (finishedNs) {
+        activeSubagentByCallId.delete(msg.tool_call_id);
+        // Resolve the placeholder to the real instance key (tools:<run-id>) so
+        // the frontend — which rebinds SubagentEvents to instance keys — can
+        // match this finished marker. Falls back to the placeholder if no
+        // internal chunk was ever seen (subagent produced no streamed output).
+        const instanceKey = placeholderToInstance.get(finishedNs) ?? finishedNs;
+        yield { type: "subagent_finished", agentNs: instanceKey, requestId: ctx.requestId };
       }
     }
 
@@ -340,7 +468,12 @@ export async function* wrapAgentStream(
     // representation is present so the client can render streaming fragments
     // (tool_call_chunks) and complete calls (tool_calls) uniformly.
     const msgPayload: Record<string, unknown> = { type };
-    if (agentNs) msgPayload.agent_ns = agentNs;
+    if (agentNs) {
+      msgPayload.agent_ns = agentNs;
+      // Carry the subagent TYPE (display name) so the frontend can show
+      // "Explore" instead of the opaque instance key "tools:<run-id>".
+      if (lcAgentName) msgPayload.agent_name = lcAgentName;
+    }
     // Prefer the structured toolCalls from content blocks; fall back to the
     // raw top-level array for providers that populate it directly.
     if (toolCalls.length > 0) {

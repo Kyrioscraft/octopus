@@ -1,10 +1,8 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { Layout } from "antd";
-import { Sidebar } from "../components/Sidebar.js";
-import { ExtensionsSidebar } from "../components/ExtensionsSidebar.js";
-import { SettingsSidebar } from "../components/SettingsSidebar.js";
-import { WorkspaceFileTree } from "../components/WorkspaceFileTree.js";
-import { useChatStore } from "../stores/chat.js";
+import { Sidebar } from "../components/sidebars/Sidebar.js";
+import { ExtensionsSidebar } from "../components/sidebars/ExtensionsSidebar.js";
+import { SettingsSidebar } from "../components/sidebars/SettingsSidebar.js";
 import "../styles/theme.css";
 import "../styles/markdown.css";
 
@@ -14,12 +12,6 @@ export function AppLayout() {
   const location = useLocation();
   const isSettings = location.pathname.startsWith("/settings");
   const isExtensions = location.pathname.startsWith("/extensions");
-  // The file-tree sider is shown only on chat routes (the workspace concept
-  // doesn't apply to the settings/extensions pages).
-  const isChat = !isSettings && !isExtensions;
-  // Collapse state lives in the store so the chat header's workspace button
-  // can toggle it.
-  const fileTreeCollapsed = useChatStore((s) => s.fileTreeCollapsed);
 
   const sidebar = isSettings ? (
     <SettingsSidebar />
@@ -54,22 +46,11 @@ export function AppLayout() {
       >
         <Outlet />
       </Content>
-      {isChat && !fileTreeCollapsed && (
-        <Sider
-          width={300}
-          style={{
-            background: "var(--gray-0)",
-            borderLeft: "1px solid var(--gray-100)",
-            overflow: "hidden",
-            display: "flex",
-            flexDirection: "column",
-          }}
-        >
-          <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-            <WorkspaceFileTree />
-          </div>
-        </Sider>
-      )}
+      {/*
+        The right-side secondary surface (workspace files / subagents / todos)
+        is now the generic Companion panel (components/chat/companion), rendered inside ChatPage (it needs
+        message-derived data). It overlays the content rather than pushing it.
+      */}
     </Layout>
   );
 }

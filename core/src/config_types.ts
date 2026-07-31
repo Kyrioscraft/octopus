@@ -157,8 +157,15 @@ export function inferTransport(
 // Types — subagent (mirrors skill/mcp config-view pattern)
 // =============================================================================
 
-/** Where a subagent entry came from — determines editability. */
-export type SubagentOrigin = "file" | "user-defined";
+/**
+ * Where a subagent entry came from — determines editability.
+ * - "file": discovered from an AGENTS.md file (read-only).
+ * - "user-defined": created via the web UI / DB (editable).
+ * - "builtin": ships with Octopus (Explore, general-purpose). Read-only in the
+ *   UI; Explore is always injected at runtime regardless of the `enabled` flag
+ *   shown in the UI (which only controls display).
+ */
+export type SubagentOrigin = "file" | "user-defined" | "builtin";
 
 /**
  * A subagent entry in the unified config view. `origin` drives whether the

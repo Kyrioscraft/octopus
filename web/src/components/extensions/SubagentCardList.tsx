@@ -9,9 +9,13 @@ import { SubagentFormModal } from "./SubagentFormModal.js";
 const sdk = new OctopusClient();
 
 const ORIGIN_LABEL: Record<SubagentEntry["origin"], string> = {
-  file: "内置",
+  builtin: "内置",
+  file: "文件",
   "user-defined": "自定义",
 };
+
+/** Built-in subagents (Explore, general-purpose) are read-only — no toggle/edit. */
+const isReadonly = (s: SubagentEntry) => s.origin === "builtin" || s.origin === "file";
 
 interface SubagentCardListProps {
   subagents: SubagentEntry[];
@@ -88,7 +92,12 @@ export function SubagentCardList({ subagents, loading, search, onReload }: Subag
                     title={s.name}
                     subtitle={s.model ?? undefined}
                     description={s.description}
-                    tags={[{ label: ORIGIN_LABEL[s.origin] }]}
+                    tags={[
+                      {
+                        label: ORIGIN_LABEL[s.origin],
+                        ...(s.origin === "builtin" ? { color: "var(--main-color)" } : {}),
+                      },
+                    ]}
                     statusLabel="已启用"
                     statusLevel="success"
                     onClick={() => navigate(`/extensions/subagent/${encodeURIComponent(s.name)}`)}

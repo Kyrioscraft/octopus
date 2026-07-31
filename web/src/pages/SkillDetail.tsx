@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Button, Tooltip, Spin, Modal, message as antdMessage } from "antd";
 import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, BookOutlined } from "@ant-design/icons";
 import { OctopusClient, type SkillDetail } from "@octopus/tentacle";
-import { Markdown } from "../components/Markdown.js";
+import { Markdown } from "../components/widgets/Markdown.js";
 import { SkillFormModal } from "../components/extensions/SkillFormModal.js";
 
 const sdk = new OctopusClient();

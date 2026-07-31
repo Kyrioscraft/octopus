@@ -461,6 +461,18 @@ function processAgentEvent(
           agent_ns: event.agentNs,
           description: event.description,
           system_prompt: event.systemPrompt,
+          agent_name: event.subagentName,
+        },
+        request_id: event.requestId,
+      });
+      return;
+    }
+    case "subagent_finished": {
+      emit({
+        status: "loading",
+        msg: {
+          type: "subagent_finished",
+          agent_ns: event.agentNs,
         },
         request_id: event.requestId,
       });

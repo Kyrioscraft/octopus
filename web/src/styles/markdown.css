@@ -89,15 +89,16 @@
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
-/* Code blocks */
+/* Code blocks — wrap long lines instead of horizontal scrolling */
 .md-body .md-pre {
   position: relative; margin: 0.7em 0; padding: 14px 16px;
   background: var(--gray-25); border: 1px solid var(--gray-150);
-  border-radius: 10px; overflow-x: auto;
+  border-radius: 10px; overflow-x: hidden;
 }
 .md-body .md-pre code {
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   font-size: 13.5px; line-height: 1.6; background: transparent; padding: 0;
+  white-space: pre-wrap; word-break: break-word;
 }
 .md-copy-btn {
   position: absolute; top: 6px; right: 6px;
@@ -117,6 +118,7 @@
 }
 .md-body th, .md-body td {
   border: 1px solid var(--gray-150); padding: 7px 12px; text-align: left;
+  word-break: break-word;
 }
 .md-body th { background: var(--gray-50); font-weight: 600; color: var(--gray-1000); }
 .md-body tr:nth-child(even) td { background: var(--gray-10); }

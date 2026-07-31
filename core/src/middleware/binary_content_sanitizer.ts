@@ -21,6 +21,7 @@
  */
 
 import { ToolMessage } from "@langchain/core/messages";
+import { Command } from "@langchain/langgraph";
 
 interface ToolCallRequest {
   toolCall: { id?: string; name: string; args?: Record<string, unknown> };
@@ -82,6 +83,28 @@ function _normalizeToolMessage(result: ToolMessage): boolean {
   return changed;
 }
 
+/**
+ * Sanitize a tool-call result, handling both direct `ToolMessage` returns and
+ * `Command` wrappers. The deepagents FilesystemMiddleware rewrites large tool
+ * results into `new Command({ update: { messages: [ToolMessage, ...] } })`;
+ * without unwrapping it here, a `{type:"file"}` block inside that Command would
+ * bypass sanitization and still poison the checkpointer. Mutates in place.
+ */
+function _normalizeResult(result: any): void {
+  if (result instanceof ToolMessage) {
+    _normalizeToolMessage(result);
+    return;
+  }
+  if (result instanceof Command) {
+    const messages = (result as any).update?.messages;
+    if (Array.isArray(messages)) {
+      for (const msg of messages) {
+        if (msg instanceof ToolMessage) _normalizeToolMessage(msg);
+      }
+    }
+  }
+}
+
 class BinaryContentSanitizerMiddleware {
   name = "BinaryContentSanitizerMiddleware";
 
@@ -92,7 +115,8 @@ class BinaryContentSanitizerMiddleware {
    *
    * Although the primary offender is `read_file`, we inspect every tool result
    * so that MCP tools or future built-ins that emit `image`/`audio`/`video`
-   * blocks are also covered.
+   * blocks are also covered. Both bare `ToolMessage` results and `Command`
+   * wrappers (used by the FS middleware for large/evicted results) are handled.
    */
   wrapToolCall = (
     request: ToolCallRequest,
@@ -101,11 +125,11 @@ class BinaryContentSanitizerMiddleware {
     const result = handler(request);
     if (result instanceof Promise) {
       return result.then((r: any) => {
-        if (r instanceof ToolMessage) _normalizeToolMessage(r);
+        _normalizeResult(r);
         return r;
       });
     }
-    if (result instanceof ToolMessage) _normalizeToolMessage(result);
+    _normalizeResult(result);
     return result;
   };
 }

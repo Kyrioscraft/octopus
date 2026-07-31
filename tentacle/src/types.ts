@@ -255,6 +255,9 @@ export interface StreamEvent {
    * - `tool_call_id` / `name` — on ToolMessages, identify which tool ran.
    * - `type: "subagent_started"` — synthetic chunk announcing a subagent is
    *   about to run; carries `agent_ns`, `description`, `system_prompt`.
+   * - `type: "subagent_finished"` — synthetic chunk announcing a subagent has
+   *   returned its result to the main agent; carries `agent_ns`. Drives the
+   *   UI's "collapse on completion" for nested subagent timelines.
    */
   msg?: Record<string, unknown>;
 
@@ -407,8 +410,14 @@ export interface BuiltinSkillSpec {
   installed_record: SkillEntry | null;
 }
 
-/** Where a subagent entry came from — determines editability. */
-export type SubagentOrigin = "file" | "user-defined";
+/**
+ * Where a subagent entry came from — determines editability.
+ * - "file": discovered from an AGENTS.md file (read-only).
+ * - "user-defined": created via the web UI / DB (editable).
+ * - "builtin": ships with Octopus (Explore, general-purpose) — read-only in
+ *   the UI. Explore is always injected at runtime.
+ */
+export type SubagentOrigin = "file" | "user-defined" | "builtin";
 
 /** A subagent entry in the unified config view. */
 export interface SubagentEntry {
