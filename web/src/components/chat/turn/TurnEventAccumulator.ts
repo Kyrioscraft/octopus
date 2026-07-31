@@ -256,7 +256,14 @@ export class TurnEventAccumulator {
     }
     if (agentNs && this.subagentIndex.has(agentNs)) {
       const entry = this.subagentIndex.get(agentNs)!;
-      entry.innerAcc.consume(chunk);
+      // Forward to the subagent's INNER accumulator. CRITICAL: strip agentNs /
+      // agentName from the chunk, otherwise the inner accumulator's own
+      // consume() would (at line ~248) treat the chunk's agentNs as a foreign
+      // subagent key, fail to rebind it, and drop the chunk as an "orphan" —
+      // emptying the subagent's internal timeline. Inside the inner
+      // accumulator the chunk must behave like a plain main-timeline event.
+      const { agentNs: _dropNs, agentName: _dropName, ...inner } = chunk;
+      entry.innerAcc.consume(inner);
       const ev = this.events[entry.eventIdx];
       if (ev?.type === "subagent") {
         // The display name from an internal chunk (actually-executed type) is

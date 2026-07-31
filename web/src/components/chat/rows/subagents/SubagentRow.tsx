@@ -10,14 +10,17 @@ import type { SubagentEvent } from "../../turn/types.js";
  * A compact, single-line row representing a subagent (`task` tool) invocation
  * in the main conversation turn.
  *
+ * Layout: [status icon] [robot icon] 子智能体 [name] [intent].
+ *   - "子智能体" — a fixed label after the icon, so the row is unmistakably a
+ *     subagent invocation regardless of the agent's display name.
+ *   - name — the subagent TYPE (e.g. "Explore"), the executed subagent.
+ *   - intent — the task call's `description` (what the user/main agent asked it
+ *     to do), shown in a darker-quiet color right after the name.
+ *
  * The subagent's internal execution detail is NOT shown inline — it lives in
  * the side panel (SubagentPanel). Clicking this row selects the subagent and
- * opens the panel. This keeps the main turn uncluttered while the full nested
- * events remain one click away.
- *
- * The row mirrors the visual weight of the tool-call group bar: no border —
- * just a compact summary line (status icon + friendly name + description +
- * tool-count tag). It is the subagent counterpart of ToolCallRow.
+ * opens the panel. No expand arrow / status text here: the row is a plain
+ * clickable line (it is a <div>, not an antd Collapse).
  */
 export function SubagentRow({
   event,
@@ -30,10 +33,10 @@ export function SubagentRow({
   /** Called when the user clicks the row — opens the side panel on this subagent. */
   onOpen?: (event: SubagentEvent) => void;
 }) {
-  const tools = event.events.filter((e) => e.type === "tool");
-  const toolCount = tools.length;
   const streaming = event.status === "streaming";
-  const active = isActive ?? streaming;
+  // `isActive` reflects the parent turn's streaming state; the row's own
+  // streaming flag drives the spinner.
+  void isActive;
 
   const statusIcon = streaming ? (
     <LoadingOutlined style={{ color: "var(--color-info-700)" }} />
@@ -41,8 +44,7 @@ export function SubagentRow({
     <CheckCircleFilled style={{ color: "var(--gray-400)" }} />
   );
 
-  const uniqueNames = Array.from(new Set(tools.map((t) => (t.type === "tool" ? t.entry.name : ""))));
-  const visibleNames = uniqueNames.slice(0, 3);
+  const intent = event.description?.trim();
 
   return (
     <div
@@ -63,7 +65,7 @@ export function SubagentRow({
         fontWeight: 500,
         color: "var(--gray-500)",
         letterSpacing: "0.025em",
-        flexWrap: "wrap",
+        minWidth: 0,
         cursor: "pointer",
         padding: "4px 6px",
         borderRadius: 6,
@@ -78,55 +80,24 @@ export function SubagentRow({
     >
       {statusIcon}
       <RobotOutlined style={{ fontSize: 12 }} />
-      <span style={{ color: "var(--gray-700)" }}>
+      <span style={{ color: "var(--gray-400)", flexShrink: 0 }}>子智能体</span>
+      <span style={{ color: "var(--gray-700)", flexShrink: 0 }}>
         {event.displayName || event.agentNs || "未命名子智能体"}
       </span>
-      {event.description && (
+      {intent && (
         <span
-          title={event.description}
+          title={intent}
           style={{
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
             color: "var(--gray-400)",
-            maxWidth: 320,
+            minWidth: 0,
           }}
         >
-          {truncate(event.description, 40)}
+          {truncate(intent, 60)}
         </span>
       )}
-      {visibleNames.map((n) => (
-        <span
-          key={n}
-          style={{
-            fontSize: 11,
-            lineHeight: "18px",
-            background: "transparent",
-            border: "1px solid var(--gray-200)",
-            color: "var(--gray-500)",
-            padding: "0 6px",
-            borderRadius: 4,
-          }}
-        >
-          {n}
-        </span>
-      ))}
-      {uniqueNames.length > visibleNames.length && (
-        <span style={{ fontSize: 11, color: "var(--gray-400)" }}>
-          +{uniqueNames.length - visibleNames.length}
-        </span>
-      )}
-      <span style={{ marginLeft: "auto", fontSize: 11 }}>
-        <span style={{ color: streaming ? "var(--color-info-700)" : "var(--color-success-700)" }}>
-          {active
-            ? toolCount > 0
-              ? `执行中 · ${toolCount} 个工具`
-              : "执行中"
-            : toolCount > 0
-              ? `完成 · ${toolCount} 个工具`
-              : "完成"}
-        </span>
-      </span>
     </div>
   );
 }

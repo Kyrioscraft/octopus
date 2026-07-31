@@ -75,7 +75,10 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
         color: "var(--gray-500)",
         letterSpacing: "0.025em",
         minWidth: 0,
-        flex: 1,
+        // NOTE: deliberately NO `flex: 1`. With flex:1 the header would stretch
+        // to fill the row, pushing antd's expand arrow (expandIconPosition="end")
+        // all the way to the right edge. Without it, the arrow sits right after
+        // the header content instead of right-aligning.
       }}
     >
       <StatusIcon status={entry.status} />

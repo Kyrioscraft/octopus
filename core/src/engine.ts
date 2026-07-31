@@ -335,8 +335,6 @@ export async function* wrapAgentStream(
   // final result) arrives back at the main agent. This drives the UI's
   // "collapse on completion" behavior for nested subagent timelines.
   const activeSubagentByCallId = new Map<string, string>();
-  // Placeholder counter for task calls without an id (rare).
-  let placeholderSeq = 0;
   // Map: placeholder key (from subagent_started) → resolved tools:<run-id> (the
   // real instance key, learned from the first internal chunk). Used so
   // subagent_finished can emit the SAME key the frontend rebinds to.
@@ -344,6 +342,27 @@ export async function* wrapAgentStream(
   // Reverse map: tools:<run-id> → placeholder key, so we can look up which
   // pending subagent an internal chunk belongs to (for binding on first sight).
   const instanceToPlaceholder = new Map<string, string>();
+  // Instance keys of subagents that have started streaming but not yet been
+  // marked finished. Used by the completion heuristic below: the deepagents SDK
+  // executes the `task` tool internally and does NOT stream its ToolMessage
+  // result back through the main agent's message stream (verified empirically:
+  // the task tool_call_id never appears as a type:"tool" chunk). The reliable
+  // completion signal is therefore "the main agent resumes emitting chunks"
+  // (agentNs becomes undefined again) after subagent chunks were flowing — at
+  // that point every still-active instance is guaranteed to have returned,
+  // because the `task` tool blocks until its subagent finishes.
+  const activeInstances = new Set<string>();
+  // Accumulate the `task` tool call's streaming args (tool_call_chunks come in
+  // fragments; the complete `tool_calls[i].args` is `{}` during streaming, so
+  // we must reconstruct the args ourselves to read `description` /
+  // `subagent_type`). Keyed by the call id; the index→id bridge (learned from
+  // the first chunk's id) lets nameless continuation fragments resolve.
+  // This drives the subagent_started emit: we DELAY emitting subagent_started
+  // until the args are complete enough to yield a description, so the row's
+  // "intent" text is accurate instead of empty.
+  const taskArgsBuf = new Map<string, string>(); // callId → accumulated args JSON string
+  const taskIndexToId = new Map<number, string>(); // tool_call_chunks index → callId
+  const taskStarted = new Set<string>(); // callIds already emitted as subagent_started
 
   for await (const chunk of eventStream) {
     const unpacked = unpackChunk(chunk);
@@ -388,14 +407,21 @@ export async function* wrapAgentStream(
     //   - subagent token: "tools:<run-id>|model_request:<uuid>"
     //   - subagent tool:  "tools:<run-id>|tools:<tool-id>"
     //
-    // We extract the leading `tools:<run-id>` as the instance key. Anything
-    // after the first `|` (model_request / inner tools) belongs to the SAME
-    // invocation and must nest under the same key.
+    // CRITICAL DISAMBIGUATION: a leading `tools:` segment is NOT sufficient to
+    // identify a subagent chunk. The MAIN AGENT'S OWN tool calls also execute
+    // under a `tools:<run-id>` namespace (e.g. its direct `ls` call), and their
+    // result chunks carry `tools:<run-id>` WITHOUT an `lc_agent_name`. Only the
+    // deepagents SDK sets `lc_agent_name`, and only on subagent (subgraph)
+    // chunks. So we require BOTH conditions to treat a chunk as subagent-owned:
+    //   (1) ns starts with `tools:`, AND
+    //   (2) metadata.lc_agent_name is present.
+    // Without (2), the chunk is a main-agent tool call/result and is treated as
+    // agentNs = undefined (it belongs on the main timeline).
     const lcAgentName = meta?.lc_agent_name as string | undefined;
     let agentNs: string | undefined;
     if (ns) {
       const firstSeg = ns.split("|")[0];
-      if (firstSeg.startsWith("tools:")) {
+      if (firstSeg.startsWith("tools:") && lcAgentName) {
         agentNs = firstSeg; // unique per-invocation instance key
         // Bind this instance key to its pending placeholder (FIFO: the earliest
         // unresolved placeholder corresponds to the earliest-started subagent).
@@ -405,6 +431,8 @@ export async function* wrapAgentStream(
             if (!placeholderToInstance.has(placeholder)) {
               placeholderToInstance.set(placeholder, agentNs);
               instanceToPlaceholder.set(agentNs, placeholder);
+              // This subagent is now actively streaming its internal timeline.
+              activeInstances.add(agentNs);
               break;
             }
           }
@@ -413,44 +441,87 @@ export async function* wrapAgentStream(
     }
 
     // Emit subagent_started when the main agent invokes the `task` tool.
-    // Check both content-block tool_calls and the top-level array.
     //
-    // NOTE: at this point we do NOT yet know the subagent's `tools:<run-id>`
+    // The `task` call's args (subagent_type + description) are NOT available on
+    // the complete `tool_calls` array during streaming — that array carries
+    // name + id but `args: {}` until the message is fully assembled. The args
+    // arrive only as `tool_call_chunks` fragments. So we accumulate the args
+    // string per call id (bridging nameless continuation fragments via index),
+    // and DELAY emitting subagent_started until the args parse into a usable
+    // subagent_type + description. This makes the row's "intent" accurate.
+    //
+    // NOTE: at emit time we still do NOT know the subagent's `tools:<run-id>`
     // instance key (that appears only once the subgraph starts streaming). So
-    // we emit `subagent_started` with the requested `subagent_type` as a
-    // PLACEHOLDER agentNs plus a display name. The frontend rebinds the
-    // placeholder to the real `tools:<run-id>` when the first internal chunk
-    // arrives (see TurnEventAccumulator.rebindPendingSubagent).
+    // subagent_started uses the requested `subagent_type` as a PLACEHOLDER
+    // agentNs; the frontend rebinds it to the real key on the first internal
+    // chunk (see TurnEventAccumulator.rebindPendingSubagent).
     if (!agentNs && type === "ai") {
+      // 1) Seed the index→id bridge from any complete tool_calls entry (the
+      //    first delta carries name + id alongside the chunks).
       const allCalls = toolCalls.length > 0 ? toolCalls : (msg.tool_calls as Array<Record<string, unknown>> | undefined) ?? [];
-      for (const tc of allCalls) {
-        if (tc.name === "task") {
-          const tcArgs = (tc.args ?? {}) as Record<string, unknown>;
-          const saType = (tcArgs.subagent_type as string) ?? "general-purpose";
-          const entry = ctx.subagentRegistry.get(saType);
-          // Placeholder key unique per task call (so two concurrent task calls
-          // get two distinct placeholders). The frontend rebinds this to the
-          // real `tools:<run-id>` once the subagent's stream begins.
-          const placeholderKey = `pending:${tc.id ?? `noid_${placeholderSeq++}`}`;
-          if (typeof tc.id === "string" && tc.id) {
-            activeSubagentByCallId.set(tc.id, placeholderKey);
-          }
-          yield {
-            type: "subagent_started",
-            agentNs: placeholderKey,
-            description: (tcArgs.description as string) ?? "",
-            systemPrompt: entry?.systemPrompt ?? "",
-            subagentName: saType,
-            requestId: ctx.requestId,
-          };
+      for (let i = 0; i < allCalls.length; i++) {
+        const tc = allCalls[i];
+        if (tc?.name === "task" && typeof tc.id === "string" && tc.id) {
+          taskIndexToId.set(i, tc.id);
         }
+      }
+      // 2) Accumulate task args from streaming fragments.
+      for (let i = 0; i < toolCallChunks.length; i++) {
+        const tcc = toolCallChunks[i];
+        if (!tcc || tcc.name !== "task") {
+          // A nameless fragment still belongs to task if its index maps to a
+          // task call id we already seeded.
+          const idx = typeof tcc?.index === "number" ? tcc.index : Number(tcc?.index);
+          if (!taskIndexToId.has(Number.isNaN(idx) ? i : idx)) continue;
+        }
+        if (typeof tcc.args !== "string" || tcc.args.length === 0) continue;
+        const idx = typeof tcc.index === "number" ? tcc.index : Number(tcc.index);
+        const callId =
+          (typeof tcc.id === "string" && tcc.id ? tcc.id : undefined) ??
+          taskIndexToId.get(Number.isNaN(idx) ? i : idx);
+        if (!callId) continue;
+        taskIndexToId.set(Number.isNaN(idx) ? i : idx, callId);
+        taskArgsBuf.set(callId, (taskArgsBuf.get(callId) ?? "") + tcc.args);
+      }
+      // 3) For any task call id whose args JSON looks complete (ends with `}`),
+      //    emit subagent_started exactly once. Description may be empty (some
+      //    task calls omit it) — the row still needs to appear; we just won't
+      //    have an intent to show in that case.
+      for (const [callId, argsStr] of taskArgsBuf) {
+        if (taskStarted.has(callId)) continue;
+        if (!argsStr.trimEnd().endsWith("}")) continue;
+        const parsed = safeParse(argsStr);
+        const saType = (parsed.subagent_type as string) ?? "general-purpose";
+        const description = typeof parsed.description === "string" ? parsed.description : "";
+        taskStarted.add(callId);
+        const entry = ctx.subagentRegistry.get(saType);
+        const placeholderKey = `pending:${callId}`;
+        activeSubagentByCallId.set(callId, placeholderKey);
+        yield {
+          type: "subagent_started",
+          agentNs: placeholderKey,
+          description,
+          systemPrompt: entry?.systemPrompt ?? "",
+          subagentName: saType,
+          requestId: ctx.requestId,
+        };
       }
     }
 
-    // Emit subagent_finished when the main agent receives the `task` tool's
-    // result (the subagent's final report). Match by tool_call_id against the
-    // active subagents tracked above. Signals the UI to collapse the nested
-    // subagent timeline from "streaming" to "done".
+    // Emit subagent_finished when EITHER:
+    //  (a) the main agent receives the `task` tool's result as a ToolMessage
+    //      (match by tool_call_id) — works for providers that surface the task
+    //      result in the stream; OR
+    //  (b) the main agent RESUMES emitting chunks (agentNs is undefined) after
+    //      one or more subagent instances were actively streaming — works for
+    //      the deepagents SDK, which executes `task` internally and never
+    //      streams its ToolMessage result back (verified empirically).
+    //
+    // The heuristic (b) is reliable because the `task` tool BLOCKS until its
+    // subagent returns: the main agent cannot produce any chunk of its own
+    // (tokens/reasoning/tool_calls) until every subagent it invoked has
+    // finished. So a main-agent chunk while instances are active ⇒ all active
+    // instances are done.
     if (type === "tool" && msg.tool_call_id) {
       const finishedNs = activeSubagentByCallId.get(msg.tool_call_id);
       if (finishedNs) {
@@ -460,8 +531,16 @@ export async function* wrapAgentStream(
         // match this finished marker. Falls back to the placeholder if no
         // internal chunk was ever seen (subagent produced no streamed output).
         const instanceKey = placeholderToInstance.get(finishedNs) ?? finishedNs;
+        activeInstances.delete(instanceKey);
         yield { type: "subagent_finished", agentNs: instanceKey, requestId: ctx.requestId };
       }
+    }
+    if (!agentNs && activeInstances.size > 0) {
+      // Main agent resumed ⇒ every still-active subagent has returned.
+      for (const instanceKey of activeInstances) {
+        yield { type: "subagent_finished", agentNs: instanceKey, requestId: ctx.requestId };
+      }
+      activeInstances.clear();
     }
 
     // Build the msg payload forwarded to the client. Carry whichever tool-call
