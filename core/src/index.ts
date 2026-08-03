@@ -120,3 +120,11 @@ export {
   PROVIDER_BASE_URL_ENV,
   DEFAULT_AGENT_ID,
 } from "./constants.js";
+
+// Built-in slash commands
+export {
+  BUILTIN_SLASH_COMMANDS,
+  type BuiltinSlashCommand,
+  type SlashCommandKind,
+  type SystemAction,
+} from "./builtin_commands.js";

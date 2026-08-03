@@ -9,19 +9,22 @@ import {
   type BuiltinSkillSpec,
   type McpServerEntry,
   type SubagentEntry,
+  type SlashCommandEntry,
 } from "@octopus/tentacle";
 import { SkillCardList } from "../components/extensions/SkillCardList.js";
 import { McpCardList } from "../components/extensions/McpCardList.js";
 import { SubagentCardList } from "../components/extensions/SubagentCardList.js";
+import { SlashCommandCardList } from "../components/extensions/SlashCommandCardList.js";
 
 const sdk = new OctopusClient();
 
-export type ExtensionsTab = "skills" | "mcp" | "subagents";
+export type ExtensionsTab = "skills" | "mcp" | "subagents" | "commands";
 
 const TAB_TITLES: Record<ExtensionsTab, string> = {
   skills: "Skills",
   mcp: "MCP",
   subagents: "子智能体",
+  commands: "斜杠命令",
 };
 
 interface ExtensionsPageProps {
@@ -44,6 +47,8 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
   const [mcpLoading, setMcpLoading] = useState(false);
   const [subagents, setSubagents] = useState<SubagentEntry[]>([]);
   const [subagentsLoading, setSubagentsLoading] = useState(false);
+  const [slashCommands, setSlashCommands] = useState<SlashCommandEntry[]>([]);
+  const [slashCommandsLoading, setSlashCommandsLoading] = useState(false);
 
   const loadSkills = useCallback(async () => {
     setSkillsLoading(true);
@@ -84,12 +89,24 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
     }
   }, []);
 
+  const loadSlashCommands = useCallback(async () => {
+    setSlashCommandsLoading(true);
+    try {
+      setSlashCommands(await sdk.listSlashCommands());
+    } catch {
+      setSlashCommands([]);
+    } finally {
+      setSlashCommandsLoading(false);
+    }
+  }, []);
+
   // Load the active tab's data when the tab changes.
   useEffect(() => {
     if (tab === "skills") loadSkills();
     if (tab === "mcp") loadMcp();
     if (tab === "subagents") loadSubagents();
-  }, [tab, loadSkills, loadMcp, loadSubagents]);
+    if (tab === "commands") loadSlashCommands();
+  }, [tab, loadSkills, loadMcp, loadSubagents, loadSlashCommands]);
 
   // Builtin skills available for installation (status === not_installed).
   const builtinAvailable = builtinSkills.filter((b) => b.status === "not_installed");
@@ -116,7 +133,8 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
           prefix={<Search style={{ color: "var(--gray-400)" }} />}
           placeholder={
             tab === "skills" ? "搜索 Skill..." :
-            tab === "mcp" ? "搜索 MCP..." : "搜索子智能体..."
+            tab === "mcp" ? "搜索 MCP..." :
+            tab === "subagents" ? "搜索子智能体..." : "搜索命令..."
           }
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -142,12 +160,19 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
               search={search}
               onReload={loadMcp}
             />
-          ) : (
+          ) : tab === "subagents" ? (
             <SubagentCardList
               subagents={subagents}
               loading={subagentsLoading}
               search={search}
               onReload={loadSubagents}
+            />
+          ) : (
+            <SlashCommandCardList
+              commands={slashCommands}
+              loading={slashCommandsLoading}
+              search={search}
+              onReload={loadSlashCommands}
             />
           )}
         </div>

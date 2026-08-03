@@ -1,13 +1,14 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button, Tooltip } from "antd";
-import { ArrowLeft, BookOpen, Plug, Bot } from "lucide-react";
+import { ArrowLeft, BookOpen, Plug, Bot, Terminal } from "lucide-react";
 
-type Tab = "skills" | "mcp" | "subagents";
+type Tab = "skills" | "mcp" | "subagents" | "commands";
 
 const MENU_ITEMS: { key: Tab; path: string; icon: React.ReactNode; label: string }[] = [
   { key: "skills", path: "/extensions/skills", icon: <BookOpen />, label: "技能" },
   { key: "mcp", path: "/extensions/mcp", icon: <Plug />, label: "MCP服务器" },
   { key: "subagents", path: "/extensions/subagents", icon: <Bot />, label: "子智能体" },
+  { key: "commands", path: "/extensions/commands", icon: <Terminal />, label: "斜杠命令" },
 ];
 
 /**
@@ -27,7 +28,9 @@ export function ExtensionsSidebar() {
     ? "mcp"
     : path.startsWith("/extensions/subagent")
       ? "subagents"
-      : "skills";
+      : path.startsWith("/extensions/command")
+        ? "commands"
+        : "skills";
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>

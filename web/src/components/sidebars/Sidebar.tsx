@@ -105,6 +105,14 @@ export function Sidebar() {
   const [dirBrowserOpen, setDirBrowserOpen] = useState(false);
 
   const openSearch = useCallback(() => setSearchOpen(true), []);
+
+  // Listen for slash-command /search event.
+  useEffect(() => {
+    const handler = () => setSearchOpen(true);
+    window.addEventListener("octopus:open-search", handler);
+    return () => window.removeEventListener("octopus:open-search", handler);
+  }, []);
+
   const closeSearch = useCallback(() => {
     setSearchOpen(false);
     setQuery("");

@@ -144,3 +144,27 @@ export const userSubagents = sqliteTable(
     uniq: uniqueIndex("usub_user_name").on(t.userId, t.name),
   }),
 );
+
+// =============================================================================
+// User-defined slash commands — input shortcuts with prompt templates
+// =============================================================================
+
+export const userSlashCommands = sqliteTable(
+  "user_slash_commands",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    displayName: text("display_name").notNull(),
+    description: text("description").notNull(),
+    promptTemplate: text("prompt_template").notNull(),
+    action: text("action").notNull().default("insert"),
+    category: text("category"),
+    icon: text("icon"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({
+    uniq: uniqueIndex("usc_user_name").on(t.userId, t.name),
+  }),
+);

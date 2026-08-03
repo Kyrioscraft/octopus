@@ -56,6 +56,7 @@ export function App() {
             <Route path="/extensions/skills" element={<ExtensionsPage tab="skills" />} />
             <Route path="/extensions/mcp" element={<ExtensionsPage tab="mcp" />} />
             <Route path="/extensions/subagents" element={<ExtensionsPage tab="subagents" />} />
+            <Route path="/extensions/commands" element={<ExtensionsPage tab="commands" />} />
             <Route path="/extensions/skill/:name" element={<SkillDetailPage />} />
             <Route path="/extensions/mcp/:name" element={<McpDetailPage />} />
             <Route path="/extensions/subagent/:name" element={<SubagentDetailPage />} />

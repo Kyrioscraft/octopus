@@ -7,6 +7,9 @@ import {
   Zap,
 } from "lucide-react";
 import { ACCESS_MODES, MODE_ORDER, type AccessMode } from "../constants.js";
+import { SlashCommandMenu } from "./SlashCommandMenu.js";
+import type { SlashCommandEntry } from "@octopus/tentacle";
+import { useState, useCallback, useRef } from "react";
 
 const { TextArea } = Input;
 
@@ -41,6 +44,9 @@ export function InputBar({
   onSend,
   onStop,
   showStart,
+  commands,
+  onSlashSelect,
+  onSystemCommand,
 }: {
   text: string;
   setText: (v: string) => void;
@@ -58,6 +64,9 @@ export function InputBar({
   onSend: () => void;
   onStop: () => void;
   showStart: boolean;
+  commands: SlashCommandEntry[];
+  onSlashSelect: (cmd: SlashCommandEntry) => void;
+  onSystemCommand: (cmd: SlashCommandEntry) => void;
 }) {
   const ppStyle: React.CSSProperties = {
     padding: "4px 8px", cursor: "pointer", fontSize: 13, borderRadius: 4,
@@ -69,15 +78,67 @@ export function InputBar({
     display: "flex", alignItems: "center",
   };
 
+  // ---- Slash-command state ----
+  const [slashMenuVisible, setSlashMenuVisible] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Detect `/` at the start of input — show/hide the command menu.
+  const handleTextChange = useCallback(
+    (v: string) => {
+      setText(v);
+      // Show menu when input starts with `/` and hasn't hit a space yet.
+      if (v.startsWith("/") && !v.includes(" ")) {
+        setSlashQuery(v.slice(1));
+        setSlashMenuVisible(true);
+      } else {
+        setSlashMenuVisible(false);
+        setSlashQuery("");
+      }
+    },
+    [setText],
+  );
+
+  const handleSlashSelect = useCallback(
+    (cmd: SlashCommandEntry) => {
+      setSlashMenuVisible(false);
+      setSlashQuery("");
+      if (cmd.kind === "system") {
+        // System command: execute directly, no text insertion.
+        onSystemCommand(cmd);
+        // Clear the `/command` prefix from the input.
+        setText("");
+        return;
+      }
+      // Prompt command: replace `/command` with the template.
+      const afterSlash = text.slice(1);
+      const spaceIdx = afterSlash.indexOf(" ");
+      const userInput = spaceIdx > 0 ? afterSlash.slice(spaceIdx + 1) : "";
+      const template = (cmd.promptTemplate ?? "").replace("{input}", userInput);
+      setText(template);
+      onSlashSelect(cmd);
+    },
+    [text, setText, onSlashSelect, onSystemCommand],
+  );
+
   return (
-    <div style={{
+    <div ref={containerRef} style={{
+      position: "relative",
       display: "flex", flexDirection: "column",
-      background: "var(--gray-0)",
-      border: `1px solid ${ACCESS_MODES[accessMode].borderColor}`,
+      background: "var(--gray-25)",
+      border: "1px solid var(--gray-150)",
       borderRadius: 13, padding: "10px 10px 8px",
       boxShadow: "0 2px 8px var(--shadow-1)",
-      transition: "box-shadow 0.3s ease, border-color 0.3s ease",
+      transition: "box-shadow 0.3s ease",
     }}>
+      {/* Slash-command autocomplete menu (above the textarea) */}
+      <SlashCommandMenu
+        commands={commands}
+        query={slashQuery}
+        visible={slashMenuVisible}
+        onSelect={handleSlashSelect}
+      />
+
       {/* High-privilege banner: surfaces the risk whenever an autonomous mode
           is armed so the user knows changes will apply without per-step
           approval. `auto` still redirects shell file-writes to edit/write_file;
@@ -120,7 +181,7 @@ export function InputBar({
 
       {/* Textarea (taller) */}
       <TextArea
-        value={text} onChange={(e) => setText(e.target.value)}
+        value={text} onChange={(e) => handleTextChange(e.target.value)}
         onKeyDown={onKey}
         placeholder={ACCESS_MODES[accessMode].placeholder}
         autoSize={showStart ? { minRows: 3, maxRows: 8 } : { minRows: 2, maxRows: 8 }}

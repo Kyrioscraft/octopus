@@ -102,6 +102,21 @@ export interface UserSubagentRow {
   updatedAt: string;
 }
 
+/** A user-defined slash command row (origin="user-defined"). */
+export interface UserSlashCommandRow {
+  id: string;
+  userId: string;
+  name: string;
+  displayName: string;
+  description: string;
+  promptTemplate: string;
+  action: "insert" | "send";
+  category: string | null;
+  icon: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // -----------------------------------------------------------------------------
 // Connection management — module-level singleton, lazily initialized.
 // -----------------------------------------------------------------------------
@@ -195,6 +210,20 @@ function getDb(): BetterSQLite3Database<typeof schema> {
       enabled       TEXT NOT NULL,
       created_at    TEXT NOT NULL,
       updated_at    TEXT NOT NULL,
+      UNIQUE(user_id, name)
+    );
+    CREATE TABLE IF NOT EXISTS user_slash_commands (
+      id              TEXT PRIMARY KEY,
+      user_id         TEXT NOT NULL,
+      name            TEXT NOT NULL,
+      display_name    TEXT NOT NULL,
+      description     TEXT NOT NULL,
+      prompt_template TEXT NOT NULL,
+      action          TEXT NOT NULL DEFAULT 'insert',
+      category        TEXT,
+      icon            TEXT,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL,
       UNIQUE(user_id, name)
     );
 
@@ -929,4 +958,96 @@ export function listThreadsByWorkspace(
       .all();
   }
   return rows.map((t) => mapThread(t, []));
+}
+
+// =============================================================================
+// User-defined slash commands
+// =============================================================================
+
+export function listUserSlashCommands(userId: string): UserSlashCommandRow[] {
+  return getDb()
+    .select()
+    .from(schema.userSlashCommands)
+    .where(eq(schema.userSlashCommands.userId, userId))
+    .all()
+    .map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      name: r.name,
+      displayName: r.displayName,
+      description: r.description,
+      promptTemplate: r.promptTemplate,
+      action: r.action as UserSlashCommandRow["action"],
+      category: r.category ?? null,
+      icon: r.icon ?? null,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+}
+
+export function getUserSlashCommand(userId: string, id: string): UserSlashCommandRow | undefined {
+  const db = getDb();
+  const r = db
+    .select()
+    .from(schema.userSlashCommands)
+    .where(
+      and(eq(schema.userSlashCommands.userId, userId), eq(schema.userSlashCommands.id, id)),
+    )
+    .get();
+  return r
+    ? {
+        id: r.id,
+        userId: r.userId,
+        name: r.name,
+        displayName: r.displayName,
+        description: r.description,
+        promptTemplate: r.promptTemplate,
+        action: r.action as UserSlashCommandRow["action"],
+        category: r.category ?? null,
+        icon: r.icon ?? null,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }
+    : undefined;
+}
+
+export function upsertUserSlashCommand(row: UserSlashCommandRow): void {
+  const now = new Date().toISOString();
+  getDb()
+    .insert(schema.userSlashCommands)
+    .values({
+      id: row.id,
+      userId: row.userId,
+      name: row.name,
+      displayName: row.displayName,
+      description: row.description,
+      promptTemplate: row.promptTemplate,
+      action: row.action,
+      category: row.category,
+      icon: row.icon,
+      createdAt: row.createdAt ?? now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [schema.userSlashCommands.userId, schema.userSlashCommands.name],
+      set: {
+        displayName: row.displayName,
+        description: row.description,
+        promptTemplate: row.promptTemplate,
+        action: row.action,
+        category: row.category,
+        icon: row.icon,
+        updatedAt: now,
+      },
+    })
+    .run();
+}
+
+export function deleteUserSlashCommand(userId: string, id: string): void {
+  getDb()
+    .delete(schema.userSlashCommands)
+    .where(
+      and(eq(schema.userSlashCommands.userId, userId), eq(schema.userSlashCommands.id, id)),
+    )
+    .run();
 }

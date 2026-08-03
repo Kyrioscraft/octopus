@@ -651,3 +651,79 @@ export interface WorkspaceUploadResult {
   name: string;
   size: number;
 }
+
+// =============================================================================
+// Slash commands — user-customizable input shortcuts
+// =============================================================================
+
+/** Discriminator: system commands execute app actions; prompt commands insert templates. */
+export type SlashCommandKind = "system" | "prompt";
+
+/** Actions for built-in system commands. Maps to platform-specific behavior. */
+export type SystemAction =
+  | "clear"
+  | "theme"
+  | "help"
+  | "copy-last"
+  | "search"
+  | "changelog"
+  | "version"
+  | "feedback"
+  | "docs"
+  | { type: "navigate"; path: string }
+  // TUI-only (reserved)
+  | "model"
+  | "agents"
+  | "editor"
+  | "quit"
+  | "notifications"
+  | "threads"
+  | "update"
+  | "install"
+  | "auto-update"
+  | "tokens"
+  | "trace"
+  | "offload"
+  | "remember"
+  | "skill-creator";
+
+/** Platform filter for built-in commands (user-defined have no platform restriction). */
+export type SlashCommandPlatform = "web" | "tui" | "all";
+
+/** Where a slash-command entry came from — determines editability. */
+export type SlashCommandOrigin = "builtin" | "user-defined";
+
+/** A slash-command entry in the unified config view. */
+export interface SlashCommandEntry {
+  id: string;
+  /** Command name (e.g. "clear", "translate"). */
+  name: string;
+  /** Human-readable display name (e.g. "清空对话"). */
+  displayName: string;
+  /** Short description shown in the autocomplete menu. */
+  description: string;
+  /** "system" = built-in app action; "prompt" = user-defined template. */
+  kind: SlashCommandKind;
+  /** System command action (only when kind === "system"). */
+  systemAction?: SystemAction | null;
+  /** Template with {input} placeholder (only when kind === "prompt"). */
+  promptTemplate?: string | null;
+  /** "insert" = fill template; "send" = fill + auto-send (only when kind === "prompt"). */
+  action?: "insert" | "send" | null;
+  origin: SlashCommandOrigin;
+  editable: boolean;
+  /** Built-in-command platform tag. Null for user-defined commands. */
+  platform?: SlashCommandPlatform | null;
+  /** Optional grouping category. */
+  category?: string | null;
+}
+
+/** Create/update slash command request body (user-defined prompt commands only). */
+export interface SlashCommandWriteRequest {
+  name?: string;
+  displayName?: string;
+  description?: string;
+  promptTemplate?: string;
+  action?: "insert" | "send";
+  category?: string | null;
+}

@@ -54,4 +54,10 @@ export {
   type HostBrowseResult,
   type SandboxSettings,
   type SandboxSettingsPatch,
+  type SlashCommandOrigin,
+  type SlashCommandKind,
+  type SystemAction,
+  type SlashCommandPlatform,
+  type SlashCommandEntry,
+  type SlashCommandWriteRequest,
 } from "./types.js";

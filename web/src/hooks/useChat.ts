@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { message as antdMessage } from "antd";
 import {
   OctopusClient,
   type StreamEvent,
@@ -6,6 +7,7 @@ import {
   type AskUserQuestionPayload,
   type AskQuestion,
   type ResumeRequestBody,
+  type SlashCommandEntry,
 } from "@octopus/tentacle";
 import { TurnEventAccumulator, contentFromEvents } from "../components/chat/turn/TurnEventAccumulator.js";
 import type { TurnEvent, SubagentEvent } from "../components/chat/turn/types.js";
@@ -14,6 +16,7 @@ import type { TodoItem } from "../components/chat/companion/types.js";
 import type { Msg } from "../components/chat/types.js";
 import type { AccessMode } from "../components/chat/constants.js";
 import { MODE_ORDER } from "../components/chat/constants.js";
+import { useThemeStore } from "../stores/theme.js";
 
 const sdk = new OctopusClient();
 
@@ -142,9 +145,15 @@ export function useChat({
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [modelProviders, setModelProviders] = useState<ModelProviderEntry[]>([]);
   const [attachments, setAttachments] = useState<string[]>([]);
+  const [commands, setCommands] = useState<SlashCommandEntry[]>([]);
 
   const attachInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  // textRef mirrors `text` so callbacks that fire before React re-renders
+  // (e.g. slash-command auto-send) can read the latest value.
+  const textRef = useRef(text);
+  textRef.current = text;
 
   // Per-turn event accumulator. A fresh one is created at the start of each
   // assistant turn and consumed across all stream chunks.
@@ -168,9 +177,16 @@ export function useChat({
     } catch { /* */ }
   }, []);
 
+  const loadCommands = useCallback(async () => {
+    try {
+      setCommands(await sdk.listSlashCommands("web"));
+    } catch { /* */ }
+  }, []);
+
   useEffect(() => {
     listThreads();
     loadModelProviders();
+    loadCommands();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeWorkspaceId]);
 
@@ -449,6 +465,89 @@ export function useChat({
     setAttachments((prev) => prev.filter((_, j) => j !== index));
   }, []);
 
+  // ---- Slash command selection ----
+  const onSlashSelect = useCallback(
+    (cmd: SlashCommandEntry) => {
+      if (cmd.action === "send") {
+        setTimeout(() => {
+          const t = textRef.current.trim();
+          if (!t || busy) return;
+          setText("");
+          send(t);
+        }, 0);
+      }
+    },
+    [busy, send, setText],
+  );
+
+  // ---- System command dispatcher ----
+  const handleSystemCommand = useCallback(
+    (cmd: SlashCommandEntry) => {
+      const action = cmd.systemAction;
+      if (!action) return;
+
+      // Object actions (navigate)
+      if (typeof action === "object" && "type" in action) {
+        if (action.type === "navigate") {
+          window.location.href = action.path;
+        }
+        return;
+      }
+
+      // String actions
+      switch (action as string) {
+        case "clear":
+          setMsgs([]);
+          setActiveThreadId(undefined);
+          break;
+        case "theme": {
+          const { mode, setMode } = useThemeStore.getState();
+          const next =
+            mode === "light" ? "dark" : mode === "dark" ? "system" : "light";
+          setMode(next);
+          antdMessage.success(`主题已切换为 ${next === "light" ? "浅色" : next === "dark" ? "深色" : "跟随系统"}`);
+          break;
+        }
+        case "search":
+          // Dispatch a custom event that Sidebar listens for to open the
+          // global search modal. Fallback: Ctrl+K simulation.
+          window.dispatchEvent(new CustomEvent("octopus:open-search"));
+          break;
+        case "copy-last": {
+          const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
+          if (lastAssistant?.content) {
+            navigator.clipboard.writeText(lastAssistant.content).then(
+              () => antdMessage.success("已复制到剪贴板"),
+              () => antdMessage.error("复制失败"),
+            );
+          } else {
+            antdMessage.warning("没有可复制的内容");
+          }
+          break;
+        }
+        case "help":
+          antdMessage.info("快捷键：Enter 发送，Shift+Enter 换行，Shift+Tab 切换模式，Ctrl+K 搜索，/ 打开命令菜单");
+          break;
+        case "changelog":
+          window.open("https://github.com/octopus/changelog", "_blank");
+          break;
+        case "version":
+          antdMessage.info("Octopus v0.1.0");
+          break;
+        case "feedback":
+          window.open("https://github.com/octopus/issues", "_blank");
+          break;
+        case "docs":
+          window.open("https://docs.octopus.dev", "_blank");
+          break;
+        // TUI-only commands — no-op on web
+        default:
+          break;
+      }
+    },
+    [msgs, setActiveThreadId],
+  );
+
   // ---- Input send + keyboard ----
   const doSend = useCallback(() => {
     const t = text.trim();
@@ -513,8 +612,9 @@ export function useChat({
     // state
     msgs, text, setText, busy, ask, sessionAllowlist, accessMode, setAccessMode: changeAccessMode,
     selectedModel, setSelectedModel, attachments, modelOptions, todos, allSubagents, showStart,
-    attachInputRef,
+    attachInputRef, commands,
     // actions
     send, resolve, stop, doSend, onKey, load, clearMsgs, pickAttachments, removeAttachment,
+    onSlashSelect, handleSystemCommand,
   };
 }

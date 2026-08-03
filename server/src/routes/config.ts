@@ -55,6 +55,13 @@ import {
   getSandboxSettings,
   updateSandboxSettings,
 } from "../services/model.service.js";
+import {
+  listAllCommands,
+  getCommand,
+  createCommand,
+  updateCommand,
+  deleteCommand,
+} from "../services/slash-command.service.js";
 
 export const configRouter = new Hono();
 
@@ -435,6 +442,75 @@ configRouter.put("/sandbox", getOptionalUser, async (c) => {
   }>();
   try {
     return c.json(updateSandboxSettings(body));
+  } catch (err) {
+    return handleError(c, err);
+  }
+});
+
+// =============================================================================
+// Slash commands: /api/config/slash-commands
+// =============================================================================
+
+configRouter.get("/slash-commands", getOptionalUser, (c) => {
+  const userId = c.var.user.sub;
+  const platform = c.req.query("platform") as
+    | "web"
+    | "tui"
+    | "all"
+    | undefined;
+  return c.json({ commands: listAllCommands(userId, platform) });
+});
+
+configRouter.get("/slash-commands/:id", getOptionalUser, (c) => {
+  const userId = c.var.user.sub;
+  const cmd = getCommand(userId, c.req.param("id"));
+  if (!cmd) return c.json({ detail: "命令不存在" }, 404);
+  return c.json(cmd);
+});
+
+configRouter.post("/slash-commands", getOptionalUser, async (c) => {
+  const userId = c.var.user.sub;
+  const body = await c.req.json<{
+    name: string;
+    displayName: string;
+    description: string;
+    icon?: string | null;
+    promptTemplate: string;
+    action?: "insert" | "send";
+    category?: string | null;
+  }>();
+  try {
+    const command = createCommand(userId, body);
+    return c.json({ command }, 201);
+  } catch (err) {
+    return handleError(c, err);
+  }
+});
+
+configRouter.put("/slash-commands/:id", getOptionalUser, async (c) => {
+  const userId = c.var.user.sub;
+  const body = await c.req.json<{
+    name?: string;
+    displayName?: string;
+    description?: string;
+    icon?: string | null;
+    promptTemplate?: string;
+    action?: "insert" | "send";
+    category?: string | null;
+  }>();
+  try {
+    const command = updateCommand(userId, c.req.param("id"), body);
+    return c.json({ command });
+  } catch (err) {
+    return handleError(c, err);
+  }
+});
+
+configRouter.delete("/slash-commands/:id", getOptionalUser, (c) => {
+  const userId = c.var.user.sub;
+  try {
+    deleteCommand(userId, c.req.param("id"));
+    return c.json({ success: true });
   } catch (err) {
     return handleError(c, err);
   }

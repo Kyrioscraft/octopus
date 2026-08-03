@@ -117,6 +117,9 @@ export function ChatPage() {
       onSend={chat.doSend}
       onStop={chat.stop}
       showStart={chat.showStart}
+      commands={chat.commands}
+      onSlashSelect={chat.onSlashSelect}
+      onSystemCommand={chat.handleSystemCommand}
     />
   );
 

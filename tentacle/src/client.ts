@@ -20,6 +20,8 @@ import {
   type SkillDetail,
   type SkillEntry,
   type SkillWriteRequest,
+  type SlashCommandEntry,
+  type SlashCommandWriteRequest,
   type StreamCallOptions,
   type StreamEvent,
   type SubagentEntry,
@@ -375,6 +377,49 @@ export class OctopusClient {
   /** Update sandbox configuration. `apiKey` is write-only. */
   async updateSandboxSettings(patch: SandboxSettingsPatch): Promise<SandboxSettings> {
     return this.#put<SandboxSettings>("/api/config/sandbox", patch);
+  }
+
+  // =========================================================================
+  // Config — Slash commands (/api/config/slash-commands)
+  // =========================================================================
+
+  /** List all slash commands (builtin + user-defined, merged). */
+  async listSlashCommands(platform?: "web" | "tui" | "all"): Promise<SlashCommandEntry[]> {
+    const qs = platform ? `?platform=${encodeURIComponent(platform)}` : "";
+    const res = await this.#get<{ commands: SlashCommandEntry[] }>(
+      `/api/config/slash-commands${qs}`,
+    );
+    return res.commands;
+  }
+
+  /** Get a single slash command's detail. */
+  async getSlashCommand(id: string): Promise<SlashCommandEntry> {
+    return this.#get<SlashCommandEntry>(
+      `/api/config/slash-commands/${encodeURIComponent(id)}`,
+    );
+  }
+
+  /** Create a user-defined slash command. */
+  async createSlashCommand(body: SlashCommandWriteRequest): Promise<SlashCommandEntry> {
+    const res = await this.#post<{ command: SlashCommandEntry }>(
+      "/api/config/slash-commands",
+      body,
+    );
+    return res.command;
+  }
+
+  /** Update a user-defined slash command (partial). */
+  async updateSlashCommand(id: string, body: SlashCommandWriteRequest): Promise<SlashCommandEntry> {
+    const res = await this.#put<{ command: SlashCommandEntry }>(
+      `/api/config/slash-commands/${encodeURIComponent(id)}`,
+      body,
+    );
+    return res.command;
+  }
+
+  /** Delete a user-defined slash command. */
+  async deleteSlashCommand(id: string): Promise<void> {
+    await this.#delete(`/api/config/slash-commands/${encodeURIComponent(id)}`);
   }
 
   // =========================================================================

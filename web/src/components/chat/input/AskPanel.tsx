@@ -9,18 +9,20 @@
  * the surrounding `busy` state, so the user can't type a new message while a
  * question is pending (semantically: answering the question IS the input).
  *
- * Pagination: multiple questions are shown ONE AT A TIME with prev/next
- * chevrons + a "1/3" indicator. Each answered question unlocks the next;
- * the final question's primary button submits the full answer set.
+ * Pagination: multiple questions are shown ONE AT A TIME. The pagination
+ * control (prev/next chevrons + "1/3" indicator) lives in the header's
+ * top-right corner; each answered question unlocks the next, and the final
+ * question's primary button submits the full answer set.
  *
  * Three `kind`, dispatched by QuestionBody:
  *   - tool_approval : one row per pending tool call, approve/reject (+ session).
  *   - discussion    : Radio/Checkbox options + optional "Other…" free text.
  *   - clarify       : a TextArea.
  *
- * Styling is deliberately restrained — no tinted backgrounds, just spacing,
- * font-weight, and a 2px left accent rule per kind — so it reads as a
- * first-class part of the input bar rather than a foreign popup.
+ * Styling is deliberately restrained — neutral grayscale palette (no brand
+ * green), no drop shadows, just a 1px border + generous spacing so it reads
+ * as a first-class part of the input bar rather than a foreign popup.
+ * Primary actions use a solid --gray-900 fill; reject uses a red outline.
  */
 
 import { useState } from "react";
@@ -41,6 +43,46 @@ import {
 } from "lucide-react";
 
 const { TextArea } = Input;
+
+// Button style presets — clean, animated, no antd primary dependency.
+const S = {
+  mainBase: {
+    background: "var(--gray-900)",
+    color: "var(--gray-0)",
+    border: "1px solid var(--gray-900)",
+    boxShadow: "none",
+    transition: "all 0.18s ease",
+  } as React.CSSProperties,
+  mainHover: {
+    background: "var(--gray-700)",
+    border: "1px solid var(--gray-700)",
+    boxShadow: "0 1px 3px var(--shadow-1)",
+  } as React.CSSProperties,
+  mainPress: {
+    background: "var(--gray-600)",
+    border: "1px solid var(--gray-600)",
+    boxShadow: "none",
+  } as React.CSSProperties,
+
+  rejectBase: {
+    background: "transparent",
+    color: "var(--color-error-500)",
+    border: "1px solid var(--color-error-200)",
+    boxShadow: "none",
+    transition: "all 0.18s ease",
+  } as React.CSSProperties,
+  rejectHover: {
+    background: "var(--color-error-50)",
+    borderColor: "var(--color-error-500)",
+  } as React.CSSProperties,
+  rejectPress: {
+    background: "var(--color-error-100)",
+  } as React.CSSProperties,
+};
+
+/** Merge style objects — later objects override earlier ones. */
+const css = (...styles: (React.CSSProperties | undefined | false)[]): React.CSSProperties =>
+  Object.assign({}, ...styles.filter(Boolean));
 
 interface Props {
   payload: AskUserQuestionPayload;
@@ -108,33 +150,64 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
     !!current.context?.source &&
     sessionAllowlist.has(current.context.source);
 
+  // Hover/press state for the primary action button.
+  const [mainState, setMainState] = useState<"base" | "hover" | "press">("base");
+
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        background: "var(--gray-0)",
+        background: "var(--gray-25)",
         border: "1px solid var(--gray-150)",
-        borderRadius: 13,
-        padding: "12px 14px 10px",
-        boxShadow: "0 2px 8px var(--shadow-1)",
-        transition: "box-shadow 0.3s ease, border-color 0.3s ease",
+        borderRadius: 12,
+        padding: "14px 16px 12px",
       }}
     >
-      {/* Header row: kind label + pagination indicator. */}
+      {/* Header row: kind label (left) + pagination control (right). */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          marginBottom: 10,
+          marginBottom: 12,
         }}
       >
         <AskKindLabel kind={payload.kind} />
         {total > 1 && (
-          <span style={{ fontSize: 12, color: "var(--gray-400)" }}>
-            {page + 1} / {total}
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
+            <Button
+              type="text"
+              size="small"
+              icon={<ChevronLeft />}
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              style={{ color: page === 0 ? "var(--gray-200)" : "var(--gray-500)" }}
+            />
+            <span
+              style={{
+                fontSize: 12,
+                fontWeight: 500,
+                color: "var(--gray-600)",
+                minWidth: 32,
+                textAlign: "center",
+                fontVariantNumeric: "tabular-nums",
+                userSelect: "none",
+              }}
+            >
+              {page + 1} / {total}
+            </span>
+            <Button
+              type="text"
+              size="small"
+              icon={<ChevronRight />}
+              disabled={!canAdvance || isLast}
+              onClick={() => setPage((p) => Math.min(total - 1, p + 1))}
+              style={{
+                color: !canAdvance || isLast ? "var(--gray-200)" : "var(--gray-500)",
+              }}
+            />
+          </div>
         )}
       </div>
 
@@ -152,59 +225,16 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         sessionAllowed={sessionAllowed}
       />
 
-      {/* Footer toolbar — mirrors inputBar's bottom row layout:
-          left cluster (pagination), spacer, right cluster (primary action). */}
+      {/* Footer toolbar — primary action only (pagination moved to header). */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 6,
+          justifyContent: "flex-end",
+          gap: 8,
           marginTop: 12,
         }}
       >
-        {/* Left: prev chevron (disabled on first page) */}
-        <Button
-          type="text"
-          size="small"
-          icon={<ChevronLeft />}
-          disabled={page === 0}
-          onClick={() => setPage((p) => Math.max(0, p - 1))}
-        />
-        {/* Page dots when multi-question — subtle progress indicator. */}
-        {total > 1 && (
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            {payload.questions.map((q, i) => (
-              <span
-                key={q.question_id}
-                onClick={() => setPage(i)}
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  cursor: "pointer",
-                  background:
-                    i === page
-                      ? "var(--main-500)"
-                      : isAnswered(payload.questions[i])
-                        ? "var(--main-200)"
-                        : "var(--gray-200)",
-                  transition: "background 0.2s ease",
-                }}
-              />
-            ))}
-          </div>
-        )}
-        {/* Right chevron */}
-        <Button
-          type="text"
-          size="small"
-          icon={<ChevronRight />}
-          disabled={!canAdvance || isLast}
-          onClick={() => setPage((p) => Math.min(total - 1, p + 1))}
-        />
-
-        <div style={{ flex: 1 }} />
-
         {/* Right cluster: primary action. */}
         {payload.kind === "tool_approval" ? (
           <ToolApprovalActions
@@ -219,19 +249,35 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         ) : isLast ? (
           <Button
             size="small"
-            type="primary"
             icon={<Check />}
             disabled={!canAdvance}
             onClick={() => submitAll()}
+            style={css(
+              S.mainBase,
+              mainState === "hover" && S.mainHover,
+              mainState === "press" && S.mainPress,
+            )}
+            onMouseEnter={() => setMainState("hover")}
+            onMouseLeave={() => setMainState("base")}
+            onMouseDown={() => setMainState("press")}
+            onMouseUp={() => setMainState("hover")}
           >
             提交
           </Button>
         ) : (
           <Button
             size="small"
-            type="primary"
             disabled={!canAdvance}
             onClick={() => setPage((p) => Math.min(total - 1, p + 1))}
+            style={css(
+              S.mainBase,
+              mainState === "hover" && S.mainHover,
+              mainState === "press" && S.mainPress,
+            )}
+            onMouseEnter={() => setMainState("hover")}
+            onMouseLeave={() => setMainState("base")}
+            onMouseDown={() => setMainState("press")}
+            onMouseUp={() => setMainState("hover")}
           >
             下一题
           </Button>
@@ -252,7 +298,7 @@ function AskKindLabel({ kind }: { kind: AskKind }) {
       case "discussion":
         return { icon: <MessageSquare />, label: "方案选择", color: "var(--color-info-500)" };
       case "clarify":
-        return { icon: <CircleHelp />, label: "需要澄清", color: "var(--main-500)" };
+        return { icon: <CircleHelp />, label: "需要澄清", color: "var(--gray-900)" };
     }
   })();
   return (
@@ -416,16 +462,40 @@ function ToolApprovalActions({
     if (isLast) onSubmitAll();
     else onNext();
   };
+
+  const [rejectState, setRejectState] = useState<"base" | "hover" | "press">("base");
+  const [approveState, setApproveState] = useState<"base" | "hover" | "press">("base");
+
   return (
     <>
-      <Button size="small" danger onClick={() => decide({ type: "reject" })}>
+      <Button
+        size="small"
+        onClick={() => decide({ type: "reject" })}
+        style={css(
+          S.rejectBase,
+          rejectState === "hover" && S.rejectHover,
+          rejectState === "press" && S.rejectPress,
+        )}
+        onMouseEnter={() => setRejectState("hover")}
+        onMouseLeave={() => setRejectState("base")}
+        onMouseDown={() => setRejectState("press")}
+        onMouseUp={() => setRejectState("hover")}
+      >
         拒绝
       </Button>
       <Button
         size="small"
-        type="primary"
         icon={<Check />}
         onClick={() => decide({ type: "approve" })}
+        style={css(
+          S.mainBase,
+          approveState === "hover" && S.mainHover,
+          approveState === "press" && S.mainPress,
+        )}
+        onMouseEnter={() => setApproveState("hover")}
+        onMouseLeave={() => setApproveState("base")}
+        onMouseDown={() => setApproveState("press")}
+        onMouseUp={() => setApproveState("hover")}
       >
         批准
       </Button>
