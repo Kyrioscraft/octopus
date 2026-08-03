@@ -24,7 +24,6 @@
   "dependencies": {
     "@octopus/core": "workspace:*",
     "@octopus/tentacle": "workspace:*",
-    "@octopus/tui": "link:",
     "chalk": "^5.4.0",
     "commander": "^13.0.0",
     "diff": "^7.0.0",
