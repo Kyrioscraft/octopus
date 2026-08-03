@@ -13,7 +13,6 @@ import { Collapse, Tooltip } from "antd";
 import {
   CircleX,
   LoaderCircle,
-  Clock,
   Search,
 } from "lucide-react";
 
@@ -179,9 +178,8 @@ export function ToolGroupBar({ tools, isActive }: { tools: ToolEvent[]; isActive
   const allDone = pending === 0 && errored === 0 && done === total;
 
   // Single-slot icon: spinner while any tool is still in flight, the
-  // exploration-group (FileText) type icon once all done, error/pending
-  // status icons otherwise — avoids the redundancy of a status icon next
-  // to the type icon (mirrors ToolCallRow / SubagentRow).
+  // exploration-group (Search) type icon once all done (dimmed), error icon
+  // otherwise — mirrors ToolCallRow / SubagentRow.
   let leadIcon;
   if (errored > 0) {
     leadIcon = <CircleX style={{ color: "var(--color-error-500)" }} />;
@@ -190,7 +188,7 @@ export function ToolGroupBar({ tools, isActive }: { tools: ToolEvent[]; isActive
   } else if (allDone) {
     leadIcon = <Search style={{ fontSize: 13, color: "var(--gray-400)" }} />;
   } else {
-    leadIcon = <Clock style={{ color: "var(--gray-400)" }} />;
+    leadIcon = <LoaderCircle style={{ color: "var(--color-info-700)" }} />;
   }
 
   // Folded chips: up to 3 targets (file name / search term), remainder "+M".

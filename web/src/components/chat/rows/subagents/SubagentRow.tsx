@@ -38,11 +38,11 @@ export function SubagentRow({
   void isActive;
 
   // Single-slot icon: spinner while streaming, the subagent (Bot) type icon
-  // otherwise — avoids the redundancy of a status icon next to the type icon.
+  // otherwise — dimmed so completion reads as "settled" (mirrors ToolCallRow).
   const leadIcon = streaming ? (
     <LoaderCircle style={{ color: "var(--color-info-700)" }} />
   ) : (
-    <Bot style={{ fontSize: 12 }} />
+    <Bot style={{ fontSize: 13, color: "var(--gray-400)" }} />
   );
 
   const intent = event.description?.trim();

@@ -3,7 +3,6 @@ import { Collapse, Tag } from "antd";
 import {
   CircleX,
   LoaderCircle,
-  Clock,
 } from "lucide-react";
 import type { ToolCallEntry } from "./types.js";
 import { getToolIcon, getToolDisplayName } from "./registry.js";
@@ -38,22 +37,25 @@ export interface ToolCallRowProps {
 /**
  * Single-slot icon for a tool row.
  *
- * Done → the tool's own type icon (the status is implied by completion).
- * Running → a spinner (hides the type icon while in flight, avoiding the
- *           visual redundancy of "spinner + type-icon" side by side).
- * Error / pending → status icon (these states still need to stand out).
+ * Done → the tool's own type icon, dimmed (gray-400) so completion reads as
+ *         "settled" and in-flight spinners stand out by contrast.
+ * Running / pending → a spinner (no type icon while in flight).
+ * Error → CircleX (failures must pop).
  */
 function RowIcon({ name, status }: { name: string; status: ToolCallEntry["status"] }) {
   switch (status) {
     case "done":
-      return <>{getToolIcon(name)}</>;
-    case "running":
-      return <LoaderCircle style={{ color: "var(--color-info-700)" }} />;
+      return (
+        <span style={{ color: "var(--gray-400)", display: "inline-flex", alignItems: "center" }}>
+          {getToolIcon(name)}
+        </span>
+      );
     case "error":
       return <CircleX style={{ color: "var(--color-error-500)" }} />;
+    case "running":
     case "pending":
     default:
-      return <Clock style={{ color: "var(--gray-400)" }} />;
+      return <LoaderCircle style={{ color: "var(--color-info-700)" }} />;
   }
 }
 
@@ -87,7 +89,7 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
         // the header content instead of right-aligning.
       }}
     >
-      <span style={{ color: "var(--gray-600)", display: "inline-flex", alignItems: "center" }}>
+      <span style={{ display: "inline-flex", alignItems: "center" }}>
         <RowIcon name={entry.name} status={entry.status} />
       </span>
       {header ?? <span>{displayName}</span>}
