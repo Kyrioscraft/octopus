@@ -152,9 +152,6 @@ importers:
 
   web:
     dependencies:
-      '@ant-design/icons':
-        specifier: ^5.6.0
-        version: 5.6.1(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@octopus/tentacle':
         specifier: workspace:*
         version: link:../tentacle
@@ -167,6 +164,9 @@ importers:
       highlight.js:
         specifier: ^11.11.1
         version: 11.11.1
+      lucide-react:
+        specifier: ^1.28.0
+        version: 1.28.0(react@19.2.7)
       react:
         specifier: ^19.0.0
         version: 19.2.7
@@ -1820,6 +1820,11 @@ packages:
 
   lru-cache@5.1.1:
     resolution: {integrity: sha512-KpNARQA3Iwv+jTA0utUVVbrh+Jlrr1Fv0e56GGzAFOXN7dk/FviaDW8LHmK52DlcH4WP2n6gI8vN1aesBFgo9w==}
+
+  lucide-react@1.28.0:
+    resolution: {integrity: sha512-fARAFJULsGuDDydjp6+6blekG/sBIM29TerzLjc9bQUKAcEfrSc4ZQKb25KRz4OMKd87cZTb5dgq0w/T6KufVg==}
+    peerDependencies:
+      react: ^16.5.1 || ^17.0.0 || ^18.0.0 || ^19.0.0
 
   markdown-table@3.0.4:
     resolution: {integrity: sha512-wiYz4+JrLyb/DqW2hkFJxP7Vd7JuTDm77fvbM8VfEQdmSMqcImWeeRbHwZjBjIFki/VaMK2BhFi7oUUZeM5bqw==}
@@ -4487,6 +4492,10 @@ snapshots:
   lru-cache@5.1.1:
     dependencies:
       yallist: 3.1.1
+
+  lucide-react@1.28.0(react@19.2.7):
+    dependencies:
+      react: 19.2.7
 
   markdown-table@3.0.4: {}
 

@@ -1,5 +1,6 @@
 import { Button, Tooltip } from "antd";
-import { GithubOutlined, LeftSquareOutlined, RightSquareOutlined } from "@ant-design/icons";
+import { PanelRightClose, PanelRightOpen } from "lucide-react";
+import { GithubIcon } from "../widgets/GithubIcon.js";
 import { TodoBadge } from "./header/TodoBadge.js";
 import { SubagentBadge } from "./header/SubagentBadge.js";
 import type { TodoItem } from "./companion/types.js";
@@ -63,8 +64,8 @@ export function ChatHeader({
             className="hover-green"
           >
             {companionOpen
-              ? <LeftSquareOutlined style={{ fontSize: 15 }} />
-              : <RightSquareOutlined style={{ fontSize: 15 }} />}
+              ? <PanelRightClose style={{ fontSize: 15 }} />
+              : <PanelRightOpen style={{ fontSize: 15 }} />}
           </Button>
         </Tooltip>
         <Tooltip title="GitHub 仓库">
@@ -86,7 +87,7 @@ export function ChatHeader({
               e.currentTarget.style.background = "transparent";
             }}
           >
-            <GithubOutlined style={{ fontSize: 16 }} />
+            <GithubIcon size={16} />
           </a>
         </Tooltip>
       </div>

@@ -1,49 +1,49 @@
 import type { ReactNode } from "react";
 import {
-  CodeOutlined,
-  EditOutlined,
-  FileAddOutlined,
-  FileTextOutlined,
-  RobotOutlined,
-  SearchOutlined,
-  FolderOpenOutlined,
-  GlobalOutlined,
-  ToolOutlined,
-  QuestionCircleOutlined,
-} from "@ant-design/icons";
+  SquareTerminal,
+  Pencil,
+  FilePlus,
+  FileText,
+  Bot,
+  Search,
+  FolderOpen,
+  Globe,
+  Wrench,
+  CircleHelp,
+} from "lucide-react";
 
 /**
- * Tool name → icon mapping. Falls back to <ToolOutlined /> for unknown tools.
+ * Tool name → icon mapping. Falls back to <Wrench /> for unknown tools.
  * Adding a new tool only requires one line here.
  */
 export const TOOL_ICON_MAP: Record<string, ReactNode> = {
   // Shell
-  execute: <CodeOutlined />,
-  bash: <CodeOutlined />,
-  run_shell_command: <CodeOutlined />,
-  cmd: <CodeOutlined />,
+  execute: <SquareTerminal />,
+  bash: <SquareTerminal />,
+  run_shell_command: <SquareTerminal />,
+  cmd: <SquareTerminal />,
   // File edits
-  edit_file: <EditOutlined />,
-  replace: <EditOutlined />,
-  write_file: <FileAddOutlined />,
+  edit_file: <Pencil />,
+  replace: <Pencil />,
+  write_file: <FilePlus />,
   // File reads
-  read_file: <FileTextOutlined />,
-  list_directory: <FolderOpenOutlined />,
-  ls: <FolderOpenOutlined />,
-  glob: <SearchOutlined />,
-  grep: <SearchOutlined />,
-  search_file_content: <SearchOutlined />,
+  read_file: <FileText />,
+  list_directory: <FolderOpen />,
+  ls: <FolderOpen />,
+  glob: <Search />,
+  grep: <Search />,
+  search_file_content: <Search />,
   // Subagent
-  task: <RobotOutlined />,
+  task: <Bot />,
   // Web
-  web_search: <GlobalOutlined />,
-  fetch_url: <GlobalOutlined />,
+  web_search: <Globe />,
+  fetch_url: <Globe />,
   // HITL
-  ask_user_question: <QuestionCircleOutlined />,
+  ask_user_question: <CircleHelp />,
 };
 
 export function getToolIcon(name: string): ReactNode {
-  return TOOL_ICON_MAP[name] ?? <ToolOutlined />;
+  return TOOL_ICON_MAP[name] ?? <Wrench />;
 }
 
 /**

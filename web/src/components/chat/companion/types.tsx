@@ -1,9 +1,9 @@
 import type { ReactNode } from "react";
 import {
-  AppstoreOutlined,
-  CheckSquareOutlined,
-  RobotOutlined,
-} from "@ant-design/icons";
+  LayoutGrid,
+  CheckSquare,
+  Bot,
+} from "lucide-react";
 import type { CompanionTabKind } from "../../../stores/chat.js";
 import type { SubagentEvent } from "../turn/types.js";
 
@@ -38,9 +38,9 @@ export interface TodoItem {
 
 /** Icon + short label for each tab kind, shown in the tab strip + add menu. */
 export const TAB_META: Record<CompanionTabKind, { icon: ReactNode; label: string }> = {
-  files: { icon: <AppstoreOutlined />, label: "文件" },
-  subagents: { icon: <RobotOutlined />, label: "子智能体" },
-  todos: { icon: <CheckSquareOutlined />, label: "待办" },
+  files: { icon: <LayoutGrid />, label: "文件" },
+  subagents: { icon: <Bot />, label: "子智能体" },
+  todos: { icon: <CheckSquare />, label: "待办" },
 };
 
 /**

@@ -4,19 +4,19 @@ import { Button, Tooltip, Dropdown, Modal, Input, Popconfirm, message as antdMes
 import type { MenuProps } from "antd";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  MessageOutlined,
-  AppstoreOutlined,
-  SettingOutlined,
-  MoreOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  SearchOutlined,
-  BookOutlined,
-  ApiOutlined,
-  RobotOutlined,
-  FolderOpenOutlined,
-  DesktopOutlined,
-} from "@ant-design/icons";
+  MessageSquare,
+  LayoutGrid,
+  Settings,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  Search,
+  BookOpen,
+  Plug,
+  Bot,
+  FolderOpen,
+  Monitor,
+} from "lucide-react";
 import { OctopusClient, type Thread, type Workspace } from "@octopus/tentacle";
 import { useChatStore } from "../../stores/chat.js";
 import { DirBrowserModal } from "../workspace/DirBrowserModal.js";
@@ -71,18 +71,18 @@ function SearchEmpty() {
 }
 
 const navItems = [
-  { key: "search", icon: <SearchOutlined />, label: "搜索" },
-  { key: "extensions", icon: <AppstoreOutlined />, label: "扩展管理" },
+  { key: "search", icon: <Search />, label: "搜索" },
+  { key: "extensions", icon: <LayoutGrid />, label: "扩展管理" },
 ];
 
 // Static page-feature entries surfaced by the global search modal.
 const FEATURES = [
-  { label: "新建对话", path: "/agent", icon: <MessageOutlined /> },
-  { label: "扩展管理 - 技能", path: "/extensions/skills", icon: <BookOutlined /> },
-  { label: "扩展管理 - MCP服务器", path: "/extensions/mcp", icon: <ApiOutlined /> },
-  { label: "扩展管理 - 子智能体", path: "/extensions/subagents", icon: <RobotOutlined /> },
-  { label: "设置 - 常规", path: "/settings/general", icon: <SettingOutlined /> },
-  { label: "设置 - 模型配置", path: "/settings/model", icon: <SettingOutlined /> },
+  { label: "新建对话", path: "/agent", icon: <MessageSquare /> },
+  { label: "扩展管理 - 技能", path: "/extensions/skills", icon: <BookOpen /> },
+  { label: "扩展管理 - MCP服务器", path: "/extensions/mcp", icon: <Plug /> },
+  { label: "扩展管理 - 子智能体", path: "/extensions/subagents", icon: <Bot /> },
+  { label: "设置 - 常规", path: "/settings/general", icon: <Settings /> },
+  { label: "设置 - 模型配置", path: "/settings/model", icon: <Settings /> },
 ];
 
 export function Sidebar() {
@@ -224,13 +224,13 @@ export function Sidebar() {
   const menuFor = (t: Thread): MenuProps["items"] => [
     {
       key: "rename",
-      icon: <EditOutlined />,
+      icon: <Pencil />,
       label: "重命名",
       onClick: ({ domEvent }) => { domEvent.stopPropagation(); startRename(t); },
     },
     {
       key: "delete",
-      icon: <DeleteOutlined />,
+      icon: <Trash2 />,
       danger: true,
       label: "删除",
       onClick: ({ domEvent }) => { domEvent.stopPropagation(); startDelete(t); },
@@ -292,7 +292,7 @@ export function Sidebar() {
         <Button
           block
           onClick={handleNewChat}
-          icon={<MessageOutlined />}
+          icon={<MessageSquare />}
           style={{
             borderColor: "var(--gray-150)",
             backgroundColor: "var(--gray-0)",
@@ -378,7 +378,7 @@ export function Sidebar() {
             工作区
           </span>
           <Tooltip title="打开文件夹">
-            <FolderOpenOutlined
+            <FolderOpen
               onClick={() => setDirBrowserOpen(true)}
               style={{
                 fontSize: 14, color: "var(--gray-500)", cursor: "pointer",
@@ -398,7 +398,7 @@ export function Sidebar() {
               border: "1px dashed var(--gray-150)",
             }}
           >
-            <FolderOpenOutlined style={{ marginRight: 6 }} />
+            <FolderOpen style={{ marginRight: 6 }} />
             打开一个文件夹作为工作区
           </div>
         ) : (
@@ -419,7 +419,7 @@ export function Sidebar() {
                     marginBottom: 2,
                   }}
                 >
-                  <DesktopOutlined style={{ fontSize: 15 }} />
+                  <Monitor style={{ fontSize: 15 }} />
                   <span style={{
                     flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}>
@@ -513,7 +513,7 @@ export function Sidebar() {
                   e.currentTarget.style.color = "var(--gray-500)";
                 }}
               >
-                <MoreOutlined />
+                <MoreHorizontal />
               </span>
             </Dropdown>
           </div>
@@ -545,7 +545,7 @@ export function Sidebar() {
           </div>
           <span style={{ flex: 1 }}>octopus</span>
           <Tooltip title="设置">
-            <SettingOutlined
+            <Settings
               onClick={() => navigate("/settings/general")}
               style={{
                 fontSize: 16, color: "var(--gray-500)", cursor: "pointer",
@@ -577,7 +577,7 @@ export function Sidebar() {
               if (filteredFeatures.length > 0) jumpToFeature(filteredFeatures[0].path);
               else if (filteredThreads.length > 0) jumpToThread(filteredThreads[0]);
             }}
-            prefix={<SearchOutlined style={{ color: "var(--gray-400)" }} />}
+            prefix={<Search style={{ color: "var(--gray-400)" }} />}
             placeholder="搜索功能或对话..."
             allowClear
             autoFocus
@@ -622,7 +622,7 @@ export function Sidebar() {
                 {filteredThreads.map((t) => (
                   <SearchResultRow
                     key={t.id}
-                    icon={<MessageOutlined />}
+                    icon={<MessageSquare />}
                     label={t.title}
                     onClick={() => jumpToThread(t)}
                   />

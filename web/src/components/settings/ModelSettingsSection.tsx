@@ -4,10 +4,16 @@ import {
   message as antdMessage, Popconfirm,
 } from "antd";
 import {
-  ReloadOutlined, PlusOutlined, SearchOutlined, CloudOutlined,
-  SettingOutlined, DeleteOutlined, ApiOutlined, AppstoreOutlined,
-  CheckCircleFilled,
-} from "@ant-design/icons";
+  CircleCheckBig,
+  Cloud,
+  LayoutGrid,
+  Plug,
+  Plus,
+  RotateCw,
+  Search,
+  Settings,
+  Trash2,
+} from "lucide-react";
 import type {
   OctopusClient,
   ModelSettingsResponse,
@@ -140,7 +146,7 @@ export function ModelSettingsSection({ sdk }: Props) {
         extra={
           <Input
             allowClear
-            prefix={<SearchOutlined style={{ color: "var(--gray-400)" }} />}
+            prefix={<Search style={{ color: "var(--gray-400)" }} />}
             placeholder="搜索供应商..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -231,7 +237,7 @@ function ProviderRow({
           width: 24, textAlign: "center", flexShrink: 0,
         }}
       >
-        <ApiOutlined />
+        <Plug />
       </span>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-1000)" }}>
@@ -254,7 +260,7 @@ function ProviderRow({
       <Tooltip title="模型管理">
         <Button
           size="small"
-          icon={<AppstoreOutlined />}
+          icon={<LayoutGrid />}
           onClick={onManageModels}
           style={{ borderRadius: 8 }}
         />
@@ -262,7 +268,7 @@ function ProviderRow({
       <Tooltip title="配置">
         <Button
           size="small"
-          icon={<SettingOutlined />}
+          icon={<Settings />}
           onClick={onConfig}
           style={{ borderRadius: 8 }}
         />
@@ -376,7 +382,7 @@ function ModelsModal({
               <Tooltip title="从供应商 API 实时获取可用模型列表">
                 <Button
                   size="small"
-                  icon={<CloudOutlined />}
+                  icon={<Cloud />}
                   onClick={fetchRemote}
                   loading={remoteLoading}
                   style={{ borderRadius: 8 }}
@@ -395,7 +401,7 @@ function ModelsModal({
               <Button
                 size="small"
                 type="primary"
-                icon={<PlusOutlined />}
+                icon={<Plus />}
                 onClick={addModel}
                 loading={saving}
                 style={{ borderRadius: 8 }}
@@ -469,7 +475,7 @@ function ModelsModal({
                       <Tooltip title="移除">
                         <Button
                           type="text" size="small" danger
-                          icon={<DeleteOutlined />}
+                          icon={<Trash2 />}
                           style={{ width: 28, height: 28, borderRadius: 6 }}
                         />
                       </Tooltip>
@@ -507,7 +513,7 @@ function ModelsModal({
               <Input
                 allowClear
                 size="small"
-                prefix={<SearchOutlined style={{ color: "var(--gray-400)" }} />}
+                prefix={<Search style={{ color: "var(--gray-400)" }} />}
                 placeholder="搜索 id 或名称…"
                 value={remoteSearch}
                 onChange={(e) => setRemoteSearch(e.target.value)}
@@ -606,7 +612,7 @@ function ModelsModal({
                             size="small"
                             type={added ? "primary" : "default"}
                             disabled={added}
-                            icon={added ? <CheckCircleFilled /> : <PlusOutlined />}
+                            icon={added ? <CircleCheckBig /> : <Plus />}
                             onClick={() => addFromRemote(m.id)}
                             style={{ borderRadius: 8, width: 32, minWidth: 32 }}
                           />

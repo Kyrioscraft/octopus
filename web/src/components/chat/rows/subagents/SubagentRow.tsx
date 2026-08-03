@@ -1,8 +1,7 @@
 import {
-  CheckCircleFilled,
-  LoadingOutlined,
-  RobotOutlined,
-} from "@ant-design/icons";
+  LoaderCircle,
+  Bot,
+} from "lucide-react";
 import { truncate } from "../../../widgets/utils.js";
 import type { SubagentEvent } from "../../turn/types.js";
 
@@ -38,10 +37,12 @@ export function SubagentRow({
   // streaming flag drives the spinner.
   void isActive;
 
-  const statusIcon = streaming ? (
-    <LoadingOutlined style={{ color: "var(--color-info-700)" }} />
+  // Single-slot icon: spinner while streaming, the subagent (Bot) type icon
+  // otherwise — avoids the redundancy of a status icon next to the type icon.
+  const leadIcon = streaming ? (
+    <LoaderCircle style={{ color: "var(--color-info-700)" }} />
   ) : (
-    <CheckCircleFilled style={{ color: "var(--gray-400)" }} />
+    <Bot style={{ fontSize: 12 }} />
   );
 
   const intent = event.description?.trim();
@@ -78,8 +79,7 @@ export function SubagentRow({
         e.currentTarget.style.background = "transparent";
       }}
     >
-      {statusIcon}
-      <RobotOutlined style={{ fontSize: 12 }} />
+      {leadIcon}
       <span style={{ color: "var(--gray-400)", flexShrink: 0 }}>子智能体</span>
       <span style={{ color: "var(--gray-700)", flexShrink: 0 }}>
         {event.displayName || event.agentNs || "未命名子智能体"}

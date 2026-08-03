@@ -1,11 +1,10 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { Collapse, Tag } from "antd";
 import {
-  CheckCircleFilled,
-  CloseCircleFilled,
-  LoadingOutlined,
-  ClockCircleOutlined,
-} from "@ant-design/icons";
+  CircleX,
+  LoaderCircle,
+  Clock,
+} from "lucide-react";
 import type { ToolCallEntry } from "./types.js";
 import { getToolIcon, getToolDisplayName } from "./registry.js";
 
@@ -36,17 +35,25 @@ export interface ToolCallRowProps {
   defaultExpanded?: boolean;
 }
 
-function StatusIcon({ status }: { status: ToolCallEntry["status"] }) {
+/**
+ * Single-slot icon for a tool row.
+ *
+ * Done → the tool's own type icon (the status is implied by completion).
+ * Running → a spinner (hides the type icon while in flight, avoiding the
+ *           visual redundancy of "spinner + type-icon" side by side).
+ * Error / pending → status icon (these states still need to stand out).
+ */
+function RowIcon({ name, status }: { name: string; status: ToolCallEntry["status"] }) {
   switch (status) {
     case "done":
-      return <CheckCircleFilled style={{ color: "var(--gray-400)" }} />;
-    case "error":
-      return <CloseCircleFilled style={{ color: "var(--color-error-500)" }} />;
+      return <>{getToolIcon(name)}</>;
     case "running":
-      return <LoadingOutlined style={{ color: "var(--color-info-700)" }} />;
+      return <LoaderCircle style={{ color: "var(--color-info-700)" }} />;
+    case "error":
+      return <CircleX style={{ color: "var(--color-error-500)" }} />;
     case "pending":
     default:
-      return <ClockCircleOutlined style={{ color: "var(--gray-400)" }} />;
+      return <Clock style={{ color: "var(--gray-400)" }} />;
   }
 }
 
@@ -60,7 +67,6 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
     if (defaultExpanded) setExpanded(true);
   }, [defaultExpanded]);
 
-  const icon = getToolIcon(entry.name);
   const displayName = getToolDisplayName(entry.name);
   const isError = entry.status === "error";
 
@@ -81,9 +87,8 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
         // the header content instead of right-aligning.
       }}
     >
-      <StatusIcon status={entry.status} />
       <span style={{ color: "var(--gray-600)", display: "inline-flex", alignItems: "center" }}>
-        {icon}
+        <RowIcon name={entry.name} status={entry.status} />
       </span>
       {header ?? <span>{displayName}</span>}
     </div>

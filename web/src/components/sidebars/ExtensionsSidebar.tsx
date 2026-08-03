@@ -1,13 +1,13 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button, Tooltip } from "antd";
-import { ArrowLeftOutlined, BookOutlined, ApiOutlined, RobotOutlined } from "@ant-design/icons";
+import { ArrowLeft, BookOpen, Plug, Bot } from "lucide-react";
 
 type Tab = "skills" | "mcp" | "subagents";
 
 const MENU_ITEMS: { key: Tab; path: string; icon: React.ReactNode; label: string }[] = [
-  { key: "skills", path: "/extensions/skills", icon: <BookOutlined />, label: "技能" },
-  { key: "mcp", path: "/extensions/mcp", icon: <ApiOutlined />, label: "MCP服务器" },
-  { key: "subagents", path: "/extensions/subagents", icon: <RobotOutlined />, label: "子智能体" },
+  { key: "skills", path: "/extensions/skills", icon: <BookOpen />, label: "技能" },
+  { key: "mcp", path: "/extensions/mcp", icon: <Plug />, label: "MCP服务器" },
+  { key: "subagents", path: "/extensions/subagents", icon: <Bot />, label: "子智能体" },
 ];
 
 /**
@@ -43,7 +43,7 @@ export function ExtensionsSidebar() {
               fontSize: 14, fontWeight: 450, color: "var(--gray-700)",
               border: "1px solid var(--gray-150)", background: "var(--gray-0)",
             }}
-            icon={<ArrowLeftOutlined style={{ fontSize: 16 }} />}
+            icon={<ArrowLeft style={{ fontSize: 16 }} />}
           >
             返回对话
           </Button>

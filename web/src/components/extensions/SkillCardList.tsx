@@ -3,11 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { Button, Tooltip, Spin, Empty, Upload, message as antdMessage } from "antd";
 import type { UploadProps } from "antd";
 import {
-  BookOutlined,
-  PlusOutlined,
-  ReloadOutlined,
-  UploadOutlined,
-} from "@ant-design/icons";
+  BookOpen,
+  Plus,
+  RotateCw,
+  Upload as UploadIcon,
+} from "lucide-react";
 import { OctopusClient, type SkillEntry, type BuiltinSkillSpec } from "@octopus/tentacle";
 import { ExtensionCard } from "./ExtensionCard.js";
 import { SkillFormModal } from "./SkillFormModal.js";
@@ -103,7 +103,7 @@ export function SkillCardList({
           <Button
             type="text"
             size="small"
-            icon={<ReloadOutlined spin={loading} />}
+            icon={<RotateCw className={loading ? "lucide-spin" : undefined} />}
             onClick={onReload}
             style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
           />
@@ -111,7 +111,7 @@ export function SkillCardList({
         <Upload {...uploadProps}>
           <Button
             size="small"
-            icon={<UploadOutlined />}
+            icon={<UploadIcon />}
             loading={importing}
             style={{ borderRadius: 6 }}
           >
@@ -121,7 +121,7 @@ export function SkillCardList({
         <Button
           type="primary"
           size="small"
-          icon={<PlusOutlined />}
+          icon={<Plus />}
           onClick={() => setCreateOpen(true)}
           style={{ borderRadius: 6 }}
         >
@@ -143,7 +143,7 @@ export function SkillCardList({
                 {owned.map((s) => (
                   <ExtensionCard
                     key={s.name}
-                    icon={<BookOutlined />}
+                    icon={<BookOpen />}
                     title={s.name}
                     subtitle={s.path}
                     description={s.description}
@@ -162,7 +162,7 @@ export function SkillCardList({
                 {catalog.map((s) => (
                   <ExtensionCard
                     key={s.name}
-                    icon={<BookOutlined />}
+                    icon={<BookOpen />}
                     title={s.name}
                     subtitle={s.path}
                     description={s.description}
@@ -182,7 +182,7 @@ export function SkillCardList({
                 {filteredBuiltin.map((b) => (
                   <ExtensionCard
                     key={b.slug}
-                    icon={<BookOutlined />}
+                    icon={<BookOpen />}
                     title={b.name}
                     description={b.description}
                     tags={[{ label: "内置" }]}

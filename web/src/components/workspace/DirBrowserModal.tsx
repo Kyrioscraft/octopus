@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Modal, Breadcrumb, Spin, Button, Tooltip, Select, message as antdMessage } from "antd";
 import {
-  FolderOutlined,
-  ArrowLeftOutlined,
-  HomeOutlined,
-  CheckOutlined,
-  ReloadOutlined,
-} from "@ant-design/icons";
+  ArrowLeft,
+  Check,
+  Folder,
+  Home,
+  RotateCw,
+} from "lucide-react";
 import { OctopusClient, type HostBrowseResult, type HostDirEntry } from "@octopus/tentacle";
 
 // =============================================================================
@@ -156,7 +156,7 @@ export function DirBrowserModal({ open, onClose, onSelect }: DirBrowserModalProp
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <Button
             size="small"
-            icon={<ArrowLeftOutlined />}
+            icon={<ArrowLeft />}
             disabled={!data || isAtRoot(data.current, data.roots)}
             onClick={goUp}
             style={{ borderRadius: 6, height: 30, fontSize: 13, borderColor: "var(--gray-150)" }}
@@ -180,7 +180,7 @@ export function DirBrowserModal({ open, onClose, onSelect }: DirBrowserModalProp
         {/* Right group: refresh */}
         <div style={{ flex: 1 }} />
         <Tooltip title="刷新">
-          <Button size="small" type="text" icon={<ReloadOutlined />} onClick={() => load(data?.current)} />
+          <Button size="small" type="text" icon={<RotateCw />} onClick={() => load(data?.current)} />
         </Tooltip>
       </div>
 
@@ -191,7 +191,7 @@ export function DirBrowserModal({ open, onClose, onSelect }: DirBrowserModalProp
             {
               title: (
                 <span onClick={() => data && enterDir(data.roots[0])} style={{ cursor: "pointer" }}>
-                  <HomeOutlined />
+                  <Home />
                 </span>
               ),
             },
@@ -238,11 +238,11 @@ export function DirBrowserModal({ open, onClose, onSelect }: DirBrowserModalProp
                   if (!isSelected) ev.currentTarget.style.backgroundColor = "transparent";
                 }}
               >
-                <FolderOutlined style={{ color: "var(--main-color)" }} />
+                <Folder style={{ color: "var(--main-color)" }} />
                 <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {e.name}
                 </span>
-                {isSelected && <CheckOutlined style={{ fontSize: 12 }} />}
+                {isSelected && <Check style={{ fontSize: 12 }} />}
               </div>
             );
           })

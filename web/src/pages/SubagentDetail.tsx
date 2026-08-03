@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Tooltip, Switch, Spin, Modal, Tag, message as antdMessage } from "antd";
 import {
-  ArrowLeftOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  RobotOutlined,
-} from "@ant-design/icons";
+  ArrowLeft,
+  Bot,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { OctopusClient, type SubagentEntry } from "@octopus/tentacle";
 import { SubagentFormModal } from "../components/extensions/SubagentFormModal.js";
 
@@ -93,13 +93,13 @@ export function SubagentDetailPage() {
             <Button
               type="text"
               size="small"
-              icon={<ArrowLeftOutlined />}
+              icon={<ArrowLeft />}
               onClick={back}
               style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
             />
           </Tooltip>
           <div style={iconTileStyle}>
-            <RobotOutlined />
+            <Bot />
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={titleStyle}>{name}</div>
@@ -127,7 +127,7 @@ export function SubagentDetailPage() {
                 <Button
                   type="text"
                   size="small"
-                  icon={<EditOutlined />}
+                  icon={<Pencil />}
                   onClick={() => setEditOpen(true)}
                   style={iconBtnStyle}
                 />
@@ -137,7 +137,7 @@ export function SubagentDetailPage() {
                   type="text"
                   size="small"
                   danger
-                  icon={<DeleteOutlined />}
+                  icon={<Trash2 />}
                   onClick={onDelete}
                   style={iconBtnStyle}
                 />

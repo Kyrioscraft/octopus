@@ -1,4 +1,4 @@
-import { CheckSquareOutlined } from "@ant-design/icons";
+import { CheckSquare } from "lucide-react";
 import { useChatStore } from "../../../stores/chat.js";
 import type { TodoItem } from "../companion/types.js";
 
@@ -57,7 +57,7 @@ export function TodoBadge({ todos }: { todos: TodoItem[] }) {
         cursor: "pointer",
       }}
     >
-      <CheckSquareOutlined style={{ fontSize: 13 }} />
+      <CheckSquare style={{ fontSize: 13 }} />
       <span>
         {done}/{total}
       </span>

@@ -1,11 +1,11 @@
 import { Input, Button, Tooltip, Popover, Select, Tag } from "antd";
 import {
-  ArrowUpOutlined, PauseOutlined,
-  PaperClipOutlined,
-  PlusOutlined,
-  FileAddOutlined, PictureOutlined,
-  ThunderboltOutlined,
-} from "@ant-design/icons";
+  ArrowUp, Pause,
+  Paperclip,
+  Plus,
+  FilePlus, Image,
+  Zap,
+} from "lucide-react";
 import { ACCESS_MODES, MODE_ORDER, type AccessMode } from "../constants.js";
 
 const { TextArea } = Input;
@@ -89,7 +89,7 @@ export function InputBar({
           padding: "2px 6px", marginBottom: 6,
           background: "var(--main-50)", borderRadius: 6,
         }}>
-          <ThunderboltOutlined /> 自动模式：将直接执行文件变更，不再逐步确认
+          <Zap /> 自动模式：将直接执行文件变更，不再逐步确认
         </div>
       )}
       {accessMode === "full" && !busy && (
@@ -99,7 +99,7 @@ export function InputBar({
           padding: "2px 6px", marginBottom: 6,
           background: "rgba(245, 34, 45, 0.08)", borderRadius: 6,
         }}>
-          <ThunderboltOutlined /> 完全控制：连安全命令也将自动执行，不再审核，请谨慎
+          <Zap /> 完全控制：连安全命令也将自动执行，不再审核，请谨慎
         </div>
       )}
 
@@ -111,7 +111,7 @@ export function InputBar({
               key={i} closable onClose={() => onRemoveAttachment(i)}
               style={{ marginInlineEnd: 0 }}
             >
-              <PaperClipOutlined style={{ marginRight: 4 }} />
+              <Paperclip style={{ marginRight: 4 }} />
               {name}
             </Tag>
           ))}
@@ -149,19 +149,19 @@ export function InputBar({
                 style={{ ...ppStyle, display: "flex", alignItems: "center", gap: 6 }}
                 onClick={() => attachInputRef.current?.click()}
               >
-                <FileAddOutlined /> 添加文件
+                <FilePlus /> 添加文件
               </div>
               <div
                 style={{ ...ppStyle, display: "flex", alignItems: "center", gap: 6 }}
                 onClick={() => attachInputRef.current?.click()}
               >
-                <PictureOutlined /> 上传图片
+                <Image /> 上传图片
               </div>
             </div>
           }
         >
           <Button type="text" size="small"
-            icon={<PlusOutlined />}
+            icon={<Plus />}
             style={{ ...iconBtnStyle }}
             className="hover-green"
           />
@@ -224,7 +224,7 @@ export function InputBar({
         <Tooltip title={busy ? "停止回答" : ""}>
           <Button
             type="text" shape="circle"
-            icon={busy ? <PauseOutlined /> : <ArrowUpOutlined />}
+            icon={busy ? <Pause /> : <ArrowUp />}
             onClick={busy ? onStop : onSend}
             disabled={!text.trim() && !busy}
             style={{

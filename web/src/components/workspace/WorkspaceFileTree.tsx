@@ -4,13 +4,13 @@ import {
 } from "antd";
 import type { TreeDataNode, MenuProps } from "antd";
 import {
-  FolderOutlined,
-  FileOutlined,
-  ReloadOutlined,
-  DownloadOutlined,
-  DeleteOutlined,
-  MoreOutlined,
-} from "@ant-design/icons";
+  Download,
+  File,
+  Folder,
+  MoreHorizontal,
+  RotateCw,
+  Trash2,
+} from "lucide-react";
 import {
   OctopusClient,
   type WorkspaceEntry,
@@ -172,11 +172,11 @@ export function WorkspaceFileTree() {
   // noisy; instead show actions on the selected file in the preview header).
   const entryMenu = useCallback((e: WorkspaceEntry): MenuProps["items"] => [
     {
-      key: "download", icon: <DownloadOutlined />, label: "下载",
+      key: "download", icon: <Download />, label: "下载",
       onClick: () => handleDownload(e),
     },
     {
-      key: "delete", icon: <DeleteOutlined />, danger: true, label: "删除",
+      key: "delete", icon: <Trash2 />, danger: true, label: "删除",
       onClick: () => handleDelete(e),
     },
   ], [handleDownload, handleDelete]);
@@ -188,7 +188,7 @@ export function WorkspaceFileTree() {
         const isLeaf = (n as any).isLeaf !== false && !(n as any).children?.length;
         return {
           ...n,
-          icon: isLeaf ? <FileOutlined /> : <FolderOutlined style={{ color: "var(--main-color)" }} />,
+          icon: isLeaf ? <File /> : <Folder style={{ color: "var(--main-color)" }} />,
           children: n.children ? decorate(n.children) : undefined,
         };
       });
@@ -220,18 +220,18 @@ export function WorkspaceFileTree() {
         display: "flex", alignItems: "center", gap: 6,
         padding: "8px 12px", borderBottom: "1px solid var(--gray-150)", flexShrink: 0,
       }}>
-        <FolderOutlined style={{ color: "var(--main-color)" }} />
+        <Folder style={{ color: "var(--main-color)" }} />
         <Tooltip title={activeWorkspace.path}>
           <span style={{ fontSize: 13, fontWeight: 600, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {activeWorkspace.name}
           </span>
         </Tooltip>
         <Tooltip title="刷新">
-          <Button size="small" type="text" icon={<ReloadOutlined />} onClick={loadRoot} />
+          <Button size="small" type="text" icon={<RotateCw />} onClick={loadRoot} />
         </Tooltip>
         {selected && (
           <Dropdown menu={{ items: entryMenu(selected) }} trigger={["click"]}>
-            <Button size="small" type="text" icon={<MoreOutlined />} />
+            <Button size="small" type="text" icon={<MoreHorizontal />} />
           </Dropdown>
         )}
       </div>

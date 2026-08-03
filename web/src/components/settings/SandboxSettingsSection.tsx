@@ -1,12 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { Switch, Spin, Input, Button, message as antdMessage, Tag } from "antd";
 import {
-  CloudServerOutlined,
-  ApiOutlined,
-  SaveOutlined,
-  ReloadOutlined,
-  CheckCircleFilled,
-} from "@ant-design/icons";
+  CircleCheckBig,
+  Plug,
+  RotateCw,
+  Save,
+  Server,
+} from "lucide-react";
 import type { OctopusClient, SandboxSettings } from "@octopus/tentacle";
 
 interface Props {
@@ -94,10 +94,10 @@ export function SandboxSettingsSection({ sdk }: Props) {
     }}>
       {/* Header row */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <CloudServerOutlined style={{ fontSize: 18, color: "var(--main-color)" }} />
+        <Server style={{ fontSize: 18, color: "var(--main-color)" }} />
         <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>沙盒环境</span>
         {data?.hasCredentials ? (
-          <Tag color="success" icon={<CheckCircleFilled />}>已配置密钥</Tag>
+          <Tag color="success" icon={<CircleCheckBig />}>已配置密钥</Tag>
         ) : (
           <Tag color="default">未配置密钥</Tag>
         )}
@@ -156,12 +156,12 @@ export function SandboxSettingsSection({ sdk }: Props) {
       {/* Actions */}
       <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
         <Button
-          type="primary" icon={<SaveOutlined />}
+          type="primary" icon={<Save />}
           loading={saving} onClick={saveDetails}
         >
           保存
         </Button>
-        <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
+        <Button icon={<RotateCw />} onClick={load}>刷新</Button>
       </div>
     </div>
   );
@@ -171,7 +171,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return (
     <div style={{ marginBottom: 10 }}>
       <div style={{ fontSize: 12, color: "var(--gray-600)", marginBottom: 4, display: "flex", alignItems: "center", gap: 4 }}>
-        <ApiOutlined style={{ fontSize: 12 }} />
+        <Plug style={{ fontSize: 12 }} />
         {label}
       </div>
       {children}

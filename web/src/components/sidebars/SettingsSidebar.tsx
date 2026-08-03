@@ -1,12 +1,12 @@
 import { useNavigate, useLocation } from "react-router-dom";
 import { Button, Tooltip } from "antd";
-import { ArrowLeftOutlined, SettingOutlined, ExperimentOutlined } from "@ant-design/icons";
+import { ArrowLeft, Settings, FlaskConical } from "lucide-react";
 
 type Tab = "general" | "model";
 
 const MENU_ITEMS: { key: Tab; path: string; icon: React.ReactNode; label: string }[] = [
-  { key: "general", path: "/settings/general", icon: <SettingOutlined />, label: "常规" },
-  { key: "model", path: "/settings/model", icon: <ExperimentOutlined />, label: "模型配置" },
+  { key: "general", path: "/settings/general", icon: <Settings />, label: "常规" },
+  { key: "model", path: "/settings/model", icon: <FlaskConical />, label: "模型配置" },
 ];
 
 /**
@@ -35,7 +35,7 @@ export function SettingsSidebar() {
               fontSize: 14, fontWeight: 450, color: "var(--gray-700)",
               border: "1px solid var(--gray-150)", background: "var(--gray-0)",
             }}
-            icon={<ArrowLeftOutlined style={{ fontSize: 16 }} />}
+            icon={<ArrowLeft style={{ fontSize: 16 }} />}
           >
             返回对话
           </Button>

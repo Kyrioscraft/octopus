@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { Modal, Input, Select, message as antdMessage } from "antd";
-import { PlusOutlined, MinusOutlined } from "@ant-design/icons";
+import {
+  Minus,
+  Plus,
+} from "lucide-react";
 import { OctopusClient, type McpServerEntry, type McpWriteRequest } from "@octopus/tentacle";
 
 const sdk = new OctopusClient();
@@ -225,7 +228,7 @@ function KeyValueEditor({
             placeholder={placeholderValue}
             style={{ ...inputStyle, fontFamily: monoFont, fontSize: 12.5, flex: 1.4 }}
           />
-          <MinusOutlined
+          <Minus
             onClick={() => onChange(pairs.filter((_, idx) => idx !== i))}
             style={{ alignSelf: "center", color: "var(--gray-500)", cursor: "pointer", padding: "0 6px" }}
           />
@@ -244,7 +247,7 @@ function KeyValueEditor({
           padding: "2px 0",
         }}
       >
-        <PlusOutlined /> 添加一项
+        <Plus /> 添加一项
       </div>
     </div>
   );

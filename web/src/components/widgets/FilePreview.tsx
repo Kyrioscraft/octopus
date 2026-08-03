@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { Button, Tooltip, message as antdMessage, Spin } from "antd";
 import {
-  DownloadOutlined,
-  EditOutlined,
-  CheckOutlined,
-  CloseOutlined,
-  FullscreenOutlined,
-  FullscreenExitOutlined,
-  CodeOutlined,
-  EyeOutlined,
-} from "@ant-design/icons";
+  Check,
+  CodeXml,
+  Download,
+  Eye,
+  Maximize,
+  Minimize,
+  Pencil,
+  X,
+} from "lucide-react";
 import { createPortal } from "react-dom";
 import { Markdown } from "./Markdown.js";
 import type { PreviewType, WorkspaceFileContent } from "@octopus/tentacle";
@@ -210,35 +210,35 @@ export function FilePreview({
       <div style={{ display: "flex", gap: 2 }}>
         {file.previewType === "html" && (
           <Tooltip title={showHtmlSource ? "查看渲染" : "查看源码"}>
-            <Button size="small" type="text" icon={showHtmlSource ? <EyeOutlined /> : <CodeOutlined />}
+            <Button size="small" type="text" icon={showHtmlSource ? <Eye /> : <CodeXml />}
               onClick={() => setShowHtmlSource((v) => !v)} />
           </Tooltip>
         )}
         {canEdit && !editing && (
           <Tooltip title="编辑">
-            <Button size="small" type="text" icon={<EditOutlined />} onClick={startEdit} />
+            <Button size="small" type="text" icon={<Pencil />} onClick={startEdit} />
           </Tooltip>
         )}
         {editing && (
           <>
             <Tooltip title="保存">
-              <Button size="small" type="text" icon={<CheckOutlined />} loading={saving}
+              <Button size="small" type="text" icon={<Check />} loading={saving}
                 onClick={submitSave} disabled={!dirty} />
             </Tooltip>
             <Tooltip title="取消">
-              <Button size="small" type="text" icon={<CloseOutlined />} onClick={cancelEdit} disabled={saving} />
+              <Button size="small" type="text" icon={<X />} onClick={cancelEdit} disabled={saving} />
             </Tooltip>
           </>
         )}
         {showDownload && onDownload && (
           <Tooltip title="下载">
-            <Button size="small" type="text" icon={<DownloadOutlined />} onClick={onDownload} />
+            <Button size="small" type="text" icon={<Download />} onClick={onDownload} />
           </Tooltip>
         )}
         {showFullscreen && (
           <Tooltip title={fullscreen ? "退出全屏" : "全屏"}>
             <Button size="small" type="text"
-              icon={fullscreen ? <FullscreenExitOutlined /> : <FullscreenOutlined />}
+              icon={fullscreen ? <Minimize /> : <Maximize />}
               onClick={() => setFullscreen((v) => !v)} />
           </Tooltip>
         )}

@@ -3,7 +3,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeHighlight from "rehype-highlight";
 import { Tooltip, message as antdMessage } from "antd";
-import { CopyOutlined, CheckOutlined } from "@ant-design/icons";
+import {
+  Check,
+  Copy,
+} from "lucide-react";
 
 /**
  * Markdown renderer for assistant messages.
@@ -87,7 +90,7 @@ function CodeBlock({ children }: { children: React.ReactNode }) {
         type="button"
       >
         <Tooltip title={copied ? "已复制" : "复制"}>
-          {copied ? <CheckOutlined /> : <CopyOutlined />}
+          {copied ? <Check /> : <Copy />}
         </Tooltip>
       </button>
       {children}

@@ -1,6 +1,8 @@
 import { useState, useCallback, useEffect } from "react";
 import { Input } from "antd";
-import { SearchOutlined } from "@ant-design/icons";
+import {
+  Search,
+} from "lucide-react";
 import {
   OctopusClient,
   type SkillEntry,
@@ -111,7 +113,7 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
         </span>
         <Input
           allowClear
-          prefix={<SearchOutlined style={{ color: "var(--gray-400)" }} />}
+          prefix={<Search style={{ color: "var(--gray-400)" }} />}
           placeholder={
             tab === "skills" ? "搜索 Skill..." :
             tab === "mcp" ? "搜索 MCP..." : "搜索子智能体..."

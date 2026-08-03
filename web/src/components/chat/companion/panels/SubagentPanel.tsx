@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Segmented, Empty } from "antd";
-import { RobotOutlined } from "@ant-design/icons";
+import { Bot } from "lucide-react";
 import { TurnEvents } from "../../turn/TurnEvents.js";
 import { getSubagentDisplayName } from "../../rows/subagents/display.js";
 import type { SubagentEvent } from "../../turn/types.js";
@@ -78,7 +78,7 @@ export function SubagentPanel({ subagents, refId }: CompanionPanelProps) {
                     overflow: "hidden",
                   }}
                 >
-                  <RobotOutlined style={{ fontSize: 11 }} />
+                  <Bot style={{ fontSize: 11 }} />
                   <span
                     style={{
                       overflow: "hidden",
@@ -107,7 +107,7 @@ export function SubagentPanel({ subagents, refId }: CompanionPanelProps) {
           flexShrink: 0,
         }}
       >
-        <RobotOutlined style={{ fontSize: 14, color: "var(--main-color)" }} />
+        <Bot style={{ fontSize: 14, color: "var(--main-color)" }} />
         <span style={{ fontWeight: 600, fontSize: 13, color: "var(--gray-1000)" }}>
           {getSubagentDisplayName(selected.displayName)}
         </span>

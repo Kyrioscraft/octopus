@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Tooltip, Spin, Empty, message as antdMessage } from "antd";
-import { RobotOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  Bot,
+  Plus,
+  RotateCw,
+} from "lucide-react";
 import { OctopusClient, type SubagentEntry } from "@octopus/tentacle";
 import { ExtensionCard } from "./ExtensionCard.js";
 import { SubagentFormModal } from "./SubagentFormModal.js";
@@ -58,7 +62,7 @@ export function SubagentCardList({ subagents, loading, search, onReload }: Subag
           <Button
             type="text"
             size="small"
-            icon={<ReloadOutlined spin={loading} />}
+            icon={<RotateCw className={loading ? "lucide-spin" : undefined} />}
             onClick={onReload}
             style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
           />
@@ -66,7 +70,7 @@ export function SubagentCardList({ subagents, loading, search, onReload }: Subag
         <Button
           type="primary"
           size="small"
-          icon={<PlusOutlined />}
+          icon={<Plus />}
           onClick={() => setCreateOpen(true)}
           style={{ borderRadius: 6 }}
         >
@@ -88,7 +92,7 @@ export function SubagentCardList({ subagents, loading, search, onReload }: Subag
                 {enabled.map((s) => (
                   <ExtensionCard
                     key={s.name}
-                    icon={<RobotOutlined />}
+                    icon={<Bot />}
                     title={s.name}
                     subtitle={s.model ?? undefined}
                     description={s.description}
@@ -112,7 +116,7 @@ export function SubagentCardList({ subagents, loading, search, onReload }: Subag
                 {disabled.map((s) => (
                   <ExtensionCard
                     key={s.name}
-                    icon={<RobotOutlined />}
+                    icon={<Bot />}
                     title={s.name}
                     subtitle={s.model ?? undefined}
                     description={s.description}

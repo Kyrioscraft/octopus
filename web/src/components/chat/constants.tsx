@@ -1,4 +1,4 @@
-import { CrownOutlined, EyeOutlined, LockOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { Crown, Eye, Lock, Zap } from "lucide-react";
 
 /**
  * Input toolbar access modes. Aligned with ChatRequest.mode on the server side
@@ -23,7 +23,7 @@ export const ACCESS_MODES: Record<AccessMode, {
   dangerous: boolean;
 }> = {
   plan: {
-    icon: <EyeOutlined />,
+    icon: <Eye />,
     label: "计划模式",
     hint: "只规划，不执行变更",
     placeholder: "描述你想要的方案，我只规划不执行…",
@@ -31,7 +31,7 @@ export const ACCESS_MODES: Record<AccessMode, {
     dangerous: false,
   },
   confirm: {
-    icon: <LockOutlined />,
+    icon: <Lock />,
     label: "变更确认",
     hint: "每步变更都请你确认",
     placeholder: "描述变更，我会逐步请你确认…",
@@ -39,7 +39,7 @@ export const ACCESS_MODES: Record<AccessMode, {
     dangerous: false,
   },
   auto: {
-    icon: <ThunderboltOutlined />,
+    icon: <Zap />,
     label: "自动编辑",
     hint: "全自动执行变更（含安全命令）",
     placeholder: "描述任务，我将自动执行…",
@@ -47,7 +47,7 @@ export const ACCESS_MODES: Record<AccessMode, {
     dangerous: true,
   },
   full: {
-    icon: <CrownOutlined />,
+    icon: <Crown />,
     label: "完全控制",
     hint: "全自动，含安全命令也不再审核",
     placeholder: "描述任务，我将完全自主执行…",

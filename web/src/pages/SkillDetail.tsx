@@ -1,7 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Tooltip, Spin, Modal, message as antdMessage } from "antd";
-import { ArrowLeftOutlined, EditOutlined, DeleteOutlined, BookOutlined } from "@ant-design/icons";
+import {
+  ArrowLeft,
+  BookOpen,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { OctopusClient, type SkillDetail } from "@octopus/tentacle";
 import { Markdown } from "../components/widgets/Markdown.js";
 import { SkillFormModal } from "../components/extensions/SkillFormModal.js";
@@ -66,13 +71,13 @@ export function SkillDetailPage() {
             <Button
               type="text"
               size="small"
-              icon={<ArrowLeftOutlined />}
+              icon={<ArrowLeft />}
               onClick={back}
               style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
             />
           </Tooltip>
           <div style={iconTileStyle}>
-            <BookOutlined />
+            <BookOpen />
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={titleStyle}>{name}</div>
@@ -88,7 +93,7 @@ export function SkillDetailPage() {
                 <Button
                   type="text"
                   size="small"
-                  icon={<EditOutlined />}
+                  icon={<Pencil />}
                   onClick={() => setEditOpen(true)}
                   style={iconBtnStyle}
                 />
@@ -98,7 +103,7 @@ export function SkillDetailPage() {
                   type="text"
                   size="small"
                   danger
-                  icon={<DeleteOutlined />}
+                  icon={<Trash2 />}
                   onClick={onDelete}
                   style={iconBtnStyle}
                 />

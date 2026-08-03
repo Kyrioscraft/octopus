@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button, Tooltip, Spin, Empty, message as antdMessage } from "antd";
-import { ApiOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import {
+  Plug,
+  Plus,
+  RotateCw,
+} from "lucide-react";
 import { OctopusClient, type McpServerEntry } from "@octopus/tentacle";
 import { ExtensionCard } from "./ExtensionCard.js";
 import { McpFormModal } from "./McpFormModal.js";
@@ -61,7 +65,7 @@ export function McpCardList({ servers, loading, search, onReload }: McpCardListP
           <Button
             type="text"
             size="small"
-            icon={<ReloadOutlined spin={loading} />}
+            icon={<RotateCw className={loading ? "lucide-spin" : undefined} />}
             onClick={onReload}
             style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
           />
@@ -69,7 +73,7 @@ export function McpCardList({ servers, loading, search, onReload }: McpCardListP
         <Button
           type="primary"
           size="small"
-          icon={<PlusOutlined />}
+          icon={<Plus />}
           onClick={() => setCreateOpen(true)}
           style={{ borderRadius: 6 }}
         >
@@ -91,7 +95,7 @@ export function McpCardList({ servers, loading, search, onReload }: McpCardListP
                 {enabled.map((s) => (
                   <ExtensionCard
                     key={s.name}
-                    icon={<ApiOutlined />}
+                    icon={<Plug />}
                     title={s.name}
                     subtitle={s.transport}
                     description={describe(s)}
@@ -113,7 +117,7 @@ export function McpCardList({ servers, loading, search, onReload }: McpCardListP
                 {disabled.map((s) => (
                   <ExtensionCard
                     key={s.name}
-                    icon={<ApiOutlined />}
+                    icon={<Plug />}
                     title={s.name}
                     subtitle={s.transport}
                     description={describe(s)}

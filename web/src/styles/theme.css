@@ -204,3 +204,23 @@ body {
 /* ===== Thread list item: reveal more-actions only on row hover ===== */
 .thread-more { opacity: 0; transition: opacity 0.15s ease; }
 .thread-item:hover .thread-more { opacity: 1; }
+
+/* ===== Lucide icons: align with antd's 1em sizing convention ===== */
+/* lucide-react renders <svg class="lucide lucide-xxx"> with a fixed 24px size.
+   antd icons use 1em so they scale with font-size. Forcing lucide to 1em keeps
+   the two libraries visually consistent when icons are passed into antd
+   components (Button icon=, Menu items icon:, etc.). */
+.lucide {
+  width: 1em;
+  height: 1em;
+}
+
+/* antd's LoadingOutlined spins on its own; lucide's LoaderCircle is a static
+   SVG, so we re-add the spin animation here. */
+.lucide-loader-circle {
+  animation: lucide-spin 1s linear infinite;
+}
+@keyframes lucide-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

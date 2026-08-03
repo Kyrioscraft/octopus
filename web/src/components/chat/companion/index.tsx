@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dropdown } from "antd";
 import type { MenuProps } from "antd";
-import { CloseOutlined, PlusOutlined } from "@ant-design/icons";
+import { X, Plus } from "lucide-react";
 import { useChatStore } from "../../../stores/chat.js";
 import type { CompanionTabEntry, CompanionTabKind } from "../../../stores/chat.js";
 import { TAB_META, type CompanionPanelProps } from "./types.js";
@@ -292,7 +292,7 @@ function TabStrip({
             e.currentTarget.style.color = "var(--gray-500)";
           }}
         >
-          <PlusOutlined style={{ fontSize: 13 }} />
+          <Plus style={{ fontSize: 13 }} />
         </div>
       </Dropdown>
     </div>
@@ -337,7 +337,7 @@ function TabCloseButton({ onClose }: { onClose: () => void }) {
       }}
       title="关闭标签页"
     >
-      <CloseOutlined style={{ fontSize: 9 }} />
+      <X style={{ fontSize: 9 }} />
     </span>
   );
 }

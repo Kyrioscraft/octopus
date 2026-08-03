@@ -2,11 +2,11 @@ import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button, Tooltip, Switch, Spin, Modal, Tabs, message as antdMessage } from "antd";
 import {
-  ArrowLeftOutlined,
-  EditOutlined,
-  DeleteOutlined,
-  ApiOutlined,
-} from "@ant-design/icons";
+  ArrowLeft,
+  Pencil,
+  Plug,
+  Trash2,
+} from "lucide-react";
 import { OctopusClient, type McpServerEntry } from "@octopus/tentacle";
 import { McpFormModal } from "../components/extensions/McpFormModal.js";
 
@@ -86,13 +86,13 @@ export function McpDetailPage() {
             <Button
               type="text"
               size="small"
-              icon={<ArrowLeftOutlined />}
+              icon={<ArrowLeft />}
               onClick={back}
               style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
             />
           </Tooltip>
           <div style={iconTileStyle}>
-            <ApiOutlined />
+            <Plug />
           </div>
           <div style={{ minWidth: 0 }}>
             <div style={titleStyle}>{name}</div>
@@ -115,7 +115,7 @@ export function McpDetailPage() {
                 <Button
                   type="text"
                   size="small"
-                  icon={<EditOutlined />}
+                  icon={<Pencil />}
                   onClick={() => setEditOpen(true)}
                   style={iconBtnStyle}
                 />
@@ -125,7 +125,7 @@ export function McpDetailPage() {
                   type="text"
                   size="small"
                   danger
-                  icon={<DeleteOutlined />}
+                  icon={<Trash2 />}
                   onClick={onDelete}
                   style={iconBtnStyle}
                 />

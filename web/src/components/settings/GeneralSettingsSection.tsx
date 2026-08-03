@@ -1,14 +1,14 @@
 import { useState, useEffect, useCallback } from "react";
 import { Switch, Spin, message as antdMessage, Tag, Button, Segmented } from "antd";
 import {
-  CodeOutlined,
-  GlobalOutlined,
-  ApiOutlined,
-  AuditOutlined,
-  CheckCircleOutlined,
-  LogoutOutlined,
-  BgColorsOutlined,
-} from "@ant-design/icons";
+  CodeXml,
+  Globe,
+  Plug,
+  ClipboardCheck,
+  CircleCheck,
+  LogOut,
+  Palette,
+} from "lucide-react";
 import type { OctopusClient, GeneralSettingsResponse, User } from "@octopus/tentacle";
 import { SandboxSettingsSection } from "./SandboxSettingsSection.js";
 import { useThemeStore } from "../../stores/theme.js";
@@ -26,10 +26,10 @@ const TOOL_FIELDS: {
   description: string;
   icon: React.ReactNode;
 }[] = [
-  { key: "enableShell", label: "Shell 执行", description: "允许智能体执行 Shell 命令", icon: <CodeOutlined /> },
-  { key: "enableWebSearch", label: "网页搜索", description: "允许智能体进行网页搜索", icon: <GlobalOutlined /> },
-  { key: "interactive", label: "交互确认", description: "需要人工确认危险操作 (HITL)", icon: <AuditOutlined /> },
-  { key: "autoApprove", label: "自动批准", description: "自动批准所有操作（覆盖交互确认）", icon: <CheckCircleOutlined /> },
+  { key: "enableShell", label: "Shell 执行", description: "允许智能体执行 Shell 命令", icon: <CodeXml /> },
+  { key: "enableWebSearch", label: "网页搜索", description: "允许智能体进行网页搜索", icon: <Globe /> },
+  { key: "interactive", label: "交互确认", description: "需要人工确认危险操作 (HITL)", icon: <ClipboardCheck /> },
+  { key: "autoApprove", label: "自动批准", description: "自动批准所有操作（覆盖交互确认）", icon: <CircleCheck /> },
 ];
 
 /**
@@ -192,7 +192,7 @@ export function GeneralSettingsSection({ sdk }: Props) {
             </div>
           </div>
           <Button
-            icon={<LogoutOutlined />}
+            icon={<LogOut />}
             onClick={logout}
             style={{ borderRadius: 8 }}
           >
@@ -257,7 +257,7 @@ function AppearanceCard({
     <Card title="外观">
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0" }}>
         <span style={{ fontSize: 18, color: "var(--main-color)", width: 24, textAlign: "center" }}>
-          <BgColorsOutlined />
+          <Palette />
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-1000)" }}>

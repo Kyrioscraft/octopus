@@ -11,12 +11,11 @@ import {
 } from "../rows/tools/registry.js";
 import { Collapse, Tooltip } from "antd";
 import {
-  CheckCircleFilled,
-  CloseCircleFilled,
-  LoadingOutlined,
-  ClockCircleOutlined,
-  FileTextOutlined,
-} from "@ant-design/icons";
+  CircleX,
+  LoaderCircle,
+  Clock,
+  Search,
+} from "lucide-react";
 
 /**
  * The ordered timeline of events for one assistant turn.
@@ -179,16 +178,19 @@ export function ToolGroupBar({ tools, isActive }: { tools: ToolEvent[]; isActive
   const pending = total - done - errored;
   const allDone = pending === 0 && errored === 0 && done === total;
 
-  // Status icon for the summary bar.
-  let statusIcon;
+  // Single-slot icon: spinner while any tool is still in flight, the
+  // exploration-group (FileText) type icon once all done, error/pending
+  // status icons otherwise — avoids the redundancy of a status icon next
+  // to the type icon (mirrors ToolCallRow / SubagentRow).
+  let leadIcon;
   if (errored > 0) {
-    statusIcon = <CloseCircleFilled style={{ color: "var(--color-error-500)" }} />;
+    leadIcon = <CircleX style={{ color: "var(--color-error-500)" }} />;
   } else if (pending > 0) {
-    statusIcon = <LoadingOutlined style={{ color: "var(--color-info-700)" }} />;
+    leadIcon = <LoaderCircle style={{ color: "var(--color-info-700)" }} />;
   } else if (allDone) {
-    statusIcon = <CheckCircleFilled style={{ color: "var(--gray-400)" }} />;
+    leadIcon = <Search style={{ fontSize: 13, color: "var(--gray-400)" }} />;
   } else {
-    statusIcon = <ClockCircleOutlined style={{ color: "var(--gray-400)" }} />;
+    leadIcon = <Clock style={{ color: "var(--gray-400)" }} />;
   }
 
   // Folded chips: up to 3 targets (file name / search term), remainder "+M".
@@ -223,8 +225,7 @@ export function ToolGroupBar({ tools, isActive }: { tools: ToolEvent[]; isActive
                 flexWrap: "wrap",
               }}
             >
-              {statusIcon}
-              <FileTextOutlined style={{ fontSize: 13, color: "var(--gray-400)" }} />
+              {leadIcon}
               <span>{explorationLeadText(tools)}</span>
               {visibleTargets.map((t) => (
                 <span

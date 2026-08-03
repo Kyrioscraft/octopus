@@ -1,4 +1,4 @@
-import { RobotOutlined } from "@ant-design/icons";
+import { Bot } from "lucide-react";
 import { useChatStore } from "../../../stores/chat.js";
 import type { SubagentEvent } from "../turn/types.js";
 
@@ -55,7 +55,7 @@ export function SubagentBadge({ subagents }: { subagents: SubagentEvent[] }) {
         cursor: "pointer",
       }}
     >
-      <RobotOutlined style={{ fontSize: 13 }} />
+      <Bot style={{ fontSize: 13 }} />
       <span>{total}</span>
     </button>
   );

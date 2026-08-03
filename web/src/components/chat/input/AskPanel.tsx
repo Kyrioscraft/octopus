@@ -32,14 +32,13 @@ import type {
   ResumeRequestBody,
 } from "@octopus/tentacle";
 import {
-  LeftOutlined,
-  RightOutlined,
-  CheckOutlined,
-  CheckCircleOutlined,
-  QuestionCircleOutlined,
-  MessageOutlined,
-  WarningOutlined,
-} from "@ant-design/icons";
+  ChevronLeft,
+  ChevronRight,
+  Check,
+  CircleHelp,
+  MessageSquare,
+  TriangleAlert,
+} from "lucide-react";
 
 const { TextArea } = Input;
 
@@ -167,7 +166,7 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         <Button
           type="text"
           size="small"
-          icon={<LeftOutlined />}
+          icon={<ChevronLeft />}
           disabled={page === 0}
           onClick={() => setPage((p) => Math.max(0, p - 1))}
         />
@@ -199,7 +198,7 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         <Button
           type="text"
           size="small"
-          icon={<RightOutlined />}
+          icon={<ChevronRight />}
           disabled={!canAdvance || isLast}
           onClick={() => setPage((p) => Math.min(total - 1, p + 1))}
         />
@@ -221,7 +220,7 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
           <Button
             size="small"
             type="primary"
-            icon={<CheckOutlined />}
+            icon={<Check />}
             disabled={!canAdvance}
             onClick={() => submitAll()}
           >
@@ -249,11 +248,11 @@ function AskKindLabel({ kind }: { kind: AskKind }) {
   const meta = (() => {
     switch (kind) {
       case "tool_approval":
-        return { icon: <WarningOutlined />, label: "需要批准", color: "var(--color-warning-500)" };
+        return { icon: <TriangleAlert />, label: "需要批准", color: "var(--color-warning-500)" };
       case "discussion":
-        return { icon: <MessageOutlined />, label: "方案选择", color: "var(--color-info-500)" };
+        return { icon: <MessageSquare />, label: "方案选择", color: "var(--color-info-500)" };
       case "clarify":
-        return { icon: <QuestionCircleOutlined />, label: "需要澄清", color: "var(--main-500)" };
+        return { icon: <CircleHelp />, label: "需要澄清", color: "var(--main-500)" };
     }
   })();
   return (
@@ -425,7 +424,7 @@ function ToolApprovalActions({
       <Button
         size="small"
         type="primary"
-        icon={<CheckOutlined />}
+        icon={<Check />}
         onClick={() => decide({ type: "approve" })}
       >
         批准

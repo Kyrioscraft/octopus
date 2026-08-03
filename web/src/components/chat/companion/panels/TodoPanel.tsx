@@ -1,9 +1,9 @@
 import { Progress, Tag, Empty } from "antd";
 import {
-  CheckCircleFilled,
-  ClockCircleOutlined,
-  LoadingOutlined,
-} from "@ant-design/icons";
+  CircleCheckBig,
+  Clock,
+  LoaderCircle,
+} from "lucide-react";
 import type { TodoItem, TodoStatus } from "../types.js";
 import type { CompanionPanelProps } from "../types.js";
 
@@ -99,20 +99,20 @@ export function statusVisual(status: TodoStatus): {
   switch (status) {
     case "completed":
       return {
-        icon: <CheckCircleFilled />,
+        icon: <CircleCheckBig />,
         color: "var(--color-success-500)",
         label: "已完成",
       };
     case "in_progress":
       return {
-        icon: <LoadingOutlined />,
+        icon: <LoaderCircle />,
         color: "var(--color-info-700)",
         label: "进行中",
       };
     case "pending":
     default:
       return {
-        icon: <ClockCircleOutlined />,
+        icon: <Clock />,
         color: "var(--gray-400)",
         label: "待处理",
       };
