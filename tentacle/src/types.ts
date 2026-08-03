@@ -64,9 +64,12 @@ export interface ChatRequest {
   /** Optional per-request model override ("provider:model"). Applied server-side
    *  via the configurable_model middleware; omitted = use config default. */
   model?: string;
-  /** Workspace access mode hint: "plan" | "confirm" | "auto". Logged server-side
-   *  only this iteration — does not yet alter graph behavior. */
-  mode?: "plan" | "confirm" | "auto";
+  /** Workspace access mode: "plan" | "confirm" | "auto" | "full".
+   *  plan   = read-only (destructive tools stripped).
+   *  confirm= per-step HITL approval (default).
+   *  auto   = HITL suppressed (but FileEditGuard still redirects shell writes).
+   *  full   = HITL suppressed AND FileEditGuard bypassed (fully autonomous). */
+  mode?: "plan" | "confirm" | "auto" | "full";
   /** Optional client-generated request id, used for optimistic UI correlation. */
   request_id?: string;
 }

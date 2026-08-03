@@ -563,9 +563,16 @@ export async function streamChat(input: ChatInput, emit: Emit): Promise<void> {
       input.agent, input.langgraphConfig, input.threadId, emit,
     );
 
-    // 5. Auto-generate title BEFORE finished so it rides in meta.title.
+    // 5. Auto-generate title for a new thread's first turn. This is independent
+    //    of HITL interrupts: even if the first turn pauses on a tool approval,
+    //    the title is generated now (from the user's first message) so the
+    //    sidebar never lingers on "新对话". The finished chunk below still
+    //    respects hasInterrupt — an interrupted turn isn't actually finished —
+    //    but the DB title is updated regardless, and the sidebar picks it up on
+    //    the next listThreads() refresh (triggered by init on re-entry, or when
+    //    the user navigates the sidebar).
     let newTitle: string | undefined;
-    if (input.isNewThread && !hasInterrupt && input.modelSpec) {
+    if (input.isNewThread && input.modelSpec) {
       try {
         const generated = await generateTitle(input.userMessage, input.modelSpec);
         newTitle = generated ?? input.userMessage.slice(0, 30);
@@ -579,7 +586,8 @@ export async function streamChat(input: ChatInput, emit: Emit): Promise<void> {
       }
     }
 
-    // 6. Emit finished (with title for new threads).
+    // 6. Emit finished (with title for new threads). Interrupted turns don't emit
+    //    finished — the turn isn't done — but the title is already persisted above.
     if (!hasInterrupt) {
       emit({
         status: "finished",

@@ -417,6 +417,25 @@ export function useChat({
     setBusy(false);
   }, []);
 
+  // ---- Switch access mode (persisted mid-session) ----
+  // Updates local state immediately AND writes the new mode to the thread on
+  // the server. This is what makes a mode switch take effect at the next
+  // approval point: the resume endpoint reads the persisted mode, so even an
+  // in-flight turn will honor the new mode once it pauses for input. The write
+  // is fire-and-forget — failures only surface in the console since the local
+  // state is already the source of truth for the input bar.
+  const changeAccessMode = useCallback((mode: AccessMode) => {
+    setAccessMode(mode);
+    const tid = activeThreadId;
+    if (tid) {
+      sdk.setThreadMode(tid, mode).catch((err) => {
+        // Don't surface as a user-facing error: the next /agent request also
+        // syncs the mode, so a failed PATCH here is self-healing.
+        console.warn("Failed to persist access mode on thread", tid, err);
+      });
+    }
+  }, [activeThreadId]);
+
   // ---- Attachment handling ----
   const pickAttachments = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -443,9 +462,9 @@ export function useChat({
     if (e.key === "Tab" && e.shiftKey) {
       e.preventDefault();
       const i = MODE_ORDER.indexOf(accessMode);
-      setAccessMode(MODE_ORDER[(i + 1) % MODE_ORDER.length]);
+      changeAccessMode(MODE_ORDER[(i + 1) % MODE_ORDER.length]);
     }
-  }, [doSend, accessMode]);
+  }, [doSend, accessMode, changeAccessMode]);
 
   // ---- Derived state ----
   const showStart = msgs.length === 0;
@@ -492,7 +511,7 @@ export function useChat({
 
   return {
     // state
-    msgs, text, setText, busy, ask, sessionAllowlist, accessMode, setAccessMode,
+    msgs, text, setText, busy, ask, sessionAllowlist, accessMode, setAccessMode: changeAccessMode,
     selectedModel, setSelectedModel, attachments, modelOptions, todos, allSubagents, showStart,
     attachInputRef,
     // actions

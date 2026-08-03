@@ -19,6 +19,7 @@ import {
   listUserThreadsByWorkspace,
   getThreadHistory,
   renameThread,
+  setThreadAccessMode,
   deleteThreadById,
   createUserThread,
 } from "../services/thread.service.js";
@@ -124,6 +125,29 @@ chatRouter.put("/thread/:id", getOptionalUser, async (c) => {
 });
 
 // =========================================================================
+// PATCH /api/chat/thread/{id}/mode  (switch access mode mid-session)
+// =========================================================================
+//
+// Lets the user switch the access mode (plan/confirm/auto/full) without
+// sending a new message. The chosen mode is persisted on the thread, so the
+// next resume picks it up — this is the "switch takes effect at the next
+// approval point" mechanism. The in-flight stream is NOT interrupted.
+
+chatRouter.patch("/thread/:id/mode", getOptionalUser, async (c) => {
+  const threadId = c.req.param("id");
+  const { mode } = await c.req.json<{ mode: string }>();
+  // Validate against the known set; reject unknown values rather than
+  // silently coercing, since a mode switch is an explicit user action.
+  const trimmed = mode?.trim();
+  if (trimmed !== "plan" && trimmed !== "confirm" && trimmed !== "auto" && trimmed !== "full") {
+    return c.json({ detail: "无效的访问模式" }, 400);
+  }
+  const result = setThreadAccessMode(threadId, trimmed);
+  if (!result) return c.json({ detail: "会话不存在" }, 404);
+  return c.json({ success: true, mode: result.accessMode });
+});
+
+// =========================================================================
 // POST /api/chat/agent  (stream a fresh chat turn)
 // =========================================================================
 
@@ -160,6 +184,14 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
   const requestedWsId =
     body.workspace_id ?? existing?.workspaceId ?? undefined;
   const { cwd: agentCwd, workspace } = resolveAgentCwd(userId, requestedWsId ?? null);
+  // Resolve the access mode early so we can persist it on thread creation.
+  // The client sends "plan" | "confirm" | "auto" | "full"; anything missing or
+  // unrecognized falls back to "confirm" (the per-step-approval default).
+  const rawModeForCreate = body.mode?.trim();
+  const accessMode: AccessMode =
+    rawModeForCreate === "plan" || rawModeForCreate === "auto" || rawModeForCreate === "full"
+      ? rawModeForCreate
+      : "confirm";
   if (!threadId) {
     threadId = `thread_${uuid()}`;
     createThread({
@@ -167,6 +199,7 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       userId,
       agentId: body.agent_id,
       workspaceId: workspace.id,
+      accessMode,
     });
   } else if (!existing) {
     createThread({
@@ -174,7 +207,15 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       userId,
       agentId: body.agent_id,
       workspaceId: workspace.id,
+      accessMode,
     });
+  } else {
+    // Existing thread: keep its persisted mode in sync with the request so a
+    // mode switch is reflected for the next resume even if the user didn't
+    // hit the dedicated mode endpoint.
+    if (existing.accessMode !== accessMode) {
+      setThreadAccessMode(threadId, accessMode);
+    }
   }
   // Make sure this conversation has an outputs/ directory inside the workspace.
   ensureThreadOutputs(userId, workspace.id, threadId);
@@ -184,12 +225,10 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
 
   const config = loadConfig();
   const modelOverride = body.model?.trim() || undefined;
-  // Resolve the workspace access mode. The client sends "plan" | "confirm" |
-  // "auto"; anything missing or unrecognized falls back to "confirm" (the
-  // per-step-approval default), which matches pre-existing behavior.
-  const rawMode = body.mode?.trim();
-  const accessMode: AccessMode =
-    rawMode === "plan" || rawMode === "auto" ? rawMode : "confirm";
+  // `accessMode` was resolved above (before thread creation) so it could be
+  // persisted on the thread row. It drives both graph build (plan strips
+  // destructive tools, full bypasses FileEditGuard) and the runtime HITL
+  // override (auto/full suppress all gated tools).
   logger.info("Chat request — resolved config", {
     model: modelOverride ?? config.model,
     thread_id: threadId,
@@ -292,20 +331,42 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
   // Resume in the same workspace the thread was bound to at creation.
   const existingThread = getThread(threadId);
   const { cwd: agentCwd, workspace } = resolveAgentCwd(userId, existingThread?.workspaceId ?? null);
+  // Read the persisted access mode so resume honors the user's LATEST choice,
+  // not the mode that was active when the turn started. This is what makes a
+  // mid-run mode switch take effect at the next approval point: the user can
+  // switch to auto/full, and subsequent resumes suppress HITL accordingly.
+  // Legacy rows (no access_mode) coerce to "confirm" in the db mapper.
+  const accessMode: AccessMode = (() => {
+    const m = existingThread?.accessMode;
+    return m === "plan" || m === "auto" || m === "full" ? m : "confirm";
+  })();
   const compiled = await makeGraph(config, {
     cwd: agentCwd,
     workspace: { environment: workspace.environment },
+    // accessMode rebuilds the graph for the right toolset (plan strips
+    // destructive tools, full bypasses FileEditGuard) and is part of the cache
+    // key, so each mode resolves to its own compiled graph.
+    accessMode,
     // Inject the same user subagents as the original turn so delegation works
     // consistently on resume.
     userSubagents: resolveUserSubagents(userId),
   });
   const agent = compiled.agent;
   const subagentRegistry = compiled.subagentRegistry;
-  const langgraphConfig = { configurable: { thread_id: threadId } };
+  // Re-inject the HITL override for the resolved mode, mirroring the /agent
+  // path. Without this, resume would fall back to the compiled default
+  // (confirm) and re-trigger approvals even in auto/full mode — the original
+  // cause of "auto mode still asks for approval after a question interrupt".
+  const interruptOverride = interruptOnForMode(accessMode);
+  const langgraphConfig = {
+    configurable: { thread_id: threadId },
+    ...(interruptOverride ? { context: { interruptOn: interruptOverride } } : {}),
+  };
 
   logger.info("Resume started", {
     thread_id: threadId,
     kind: resumeBody.kind,
+    mode: accessMode,
     request_id: requestId,
   });
 

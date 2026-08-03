@@ -6,20 +6,18 @@ import {
   FileAddOutlined, PictureOutlined,
   ThunderboltOutlined,
 } from "@ant-design/icons";
-import { TodoBadge } from "./TodoBadge.js";
-import type { TodoItem } from "../companion/types.js";
 import { ACCESS_MODES, MODE_ORDER, type AccessMode } from "../constants.js";
 
 const { TextArea } = Input;
 
 /**
  * The shared input bar — a bordered card with a textarea on top and a bottom
- * toolbar row (attachments popover, access-mode select, todo badge, model
- * select, send/stop button).
+ * toolbar row (attachments popover, access-mode select, model select, send/stop
+ * button).
  *
  * This component is reused in two places: the start screen and the bottom
  * input slot. It owns NO state — everything (text, busy, accessMode, model,
- * attachments, todos, handlers) is passed in via props so the parent (Chat.tsx)
+ * attachments, handlers) is passed in via props so the parent (Chat.tsx)
  * stays the single source of truth for input state.
  *
  * The hidden file input for attachments is rendered here (triggered
@@ -37,7 +35,6 @@ export function InputBar({
   attachInputRef,
   onPickAttachments,
   onKey,
-  todos,
   selectedModel,
   setSelectedModel,
   modelOptions,
@@ -55,7 +52,6 @@ export function InputBar({
   attachInputRef: React.RefObject<HTMLInputElement | null>;
   onPickAttachments: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onKey: (e: React.KeyboardEvent) => void;
-  todos: TodoItem[];
   selectedModel: string | null;
   setSelectedModel: (v: string | null) => void;
   modelOptions: Array<{ label: string; options: Array<{ label: string; value: string }> }>;
@@ -82,8 +78,10 @@ export function InputBar({
       boxShadow: "0 2px 8px var(--shadow-1)",
       transition: "box-shadow 0.3s ease, border-color 0.3s ease",
     }}>
-      {/* High-privilege banner: surfaces the risk whenever auto mode is armed
-          so the user knows file changes will apply without per-step approval. */}
+      {/* High-privilege banner: surfaces the risk whenever an autonomous mode
+          is armed so the user knows changes will apply without per-step
+          approval. `auto` still redirects shell file-writes to edit/write_file;
+          `full` runs everything unchecked, including those. */}
       {accessMode === "auto" && !busy && (
         <div style={{
           display: "flex", alignItems: "center", gap: 6,
@@ -92,6 +90,16 @@ export function InputBar({
           background: "var(--main-50)", borderRadius: 6,
         }}>
           <ThunderboltOutlined /> 自动模式：将直接执行文件变更，不再逐步确认
+        </div>
+      )}
+      {accessMode === "full" && !busy && (
+        <div style={{
+          display: "flex", alignItems: "center", gap: 6,
+          fontSize: 12, color: "var(--danger-color, #f5222d)",
+          padding: "2px 6px", marginBottom: 6,
+          background: "rgba(245, 34, 45, 0.08)", borderRadius: 6,
+        }}>
+          <ThunderboltOutlined /> 完全控制：连安全命令也将自动执行，不再审核，请谨慎
         </div>
       )}
 
@@ -196,10 +204,6 @@ export function InputBar({
             options={MODE_ORDER.map((m) => ({ value: m, label: ACCESS_MODES[m].label }))}
           />
         </Tooltip>
-
-        {/* Todo badge — only when the active conversation has todos. write_todos
-            is hidden from the tool timeline; its latest state surfaces here. */}
-        <TodoBadge todos={todos} />
 
         {/* Spacer pushes the right group to the end */}
         <div style={{ flex: 1 }} />

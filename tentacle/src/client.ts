@@ -124,6 +124,23 @@ export class OctopusClient {
     await this.#put(`/api/chat/thread/${threadId}`, { title });
   }
 
+  /**
+   * Switch the access mode of an existing thread (plan/confirm/auto/full)
+   * without sending a new message. The mode is persisted server-side so the
+   * next resume honors it — this is how a mid-run mode switch takes effect at
+   * the next approval point. Returns the stored mode on success.
+   */
+  async setThreadMode(
+    threadId: string,
+    mode: "plan" | "confirm" | "auto" | "full",
+  ): Promise<string> {
+    const res = await this.#patch<{ mode: string }>(
+      `/api/chat/thread/${threadId}/mode`,
+      { mode },
+    );
+    return res.mode;
+  }
+
   // =========================================================================
   // Config — Skills (/api/config/skills)
   // =========================================================================
@@ -677,6 +694,19 @@ export class OctopusClient {
   async #put<T>(path: string, body: unknown): Promise<T> {
     const res = await fetch(`${this.#baseUrl}${path}`, {
       method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        ...this.#authHeader(),
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) throw await this.#httpError(res);
+    return res.json() as T;
+  }
+
+  async #patch<T>(path: string, body: unknown): Promise<T> {
+    const res = await fetch(`${this.#baseUrl}${path}`, {
+      method: "PATCH",
       headers: {
         "Content-Type": "application/json",
         ...this.#authHeader(),

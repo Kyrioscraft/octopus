@@ -3,14 +3,15 @@ import { useChatStore } from "../../../stores/chat.js";
 import type { TodoItem } from "../companion/types.js";
 
 /**
- * Todo progress badge for the input toolbar.
+ * Todo progress badge for the chat header.
  *
  * `write_todos` is no longer rendered as a tool card in the conversation
  * timeline; instead, the latest todo list is surfaced here — a compact badge
- * right after the access-mode selector. The badge shows an icon + "done/total"
- * count and color-codes by progress (all done = green, in progress = blue,
- * none done = gray). Clicking it opens the right-side companion panel and
- * auto-activates the "待办" tab (see CompanionPanel / TodoPanel).
+ * in the chat header, to the left of the companion-panel toggle. The badge
+ * shows an icon + "done/total" count and color-codes by progress (all done =
+ * green, in progress = blue, none done = gray). Clicking it opens the
+ * right-side companion panel and auto-activates the "待办" tab (see
+ * CompanionPanel / TodoPanel).
  *
  * Data source: the caller derives the latest `write_todos` call's args.todos
  * from the active/last assistant turn's events[].

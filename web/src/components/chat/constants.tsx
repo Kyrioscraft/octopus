@@ -1,13 +1,18 @@
-import { EyeOutlined, LockOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { CrownOutlined, EyeOutlined, LockOutlined, ThunderboltOutlined } from "@ant-design/icons";
 
 /**
  * Input toolbar access modes. Aligned with ChatRequest.mode on the server side
- * (tentacle types); only confirm/auto currently alter graph behavior, plan is
- * read-only planning. This table centralizes the per-mode UX (icon, copy,
- * border color, dangerous flag) so the Select, textarea, and warning banner
- * all stay in sync.
+ * (tentacle types). The four modes form an escalating autonomy ladder:
+ *   plan    — read-only planning (destructive tools stripped).
+ *   confirm — per-step HITL approval (default).
+ *   auto    — HITL suppressed; file edits go through edit/write_file, shell
+ *             file-writes are still redirected by FileEditGuard.
+ *   full    — fully autonomous: HITL suppressed AND FileEditGuard bypassed, so
+ *             even shell commands that write files run unchecked.
+ * This table centralizes the per-mode UX (icon, copy, border color, dangerous
+ * flag) so the Select, textarea, and warning banners all stay in sync.
  */
-export type AccessMode = "plan" | "confirm" | "auto";
+export type AccessMode = "plan" | "confirm" | "auto" | "full";
 
 export const ACCESS_MODES: Record<AccessMode, {
   icon: React.ReactNode;
@@ -36,15 +41,23 @@ export const ACCESS_MODES: Record<AccessMode, {
   auto: {
     icon: <ThunderboltOutlined />,
     label: "自动编辑",
-    hint: "全自动执行变更",
+    hint: "全自动执行变更（含安全命令）",
     placeholder: "描述任务，我将自动执行…",
     borderColor: "var(--main-color)",
     dangerous: true,
   },
+  full: {
+    icon: <CrownOutlined />,
+    label: "完全控制",
+    hint: "全自动，含安全命令也不再审核",
+    placeholder: "描述任务，我将完全自主执行…",
+    borderColor: "var(--danger-color, #f5222d)",
+    dangerous: true,
+  },
 };
 
-/** Cycle order for the Shift+Tab shortcut: plan -> confirm -> auto -> plan. */
-export const MODE_ORDER: AccessMode[] = ["plan", "confirm", "auto"];
+/** Cycle order for the Shift+Tab shortcut: plan -> confirm -> auto -> full -> plan. */
+export const MODE_ORDER: AccessMode[] = ["plan", "confirm", "auto", "full"];
 
 /** Random greetings shown on the start screen. */
 export const GREETINGS = [

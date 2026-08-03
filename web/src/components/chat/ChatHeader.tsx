@@ -1,12 +1,17 @@
 import { Button, Tooltip } from "antd";
 import { GithubOutlined, LeftSquareOutlined, RightSquareOutlined } from "@ant-design/icons";
+import { TodoBadge } from "./header/TodoBadge.js";
+import { SubagentBadge } from "./header/SubagentBadge.js";
+import type { TodoItem } from "./companion/types.js";
+import type { SubagentEvent } from "./turn/types.js";
 
 /**
  * Chat page header — a slim bar (45px) above the conversation body.
  *
  * Left side: the conversation title ("新对话" when empty, "对话" otherwise).
- * Right side: the companion-panel toggle (open/close the right-side panel) and
- * a GitHub repo link.
+ * Right side: on-demand status badges (todos / subagents, rendered only when
+ * the conversation has any), the companion-panel toggle (open/close the
+ * right-side panel), and a GitHub repo link.
  *
  * Purely presentational — all state (`companionOpen`) and handlers
  * (`onToggleCompanion`) come via props. The component owns no state of its own.
@@ -15,10 +20,14 @@ export function ChatHeader({
   showStart,
   companionOpen,
   onToggleCompanion,
+  todos,
+  subagents,
 }: {
   showStart: boolean;
   companionOpen: boolean;
   onToggleCompanion: () => void;
+  todos: TodoItem[];
+  subagents: SubagentEvent[];
 }) {
   return (
     <div style={{
@@ -30,7 +39,14 @@ export function ChatHeader({
           {showStart ? "新对话" : "对话"}
         </span>
       </div>
-      <div style={{ display: "flex", gap: 4 }}>
+      <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+        {/* On-demand status badges — only render when the conversation has
+            any. Both open the right-side companion panel at the matching tab
+            when clicked. Kept to the LEFT of the companion-panel toggle so the
+            toggle stays anchored next to the panel it controls. */}
+        <TodoBadge todos={todos} />
+        <SubagentBadge subagents={subagents} />
+
         {/* Companion panel toggle — opens/closes the right-side panel (the app's
             shared secondary surface hosting files / subagents / todos tabs).
             The panel's own tab bar handles switching; this button only toggles. */}

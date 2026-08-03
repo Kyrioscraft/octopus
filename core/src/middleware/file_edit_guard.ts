@@ -73,10 +73,33 @@ function detectFileWrite(
   return null;
 }
 
+/**
+ * Constructor options.
+ *
+ * `bypassWhenFull` disables the guard entirely. It is set when the graph is
+ * built for `full` access mode, where the user has explicitly opted into a
+ * fully autonomous agent (including shell commands that write files). In all
+ * other modes (plan/confirm/auto) the guard stays active so non-Anthropic
+ * models are still redirected toward `edit_file` / `write_file`.
+ */
+interface FileEditGuardOptions {
+  bypassWhenFull?: boolean;
+}
+
 class FileEditGuardMiddleware {
   name = "FileEditGuardMiddleware";
 
+  private readonly _bypassWhenFull: boolean;
+
+  constructor(options: FileEditGuardOptions = {}) {
+    this._bypassWhenFull = options.bypassWhenFull === true;
+  }
+
   private _intercept = (request: ToolCallRequest): ToolMessage | undefined => {
+    // In `full` mode the guard is bypassed — the user has accepted that the
+    // agent may run any shell command, including file-writing ones.
+    if (this._bypassWhenFull) return undefined;
+
     const toolCall = request.toolCall;
     if (toolCall.name !== "execute") return undefined;
 

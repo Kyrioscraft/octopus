@@ -26,6 +26,12 @@ export const threads = sqliteTable("threads", {
   // NOTE: kept out of the DDL initially and added via idempotent ALTER TABLE
   // (see db/index.ts) so pre-existing SQLite files upgrade in place.
   workspaceId: text("workspace_id"),
+  // Persisted access mode (plan/confirm/auto/full). The front-end sends `mode`
+  // per request, but we also store it on the thread so resume picks up the
+  // latest user-chosen mode without requiring a new message. NULL on legacy
+  // rows is coerced to "confirm" by mapThread.
+  // NOTE: added via idempotent ALTER TABLE (see db/index.ts).
+  accessMode: text("access_mode"),
   createdAt: text("created_at").notNull(),
 });
 

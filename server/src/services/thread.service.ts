@@ -16,6 +16,7 @@ import {
   listThreads,
   listThreadsByWorkspace,
   updateThreadTitle,
+  updateThreadAccessMode,
   deleteThread,
 } from "../db/index.js";
 import type { ThreadRow, MessageRow } from "../db/index.js";
@@ -79,6 +80,20 @@ export function renameThread(
   const updated = updateThreadTitle(threadId, title?.trim() || DEFAULT_TITLE);
   if (!updated) return null;
   return { title: updated.title };
+}
+
+/**
+ * Persist a new access mode on the thread. Called when the user switches the
+ * mode mid-session so the resume path picks up the latest mode without
+ * requiring a new message. Returns the stored mode, or null if not found.
+ */
+export function setThreadAccessMode(
+  threadId: string,
+  accessMode: string,
+): { accessMode: string } | null {
+  const updated = updateThreadAccessMode(threadId, accessMode);
+  if (!updated) return null;
+  return { accessMode: updated.accessMode };
 }
 
 /** Delete a thread. */

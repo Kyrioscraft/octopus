@@ -44,6 +44,8 @@ export interface ThreadRow {
   title: string;
   agentId: string;
   workspaceId?: string | null;
+  /** Persisted access mode (plan/confirm/auto/full). Defaults to "confirm". */
+  accessMode: string;
   createdAt: string;
   messages: MessageRow[];
 }
@@ -222,6 +224,13 @@ function getDb(): BetterSQLite3Database<typeof schema> {
     if (!/duplicate column/i.test(err?.message ?? "")) throw err;
   }
   try {
+    // Persisted access mode (plan/confirm/auto/full). Nullable so legacy rows
+    // (pre-existing DB files) coerce to the "confirm" default in mapThread.
+    sqlite.exec(`ALTER TABLE threads ADD COLUMN access_mode TEXT;`);
+  } catch (err: any) {
+    if (!/duplicate column/i.test(err?.message ?? "")) throw err;
+  }
+  try {
     sqlite.exec(`ALTER TABLE workspaces ADD COLUMN environment TEXT NOT NULL DEFAULT 'local';`);
   } catch (err: any) {
     if (!/duplicate column/i.test(err?.message ?? "")) throw err;
@@ -296,6 +305,9 @@ function mapThread(
     userId: t.userId,
     title: t.title,
     agentId: t.agentId,
+    // Legacy rows (created before access_mode existed) have NULL — coerce to
+    // the default per-step-approval mode so resume behaves as before.
+    accessMode: t.accessMode ?? "confirm",
     createdAt: t.createdAt,
     messages: msgs,
   };
@@ -376,9 +388,11 @@ export function createThread(params: {
   title?: string;
   agentId?: string;
   workspaceId?: string | null;
+  accessMode?: string;
 }): ThreadRow {
   const createdAt = new Date().toISOString();
   const workspaceId = params.workspaceId ?? null;
+  const accessMode = params.accessMode ?? "confirm";
   getDb()
     .insert(schema.threads)
     .values({
@@ -387,6 +401,7 @@ export function createThread(params: {
       title: params.title ?? "新对话",
       agentId: params.agentId ?? "ChatbotAgent",
       workspaceId,
+      accessMode,
       createdAt,
     })
     .run();
@@ -395,6 +410,7 @@ export function createThread(params: {
     userId: params.userId,
     title: params.title ?? "新对话",
     agentId: params.agentId ?? "ChatbotAgent",
+    accessMode,
     createdAt,
     messages: [],
   };
@@ -434,6 +450,21 @@ export function updateThreadTitle(id: string, title: string): ThreadRow | undefi
   if (!existing) return undefined;
   db.update(schema.threads).set({ title }).where(eq(schema.threads.id, id)).run();
   return mapThread({ ...existing, title }, []);
+}
+
+/**
+ * Persist the user's current access mode on the thread. This is what makes a
+ * mid-run mode switch take effect at the next approval point: the resume
+ * endpoint reads `thread.accessMode` and rebuilds the interruptOn override
+ * accordingly, so the in-flight turn honors the latest mode without needing
+ * a new message.
+ */
+export function updateThreadAccessMode(id: string, accessMode: string): ThreadRow | undefined {
+  const db = getDb();
+  const existing = db.select().from(schema.threads).where(eq(schema.threads.id, id)).get();
+  if (!existing) return undefined;
+  db.update(schema.threads).set({ accessMode }).where(eq(schema.threads.id, id)).run();
+  return mapThread({ ...existing, accessMode }, []);
 }
 
 export function deleteThread(id: string): void {

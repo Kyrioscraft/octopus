@@ -111,7 +111,6 @@ export function ChatPage() {
       attachInputRef={chat.attachInputRef}
       onPickAttachments={chat.pickAttachments}
       onKey={chat.onKey}
-      todos={chat.todos}
       selectedModel={chat.selectedModel}
       setSelectedModel={chat.setSelectedModel}
       modelOptions={chat.modelOptions}
@@ -127,6 +126,8 @@ export function ChatPage() {
         showStart={chat.showStart}
         companionOpen={companionOpen}
         onToggleCompanion={toggleCompanion}
+        todos={chat.todos}
+        subagents={chat.allSubagents}
       />
 
       {/* Body — horizontal flex: the LEFT column (messages + input bar stacked)

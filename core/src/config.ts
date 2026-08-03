@@ -14,19 +14,23 @@ import { ModelConfig } from "./model_config.js";
 import { clearCaches } from "./model_config.js";
 
 // =============================================================================
-// Access modes — workspace access mode (plan / confirm / auto).
+// Access modes — workspace access mode (plan / confirm / auto / full).
 //
 // Drives two orthogonal behaviors at graph-build and runtime:
 //   - plan   : destructive tools are removed from the toolset (read-only).
 //   - confirm: per-tool HITL interrupts apply (the compiled default).
 //   - auto   : all HITL interrupts are suppressed at runtime via context.
+//   - full   : like auto (HITL suppressed) AND the FileEditGuard content
+//              guard is bypassed at build time — shell commands that write
+//              files are no longer hard-blocked. The agent runs fully
+//              autonomously and is responsible for its own actions.
 // The front-end sends `mode` per request; the server resolves it to one of
-// these and threads it into makeGraph (tool filtering) and the runtime
-// context (HITL override). Defined here (not in tentacle) to keep
-// architecture boundaries: server → core only.
+// these and threads it into makeGraph (tool filtering + FileEditGuard bypass)
+// and the runtime context (HITL override). Defined here (not in tentacle) to
+// keep architecture boundaries: server → core only.
 // =============================================================================
 
-export type AccessMode = "plan" | "confirm" | "auto";
+export type AccessMode = "plan" | "confirm" | "auto" | "full";
 
 /**
  * Tool names with side effects — file writes, shell execution, subagent/task
@@ -60,9 +64,11 @@ export const DESTRUCTIVE_TOOLS = new Set<string>([
 export function interruptOnForMode(
   mode: AccessMode,
 ): Record<string, boolean> | null {
-  if (mode === "auto") {
+  if (mode === "auto" || mode === "full") {
     // Suppress every gated tool (destructive + the read-only-but-gated
-    // web_search/fetch_url) so the run is fully autonomous.
+    // web_search/fetch_url) so the run is fully autonomous. `auto` and
+    // `full` share the same HITL override; they differ only in that `full`
+    // additionally bypasses FileEditGuard at build time (see agent.ts).
     const all = [...DESTRUCTIVE_TOOLS, "web_search", "fetch_url"];
     return Object.fromEntries(all.map((n) => [n, false]));
   }

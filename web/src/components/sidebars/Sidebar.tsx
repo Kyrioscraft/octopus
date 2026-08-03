@@ -20,6 +20,7 @@ import {
 import { OctopusClient, type Thread, type Workspace } from "@octopus/tentacle";
 import { useChatStore } from "../../stores/chat.js";
 import { DirBrowserModal } from "../workspace/DirBrowserModal.js";
+import { formatRelativeTime } from "../../utils/time.js";
 
 const sdk = new OctopusClient();
 
@@ -270,7 +271,7 @@ export function Sidebar() {
       {/* Brand area */}
       <div style={{
         display: "flex", alignItems: "center", gap: 8,
-        padding: "14px 16px 10px", flexShrink: 0,
+        padding: "14px 14px 8px", flexShrink: 0,
       }}>
         <img
           src="/octopus-logo.svg"
@@ -285,6 +286,85 @@ export function Sidebar() {
           Octopus Agent
         </span>
       </div>
+
+      {/* "创建新对话" — primary action, right under the brand */}
+      <div style={{ padding: "0 12px 8px", flexShrink: 0 }}>
+        <Button
+          block
+          onClick={handleNewChat}
+          icon={<MessageOutlined />}
+          style={{
+            borderColor: "var(--gray-150)",
+            backgroundColor: "var(--gray-0)",
+            color: "var(--main-color)",
+            boxShadow: "0 3px 4px rgba(0,10,20,0.02)",
+            fontWeight: 500, height: 36, fontSize: 14, borderRadius: 8,
+            transition: "box-shadow 0.2s ease, border-color 0.2s ease",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.boxShadow = "0 3px 4px rgba(0,10,20,0.07)";
+            e.currentTarget.style.borderColor = "var(--gray-200)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.boxShadow = "0 3px 4px rgba(0,10,20,0.02)";
+            e.currentTarget.style.borderColor = "var(--gray-150)";
+          }}
+        >
+          创建新对话
+        </Button>
+      </div>
+
+      {/* Navigation items */}
+      <div style={{ padding: "0 8px", flexShrink: 0 }}>
+        {navItems.map((item) => (
+          <Tooltip key={item.key} title={item.label} placement="right">
+            <div
+              onClick={() => {
+                if (item.key === "search") {
+                  openSearch();
+                  return;
+                }
+                setNavKey(item.key);
+                if (item.key === "extensions") navigate("/extensions");
+              }}
+              style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "0 10px", height: 36, borderRadius: 8,
+                cursor: "pointer", fontSize: 14,
+                color: navKey === item.key ? "var(--main-color)" : "var(--gray-700)",
+                background: navKey === item.key
+                  ? "color-mix(in srgb, var(--main-color) 6%, var(--gray-0))"
+                  : "transparent",
+                fontWeight: navKey === item.key ? 600 : 450,
+                marginBottom: 2,
+                transition: "background-color 0.2s ease, color 0.2s ease",
+              }}
+              onMouseEnter={(e) => {
+                if (navKey !== item.key) {
+                  e.currentTarget.style.backgroundColor = "var(--main-20)";
+                  e.currentTarget.style.color = "var(--main-color)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (navKey !== item.key) {
+                  e.currentTarget.style.backgroundColor = "transparent";
+                  e.currentTarget.style.color = "var(--gray-700)";
+                }
+              }}
+            >
+              <span style={{ fontSize: 18, display: "flex", alignItems: "center" }}>
+                {item.icon}
+              </span>
+              <span>{item.label}</span>
+            </div>
+          </Tooltip>
+        ))}
+      </div>
+
+      {/* Divider — separates action entries from content lists */}
+      <div style={{
+        margin: "6px 20px", borderTop: "1px solid var(--gray-100)", flexShrink: 0,
+      }} />
 
       {/* Workspace section — list + Open Folder */}
       <div style={{ padding: "0 8px 4px", flexShrink: 0 }}>
@@ -352,81 +432,7 @@ export function Sidebar() {
         )}
       </div>
 
-      {/* "创建新对话" — primary action styling */}
-      <div style={{ padding: "0 10px 8px", flexShrink: 0 }}>
-        <Button
-          block
-          onClick={handleNewChat}
-          icon={<MessageOutlined />}
-          style={{
-            borderColor: "var(--gray-150)",
-            backgroundColor: "var(--gray-0)",
-            color: "var(--main-color)",
-            boxShadow: "0 3px 4px rgba(0,10,20,0.02)",
-            fontWeight: 500, height: 36, fontSize: 14, borderRadius: 8,
-            transition: "box-shadow 0.2s ease, border-color 0.2s ease",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.boxShadow = "0 3px 4px rgba(0,10,20,0.07)";
-            e.currentTarget.style.borderColor = "var(--gray-200)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.boxShadow = "0 3px 4px rgba(0,10,20,0.02)";
-            e.currentTarget.style.borderColor = "var(--gray-150)";
-          }}
-        >
-          创建新对话
-        </Button>
-      </div>
-
-      {/* Navigation items */}
-      <div style={{ padding: "0 8px 4px", flexShrink: 0 }}>
-        {navItems.map((item) => (
-          <Tooltip key={item.key} title={item.label} placement="right">
-            <div
-              onClick={() => {
-                if (item.key === "search") {
-                  openSearch();
-                  return;
-                }
-                setNavKey(item.key);
-                if (item.key === "extensions") navigate("/extensions");
-              }}
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "0 10px", height: 36, borderRadius: 8,
-                cursor: "pointer", fontSize: 14,
-                color: navKey === item.key ? "var(--main-color)" : "var(--gray-700)",
-                background: navKey === item.key
-                  ? "color-mix(in srgb, var(--main-color) 6%, var(--gray-0))"
-                  : "transparent",
-                fontWeight: navKey === item.key ? 600 : 450,
-                marginBottom: 2,
-                transition: "background-color 0.2s ease, color 0.2s ease",
-              }}
-              onMouseEnter={(e) => {
-                if (navKey !== item.key) {
-                  e.currentTarget.style.backgroundColor = "var(--main-20)";
-                  e.currentTarget.style.color = "var(--main-color)";
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (navKey !== item.key) {
-                  e.currentTarget.style.backgroundColor = "transparent";
-                  e.currentTarget.style.color = "var(--gray-700)";
-                }
-              }}
-            >
-              <span style={{ fontSize: 18, display: "flex", alignItems: "center" }}>
-                {item.icon}
-              </span>
-              <span>{item.label}</span>
-            </div>
-          </Tooltip>
-        ))}
-      </div>
-
-      {/* Divider */}
+      {/* Divider — separates workspace from thread history */}
       <div style={{
         margin: "6px 20px", borderTop: "1px solid var(--gray-100)", flexShrink: 0,
       }} />
@@ -475,6 +481,14 @@ export function Sidebar() {
           >
             <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
               {t.title}
+            </span>
+            {/* Relative timestamp (always visible, kept as muted secondary text) */}
+            <span style={{
+              flexShrink: 0, marginLeft: 8,
+              fontSize: 11, lineHeight: 1, color: "var(--gray-400)",
+              whiteSpace: "nowrap",
+            }}>
+              {formatRelativeTime(t.createdAt)}
             </span>
             {/* Hover-only more-actions trigger */}
             <Dropdown

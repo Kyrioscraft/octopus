@@ -578,7 +578,14 @@ async function _makeGraphUncached(
   // enforces it programmatically so file edits always go through
   // FilesystemBackend.edit()/write() (safe string replacement) instead of
   // shell commands (which also trigger excessive HITL approval prompts).
-  middleware.push(new FileEditGuardMiddleware());
+  //
+  // In `full` access mode the guard is bypassed: the user has opted into a
+  // fully autonomous agent and accepts that shell commands may write files
+  // directly. accessMode is part of the graph cache key, so `full` compiles
+  // its own graph with the bypass enabled — cache-safe by construction.
+  middleware.push(
+    new FileEditGuardMiddleware({ bypassWhenFull: options?.accessMode === "full" }),
+  );
   middleware.push(new ToolExceptionRecoveryMiddleware());
   middleware.push(new ResumeStateMiddleware());
 
