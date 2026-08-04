@@ -6,6 +6,7 @@
   "main": "dist/cli.js",
   "types": "dist/cli.d.ts",
   "bin": {
+    "oc": "dist/cli.js",
     "octopus": "dist/cli.js",
     "octopus-tui": "dist/cli.js"
   },

@@ -50,7 +50,16 @@ pnpm dev:web
 # → http://localhost:5173（默认账户：octopus / octopus）
 ```
 
-也可以使用终端界面：`pnpm start:tui`
+也可以使用终端界面：`pnpm oc`
+
+想要在任意目录使用？一次性注册简短的 `oc` 命令：
+
+```bash
+pnpm --filter @octopus/tui link --global
+oc              # 在任意目录启动 TUI
+oc -n -p "你好"  # 非交互模式（单次执行）
+oc agents       # 无界面子命令
+```
 
 ## 配置
 

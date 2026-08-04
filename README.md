@@ -50,7 +50,16 @@ pnpm dev:web
 # → http://localhost:5173  (default account: octopus / octopus)
 ```
 
-Also try the terminal UI: `pnpm start:tui`
+Also try the terminal UI: `pnpm oc`
+
+Want it available everywhere? Register the short `oc` command once:
+
+```bash
+pnpm --filter @octopus/tui link --global
+oc              # launch the TUI from any directory
+oc -n -p "hi"   # one-shot / non-interactive
+oc agents       # headless subcommands
+```
 
 ## Configuration
 

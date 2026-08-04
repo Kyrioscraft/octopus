@@ -31,7 +31,7 @@ const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as { version: string };
 const program = new Command();
 
 program
-  .name("octopus-tui")
+  .name("oc")
   .description("Octopus AI agent — terminal interface")
   .version(pkg.version, "-v, --version", "Show version number")
   .option("-m, --model <spec>", "Model spec (e.g. openai:deepseek-v4-flash)")
@@ -128,7 +128,7 @@ async function runInteractive(opts: CliOpts): Promise<void> {
       "  - On Windows, use Windows Terminal, cmd.exe, or PowerShell.\n" +
       "  - Git Bash with winpty may not work — use mintty or Windows Terminal.\n" +
       "  - For non-TTY environments, use --non-interactive (-n) mode instead:\n" +
-      "    octopus-tui -n -p \"your prompt\"\n"
+      "    oc -n -p \"your prompt\"\n"
     );
     process.exit(1);
   }

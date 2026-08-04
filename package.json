@@ -15,7 +15,9 @@
     "dev:server": "pnpm --filter @octopus/server run dev",
     "dev:web": "pnpm --filter @octopus/web run dev",
     "start:tui": "pnpm build:tui && node tui/dist/cli.js",
-    "start:tui:dev": "pnpm build:libs && node --watch tui/dist/cli.js"
+    "start:tui:dev": "pnpm build:libs && node --watch tui/dist/cli.js",
+    "oc": "pnpm build:tui && node tui/dist/cli.js",
+    "oc:dev": "pnpm build:libs && node --watch tui/dist/cli.js"
   },
   "packageManager": "pnpm@10.32.1",
   "engines": {
