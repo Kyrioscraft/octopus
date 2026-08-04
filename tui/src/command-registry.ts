@@ -87,7 +87,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   {
     name: "/clear",
     description: "Clear chat and start new thread",
-    bypassTier: BypassTier.QUEUED,
+    bypassTier: BypassTier.IMMEDIATE_UI,
     hiddenKeywords: "reset",
   },
   {

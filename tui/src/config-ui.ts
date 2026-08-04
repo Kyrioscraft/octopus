@@ -106,7 +106,7 @@ export const UNICODE_GLYPHS: Glyphs = {
   toolCall: "⏺",
   branch: "⎿",
   dashed: "┄",
-  prompt: "❯",
+  prompt: ">",
   railTop: "╭",
   railBottom: "╰",
   circleEmpty: "○",

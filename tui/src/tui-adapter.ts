@@ -28,6 +28,8 @@ const logger = getLogger("tui.adapter");
 export interface TuiAdapterCallbacks {
   /** Add a message to the chat history. */
   addMessage: (msg: ChatMessageData) => void;
+  /** Insert a message before another message by ID. */
+  insertMessage: (msg: ChatMessageData, beforeId: string) => void;
   /** Update an existing message by ID (used for streaming assistant output). */
   updateMessage: (id: string, updates: Partial<ChatMessageData>) => void;
   /** Add or update a tool call widget. */
@@ -68,6 +70,8 @@ export interface ExecutionContext {
   agentName?: string;
   autoApprove?: boolean;
   abortSignal?: AbortSignal;
+  /** Pre-created assistant message ID to update in-place instead of creating a new one. */
+  assistantMessageId?: string;
 }
 
 // =============================================================================
@@ -158,7 +162,7 @@ export async function executeAgentTask(
   userMessage: string,
 ): Promise<void> {
   const state: StreamState = {
-    assistantMessageId: null,
+    assistantMessageId: ctx.assistantMessageId ?? null,
     assistantContent: "",
     reasoningContent: "",
     toolCalls: new Map(),
@@ -428,8 +432,8 @@ function finalizeStream(
   state: StreamState,
   callbacks: TuiAdapterCallbacks,
 ): void {
-  // If we have an assistant message with content, ensure it's finalized
-  if (state.assistantMessageId && state.assistantContent) {
+  // If we have an assistant message (pre-created or stream-created), finalize it.
+  if (state.assistantMessageId) {
     callbacks.updateMessage(state.assistantMessageId, {
       content: state.assistantContent,
       metadata: {
@@ -534,18 +538,34 @@ function ensureSubagent(
       tools: [],
     };
     state.subagents.set(agentNs, tracker);
-    callbacks.addMessage({
-      id: tracker.messageId,
-      role: "subagent",
-      content: "",
-      timestamp: Date.now(),
-      metadata: {
-        agentType: tracker.agentType,
-        description: "",
-        status: "running",
-        tools: [],
-      },
-    });
+    // Insert before assistant message when possible
+    if (state.assistantMessageId) {
+      callbacks.insertMessage({
+        id: tracker.messageId,
+        role: "subagent",
+        content: "",
+        timestamp: Date.now(),
+        metadata: {
+          agentType: tracker.agentType,
+          description: "",
+          status: "running",
+          tools: [],
+        },
+      }, state.assistantMessageId);
+    } else {
+      callbacks.addMessage({
+        id: tracker.messageId,
+        role: "subagent",
+        content: "",
+        timestamp: Date.now(),
+        metadata: {
+          agentType: tracker.agentType,
+          description: "",
+          status: "running",
+          tools: [],
+        },
+      });
+    }
   }
   return tracker;
 }
@@ -693,18 +713,34 @@ function ensureMainExplore(
     tools: [],
   };
   state.mainExplore = tracker;
-  callbacks.addMessage({
-    id: tracker.messageId,
-    role: "subagent",
-    content: "",
-    timestamp: Date.now(),
-    metadata: {
-      agentType: tracker.agentType,
-      description: "",
-      status: "running",
-      tools: [],
-    },
-  });
+  // Insert before the assistant message so Explore appears inline
+  if (state.assistantMessageId) {
+    callbacks.insertMessage({
+      id: tracker.messageId,
+      role: "subagent",
+      content: "",
+      timestamp: Date.now(),
+      metadata: {
+        agentType: tracker.agentType,
+        description: "",
+        status: "running",
+        tools: [],
+      },
+    }, state.assistantMessageId);
+  } else {
+    callbacks.addMessage({
+      id: tracker.messageId,
+      role: "subagent",
+      content: "",
+      timestamp: Date.now(),
+      metadata: {
+        agentType: tracker.agentType,
+        description: "",
+        status: "running",
+        tools: [],
+      },
+    });
+  }
   return tracker;
 }
 

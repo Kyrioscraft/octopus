@@ -14,11 +14,11 @@
 
 import React from "react";
 import { Box, Text, Static, useStdout } from "ink";
-import Spinner from "ink-spinner";
 import type { ChatMessageData, ToolStatus } from "../types.js";
 import { getGlyphs } from "../config-ui.js";
 import { ExploreWidget } from "./explore-widget.js";
 import { Markdown } from "./markdown.js";
+import { useFrame } from "../use-frame.js";
 import { COLORS } from "../theme.js";
 
 // =============================================================================
@@ -138,14 +138,15 @@ const UserMessageView: React.FC<MessageProps> = ({ message, showTimestamps }) =>
 
 const AssistantMessageView: React.FC<MessageProps> = ({ message, showTimestamps }) => {
   const glyphs = getGlyphs();
+  const frame = useFrame();
   const reasoning = message.metadata?.reasoning as string | undefined;
   const isFinalized = message.metadata?.finalized === true;
   const hasContent = message.content.length > 0;
 
   return (
     <Box flexDirection="column" paddingLeft={1} marginBottom={1}>
-      {/* Reasoning — multi-line dimmed block, truncated to 10 lines */}
-      {reasoning && <ReasoningBlock reasoning={reasoning} />}
+      {/* Reasoning — collapsible dimmed block, Tab to toggle */}
+      {reasoning && <ReasoningBlock reasoning={reasoning} isRunning={!isFinalized} />}
 
       {/* Content or loading placeholder */}
       {hasContent ? (
@@ -160,11 +161,11 @@ const AssistantMessageView: React.FC<MessageProps> = ({ message, showTimestamps 
           </Box>
           {/* Streaming cursor */}
           {!isFinalized && (
-            <Text color={COLORS.primary}><Spinner type="dots" /></Text>
+            <Text color={COLORS.primary}>{frame}</Text>
           )}
         </Box>
       ) : !isFinalized ? (
-        <Text dimColor><Spinner type="dots" /> Thinking...</Text>
+        <Text dimColor>{frame} Thinking...</Text>
       ) : (
         <Text dimColor>(empty response)</Text>
       )}
@@ -175,25 +176,17 @@ const AssistantMessageView: React.FC<MessageProps> = ({ message, showTimestamps 
 };
 
 // =============================================================================
-// Reasoning block — dimmed italic multi-line display
+// Reasoning block — spinner while thinking, nothing when done
 // =============================================================================
 
-const MAX_REASONING_LINES = 10;
-
-const ReasoningBlock: React.FC<{ reasoning: string }> = ({ reasoning }) => {
-  const glyphs = getGlyphs();
-  const lines = reasoning.split("\n").filter((l) => l.trim().length > 0);
-  const shown = lines.slice(0, MAX_REASONING_LINES);
-  if (shown.length === 0) return null;
+const ReasoningBlock: React.FC<{ reasoning: string; isRunning: boolean }> = ({ reasoning: _reasoning, isRunning }) => {
+  const frame = useFrame();
+  const lines = _reasoning.split("\n").filter((l) => l.trim().length > 0);
+  if (!isRunning) return null;
 
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      {shown.map((line, i) => (
-        <Text key={i} dimColor italic>{glyphs.dashed} {line}</Text>
-      ))}
-      {lines.length > MAX_REASONING_LINES && (
-        <Text dimColor>  {glyphs.ellipsis} {lines.length - MAX_REASONING_LINES} more lines</Text>
-      )}
+    <Box flexDirection="row" paddingLeft={1} marginBottom={1}>
+      <Text dimColor>{frame} Thinking{lines.length > 0 ? ` (${lines.length} lines)` : ""}...</Text>
     </Box>
   );
 };
@@ -220,6 +213,7 @@ const ToolCallMessageView: React.FC<MessageProps> = ({ message, showTimestamps }
   }
 
   const glyphs = getGlyphs();
+  const frame = useFrame();
 
   const isRunning = toolStatus === "running";
   const isError = toolStatus === "error" || toolStatus === "rejected";
@@ -228,55 +222,29 @@ const ToolCallMessageView: React.FC<MessageProps> = ({ message, showTimestamps }
   // Primary arg for inline display
   const primaryArg = formatPrimaryArg(toolName, toolArgs, Math.max(20, cols - 10));
 
-  // Result content
-  const content = message.content || "";
-  const contentLines = content.split("\n").filter((l) => l.trim().length > 0);
-  const maxLines = 6;
-  const truncatedContent = contentLines.length > maxLines
-    ? contentLines.slice(0, maxLines).join("\n")
-    : content;
-
   return (
-    <LeftStrip color={COLORS.tool}>
-      {/* Header: ⏺ tool_name(primary_arg)  status */}
+    <Box flexDirection="column" paddingLeft={1}>
+      {/* ⏺ tool_name arg  ⠋ — single text line, no border */}
       <Box flexDirection="row">
         <Text bold color={COLORS.tool}>{glyphs.toolCall} </Text>
         <Text bold color={COLORS.tool}>{toolName}</Text>
         {primaryArg && <Text color={COLORS.tool}>{primaryArg}</Text>}
-        <Text>  </Text>
         {isRunning && (
-          <Text color={COLORS.warning}><Spinner type="dots" /> running</Text>
+          <Text color={COLORS.warning}>  {frame}</Text>
         )}
         {isError && (
-          <Text color={COLORS.error}>{glyphs.cross} error</Text>
+          <Text color={COLORS.error}>  {glyphs.cross}</Text>
         )}
         {isWaiting && (
-          <Text color={COLORS.warning}><Spinner type="dots" /> awaiting approval</Text>
+          <Text color={COLORS.warning}>  {frame}</Text>
         )}
         {!isRunning && !isError && !isWaiting && (
-          <Text color={COLORS.success}>{glyphs.checkmark} done</Text>
+          <Text color={COLORS.success}>  {glyphs.checkmark}</Text>
         )}
       </Box>
 
-      {/* Result content — ⎿ gutter, shown when not running */}
-      {contentLines.length > 0 && !isRunning && (
-        <Box flexDirection="row" marginTop={0}>
-          <Box width={2} flexShrink={0}>
-            <Text dimColor>{glyphs.branch}</Text>
-          </Box>
-          <Box flexDirection="column" flexGrow={1}>
-            {contentLines.slice(0, maxLines).map((line, i) => (
-              <Text key={i} dimColor>{line}</Text>
-            ))}
-            {contentLines.length > maxLines && (
-              <Text dimColor>{glyphs.ellipsis} {contentLines.length - maxLines} more lines</Text>
-            )}
-          </Box>
-        </Box>
-      )}
-
       {showTimestamps && <Timestamp message={message} />}
-    </LeftStrip>
+    </Box>
   );
 };
 
@@ -288,6 +256,7 @@ const MAX_DIFF_LINES = 15;
 
 const FileEditToolView: React.FC<MessageProps> = ({ message, showTimestamps }) => {
   const glyphs = getGlyphs();
+  const frame = useFrame();
   const toolName = (message.metadata?.toolName as string) ?? "edit_file";
   const toolStatus = (message.metadata?.toolStatus as string) ?? "done";
   const toolArgs = (message.metadata?.toolArgs ?? {}) as Record<string, unknown>;
@@ -297,14 +266,9 @@ const FileEditToolView: React.FC<MessageProps> = ({ message, showTimestamps }) =
   const isRunning = toolStatus === "running";
   const isError = toolStatus === "error" || toolStatus === "rejected";
 
-  // Build diff lines
-  const diffLines = buildDiffLines(toolName, toolArgs);
-  const hasDiff = diffLines.length > 0;
-  const shown = diffLines.slice(0, MAX_DIFF_LINES);
-
   return (
-    <LeftStrip color={COLORS.tool}>
-      {/* Header: ⏺ edit_file  path  +N -M  status */}
+    <Box flexDirection="column" paddingLeft={1}>
+      {/* ⏺ edit_file path +N -M ⠋ — single text line */}
       <Box flexDirection="row">
         <Text bold color={COLORS.tool}>{glyphs.toolCall} </Text>
         <Text bold color={COLORS.tool}>{toolName}</Text>
@@ -317,35 +281,19 @@ const FileEditToolView: React.FC<MessageProps> = ({ message, showTimestamps }) =
             <Text color={COLORS.error}>-{diffStats.removed}</Text>
           </Text>
         )}
-        <Text>  </Text>
-        {isRunning ? (
-          <Text color={COLORS.warning}><Spinner type="dots" /> running</Text>
-        ) : isError ? (
-          <Text color={COLORS.error}>{glyphs.cross} error</Text>
-        ) : (
-          <Text color={COLORS.success}>{glyphs.checkmark} done</Text>
+        {isRunning && (
+          <Text color={COLORS.warning}>  {frame}</Text>
+        )}
+        {isError && (
+          <Text color={COLORS.error}>  {glyphs.cross}</Text>
+        )}
+        {!isRunning && !isError && (
+          <Text color={COLORS.success}>  {glyphs.checkmark}</Text>
         )}
       </Box>
 
-      {/* Diff content — ⎿ gutter */}
-      {hasDiff && (
-        <Box flexDirection="row" marginTop={0}>
-          <Box width={2} flexShrink={0}>
-            <Text dimColor>{glyphs.branch}</Text>
-          </Box>
-          <Box flexDirection="column" flexGrow={1}>
-            {shown.map((line, i) => (
-              <Text key={i} color={line.color}>{line.text}</Text>
-            ))}
-            {diffLines.length > MAX_DIFF_LINES && (
-              <Text dimColor>{glyphs.ellipsis} {diffLines.length - MAX_DIFF_LINES} more lines</Text>
-            )}
-          </Box>
-        </Box>
-      )}
-
       {showTimestamps && <Timestamp message={message} />}
-    </LeftStrip>
+    </Box>
   );
 };
 
@@ -385,7 +333,7 @@ export function buildDiffLines(toolName: string, args: Record<string, unknown>):
 // Tool arg formatting
 // =============================================================================
 
-/** Format the primary argument for inline display: (value). */
+/** Format the primary argument for inline display: " path_or_arg". */
 function formatPrimaryArg(
   toolName: string,
   args: Record<string, unknown> | undefined,
@@ -414,8 +362,16 @@ function formatPrimaryArg(
   }
 
   if (!val) return "";
-  const display = val.length > maxLen ? val.slice(0, maxLen) + "…" : val;
-  return `(${display})`;
+  // Show basename for file paths when truncated, full path otherwise
+  if (val.length > maxLen) {
+    const slash = val.lastIndexOf("/");
+    const basename = slash >= 0 ? val.slice(slash + 1) : val;
+    if (basename.length <= maxLen - 3) {
+      return ` …/${basename}`;
+    }
+    return ` ${val.slice(0, maxLen - 1)}…`;
+  }
+  return ` ${val}`;
 }
 
 // =============================================================================
@@ -512,6 +468,10 @@ const DiffMessageView: React.FC<MessageProps> = ({ message, showTimestamps }) =>
 
 // =============================================================================
 // Message list — <Static> + active region
+//
+// Ink's <Static> is append-only; once rendered, content stays on screen even
+// when items are removed. We force a full re-render when messages shrink
+// dramatically (e.g. /clear) by bumping a generation key.
 // =============================================================================
 
 export interface MessageListProps {
@@ -541,6 +501,17 @@ export const MessageList: React.FC<MessageListProps> = ({
   messages,
   showTimestamps,
 }) => {
+  // Force <Static> to fully re-render when messages shrink (e.g. /clear).
+  // Ink's Static is append-only — items removed from the array don't erase
+  // rendered output. Bumping the generation key on shrink forces a fresh render.
+  const prevLenRef = React.useRef(messages.length);
+  const genRef = React.useRef(0);
+  if (messages.length < prevLenRef.current && messages.length <= 1) {
+    genRef.current++;
+  }
+  prevLenRef.current = messages.length;
+  const staticKey = `static-gen-${genRef.current}`;
+
   let splitIdx = messages.length;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (isFinalized(messages[i]!)) {
@@ -555,7 +526,7 @@ export const MessageList: React.FC<MessageListProps> = ({
 
   return (
     <>
-      <Static items={staticMessages}>
+      <Static key={staticKey} items={staticMessages}>
         {(msg) => (
           <Message key={msg.id} message={msg} showTimestamps={showTimestamps} />
         )}

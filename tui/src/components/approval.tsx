@@ -62,8 +62,8 @@ export const ApprovalMenu: React.FC<ApprovalMenuProps> = ({
 
   const options = [
     { key: "y", label: "Approve", decision: "approve" as const },
-    { key: "a", label: "Auto-approve all in this thread", decision: "auto_approve" as const },
-    { key: "n", label: "Reject", decision: "reject" as const },
+    { key: "a", label: "Auto-approve", decision: "auto_approve" as const },
+    { key: "n", label: "Reject (with reason)", decision: "reject" as const },
   ];
 
   // Collect security warnings
@@ -154,7 +154,7 @@ export const ApprovalMenu: React.FC<ApprovalMenuProps> = ({
       {/* Header */}
       <Box marginBottom={1}>
         <Text bold color="yellow">
-          {glyphs.toolPrefix} Tool Approval Required
+          {glyphs.toolCall} Approve: <Text color="yellow">{request.toolName}</Text>
         </Text>
         {requests.length > 1 && (
           <Text dimColor> ({requests.length} tools)</Text>
@@ -240,7 +240,7 @@ export const ApprovalMenu: React.FC<ApprovalMenuProps> = ({
           {/* Hint */}
           <Box>
             <Text dimColor>
-              {glyphs.bullet} Use arrow keys to navigate, Enter to select, or press y/a/n
+              ↑↓ navigate  ·  Enter select  ·  y/a/n quick keys
             </Text>
           </Box>
         </>

@@ -13,7 +13,6 @@ import type { McpServerEntry } from "../mcp-viewer.js";
 import type { ApprovalRequest, ApprovalResult } from "../approval.js";
 import { TuiClient } from "../../client.js";
 import { MessageList } from "../messages.js";
-import { Loading } from "../loading.js";
 import { ChatInput } from "../chat-input.js";
 import { WelcomeScreen } from "../welcome.js";
 import { StatusBar } from "../status-bar.js";
@@ -115,13 +114,8 @@ export const MainScreen: React.FC<MainScreenProps> = (props) => {
 
       <MessageList messages={messages} showTimestamps={showTimestamps} />
 
-      {/* Chrome region — dynamic chrome (loading, approval, modals) */}
+      {/* Chrome region — dynamic chrome (approval, modals) */}
       <Box flexDirection="column" flexShrink={0}>
-        {/* Loading indicator */}
-        {phase === "running" && spinnerStatus && (
-          <Loading status={spinnerStatus} />
-        )}
-
         {/* HITL approval menu */}
         {pendingApproval && (
           <ApprovalMenu

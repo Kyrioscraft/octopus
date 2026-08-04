@@ -6,8 +6,8 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
-import Spinner from "ink-spinner";
 import type { SpinnerStatus } from "../types.js";
+import { useFrame } from "../use-frame.js";
 import { COLORS } from "../theme.js";
 
 // =============================================================================
@@ -26,6 +26,7 @@ export interface LoadingProps {
 const LoadingImpl: React.FC<LoadingProps> = ({ status, detail }) => {
   const [elapsed, setElapsed] = useState(0);
   const startTimeRef = useRef(Date.now());
+  const frame = useFrame();
 
   // Reset timer when status changes (new turn starts)
   useEffect(() => {
@@ -48,7 +49,7 @@ const LoadingImpl: React.FC<LoadingProps> = ({ status, detail }) => {
     <Box flexDirection="column" paddingLeft={1} marginBottom={1}>
       <Box flexDirection="row">
         <Text color={COLORS.primary}>
-          <Spinner type="dots" />
+          {frame}
         </Text>
         <Text color={COLORS.primary}> {status}</Text>
         <Text dimColor> ({elapsed}s, esc to interrupt)</Text>

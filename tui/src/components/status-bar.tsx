@@ -11,10 +11,10 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import Spinner from "ink-spinner";
 import type { AppPhase, SpinnerStatus, SessionStats, InputMode } from "../types.js";
 import { formatTokenCount } from "../formatting.js";
 import { getGlyphs } from "../config-ui.js";
+import { useFrame } from "../use-frame.js";
 import { COLORS } from "../theme.js";
 import { homedir } from "node:os";
 import { sep } from "node:path";
@@ -49,6 +49,7 @@ const StatusBarImpl: React.FC<StatusBarProps> = ({
   autoApprove,
 }) => {
   const glyphs = getGlyphs();
+  const frame = useFrame();
   const isBusy = phase === "running" || phase === "connecting";
   const showTokens = stats.requestCount > 0;
 
@@ -59,7 +60,7 @@ const StatusBarImpl: React.FC<StatusBarProps> = ({
         {inputMode && inputMode !== "normal" && <ModePill mode={inputMode} />}
         <ApprovePill autoApprove={autoApprove ?? false} />
         {isBusy ? (
-          <Text dimColor> <Spinner type="dots" /> {(spinner ?? "working").toLowerCase()}</Text>
+          <Text dimColor> {frame} {(spinner ?? "working").toLowerCase()}</Text>
         ) : (
           <Text dimColor> ready</Text>
         )}

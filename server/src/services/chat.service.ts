@@ -160,7 +160,10 @@ export function saveAiMessages(threadId: string, messages: any[]): void {
         id: msg.id ?? `msg_${Date.now()}_${rows.length}`,
         role: "tool",
         content: typeof msg.content === "string" ? msg.content : JSON.stringify(msg.content),
-        extraMetadata: { tool_call_id: msg.tool_call_id },
+        extraMetadata: {
+          tool_call_id: msg.tool_call_id,
+          toolName: msg.name ?? "tool",
+        },
         createdAt: new Date().toISOString(),
       });
     }

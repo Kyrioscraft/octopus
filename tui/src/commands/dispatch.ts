@@ -98,6 +98,9 @@ export function createDispatchCommand(deps: DispatchDeps): DispatchCommand {
         setMessages([]);
         setCurrentThreadId(null);
         setAgentCwd(null);
+        setMessageQueue([]);
+        setSpinnerStatus(null);
+        setPhase("ready");
         addAppMessage("Chat cleared. New thread will be created on next message.");
         return;
 
@@ -156,6 +159,7 @@ export function createDispatchCommand(deps: DispatchDeps): DispatchCommand {
 
     // --- Name-based fallback for TUI-only commands (no core systemAction) ---
     switch (cmdName) {
+      case "/clear":
       case "/force-clear":
         setMessages([]);
         setCurrentThreadId(null);

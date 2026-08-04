@@ -126,6 +126,17 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
     addMessage: (msg) => {
       setMessages((prev) => [...prev, msg]);
     },
+    insertMessage: (msg, beforeId) => {
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === beforeId);
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy.splice(idx, 0, msg);
+          return copy;
+        }
+        return [...prev, msg];
+      });
+    },
     updateMessage: (id, updates) => {
       setMessages((prev) =>
         prev.map((m) => (m.id === id ? { ...m, ...updates } : m)),
@@ -265,7 +276,18 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
       content: text,
       timestamp: Date.now(),
     };
-    setMessages((prev) => [...prev, userMsg]);
+    // Create a placeholder assistant message immediately so the inline
+    // "Thinking..." indicator appears in the conversation flow right away,
+    // rather than showing a separate bottom-anchored spinner.
+    const assistantMsgId = `msg_${Date.now() + 1}`;
+    const assistantMsg: ChatMessageData = {
+      id: assistantMsgId,
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+      metadata: { finalized: false },
+    };
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
     setPhase("running");
 
     const abortController = new AbortController();
@@ -277,6 +299,7 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
       agentName,
       autoApprove,
       abortSignal: abortController.signal,
+      assistantMessageId: assistantMsgId,
     };
     execContextRef.current = execContext;
 
