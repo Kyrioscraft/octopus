@@ -205,6 +205,29 @@ body {
 .thread-more { opacity: 0; transition: opacity 0.15s ease; }
 .thread-item:hover .thread-more { opacity: 1; }
 
+/* ===== Collapsible rows: reveal the expand/collapse arrow on hover (fade).
+   Applies to tool-call rows and tool-group bars. The arrow sits right after
+   the header content (antd expandIconPosition="end" with a non-stretching
+   header), and stays hidden until the user hovers the row — unless the row is
+   already expanded, in which case the arrow stays visible so the user can see
+   how to collapse it. Fade in/out via opacity transition. */
+.collapsible-row .ant-collapse-arrow {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  /* Keep the arrow in flow (not display:none) so the fade works and layout
+     doesn't shift on hover. */
+}
+.collapsible-row:hover .ant-collapse-arrow,
+.collapsible-row.is-expanded .ant-collapse-arrow {
+  opacity: 1;
+}
+/* Ensure the arrow hugs the header content instead of being pushed to the row's
+   right edge. antd's header-text defaults to flex:auto (stretches), which would
+   shove the arrow all the way right; override so it only takes content width. */
+.collapsible-row .ant-collapse-header-text {
+  flex: 0 1 auto;
+}
+
 /* ===== Lucide icons: align with antd's 1em sizing convention ===== */
 /* lucide-react renders <svg class="lucide lucide-xxx"> with a fixed 24px size.
    antd icons use 1em so they scale with font-size. Forcing lucide to 1em keeps

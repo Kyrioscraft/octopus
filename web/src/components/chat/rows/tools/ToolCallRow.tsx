@@ -98,7 +98,7 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
 
   return (
     <div
-      className="tool-call-row"
+      className={`tool-call-row collapsible-row${expanded ? " is-expanded" : ""}`}
       style={{
         // No own left rail — border-free reduces visual weight (the old card
         // drew a 2nd rail here, doubling up).

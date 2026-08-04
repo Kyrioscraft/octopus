@@ -1,8 +1,10 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import { Button } from "antd";
 import { useSearchParams } from "react-router-dom";
 import { OctopusClient } from "@octopus/tentacle";
 import { useChatStore } from "../stores/chat.js";
 import { useChat } from "../hooks/useChat.js";
+import { useStickToBottom } from "../hooks/useStickToBottom.js";
 import { AskPanel } from "../components/chat/input/AskPanel.js";
 import { Companion, CompanionDivider } from "../components/chat/companion/index.js";
 import { ChatHeader } from "../components/chat/ChatHeader.js";
@@ -36,6 +38,7 @@ export function ChatPage() {
   } = useChatStore();
 
   const endRef = useRef<HTMLDivElement>(null);
+  const { scrollContainerRef, isStuck, scrollToBottom } = useStickToBottom();
 
   const listThreads = useCallback(async () => {
     const scope = activeWorkspaceId ? { workspaceId: activeWorkspaceId } : undefined;
@@ -59,6 +62,7 @@ export function ChatPage() {
     setActiveThreadId,
     listThreads,
     endRef,
+    scrollToBottom,
   });
 
   // Toggle the companion panel. When opening with no tabs yet (no history of a
@@ -137,7 +141,7 @@ export function ChatPage() {
           and the RIGHT column (companion panel) sit side by side below the header. */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
-          <div style={{ flex: 1, overflowY: "auto", overflowX: "hidden" }}>
+          <div ref={scrollContainerRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", position: "relative" }}>
             {chat.showStart ? (
               <StartScreen
                 greeting={greeting}
@@ -152,6 +156,7 @@ export function ChatPage() {
                 onOpenSubagent={openSubagentPanel}
               />
             )}
+
           </div>
 
           {/* Bottom input bar (only when messages exist). Lives inside the LEFT
@@ -161,7 +166,42 @@ export function ChatPage() {
             <div style={{
               padding: "12px 20px",
               background: "var(--gray-0)", flexShrink: 0,
+              position: "relative",
             }}>
+              {/* "Back to bottom" pill — floats centered just above the input
+                  bar when the user has scrolled up. Clicking it smoothly
+                  scrolls back down and re-enables auto-follow. */}
+              {!isStuck && (
+                <Button
+                  size="small"
+                  onClick={() => scrollToBottom({ force: true, smooth: true })}
+                  style={{
+                    position: "absolute",
+                    top: -14,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    zIndex: 10,
+                    height: 26,
+                    width: 44,
+                    padding: 0,
+                    borderRadius: 13,
+                    background: "var(--gray-0)",
+                    border: "none",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "var(--gray-500)",
+                  }}
+                  aria-label="回到底部"
+                  title="回到底部"
+                >
+                  {/* Inline down-arrow SVG (project uses custom SVG icons, not @ant-design/icons) */}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </Button>
+              )}
               <div style={{ maxWidth: 800, margin: "0 auto" }}>
                 {inputArea}
                 <div style={{ padding: "4px 0 0 4px" }}>

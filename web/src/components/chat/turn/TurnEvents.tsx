@@ -200,6 +200,7 @@ export function ToolGroupBar({ tools, isActive }: { tools: ToolEvent[]; isActive
   const extra = targets.length - visibleTargets.length;
 
   return (
+    <div className={`collapsible-row${expanded ? " is-expanded" : ""}`}>
     <Collapse
       ghost
       size="small"
@@ -252,6 +253,7 @@ export function ToolGroupBar({ tools, isActive }: { tools: ToolEvent[]; isActive
         },
       ]}
     />
+    </div>
   );
 }
 

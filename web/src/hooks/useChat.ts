@@ -126,6 +126,7 @@ export function useChat({
   setActiveThreadId,
   listThreads,
   endRef,
+  scrollToBottom,
 }: {
   activeThreadId: string | undefined;
   activeWorkspaceId: string | undefined;
@@ -133,6 +134,12 @@ export function useChat({
   setActiveThreadId: (id: string | undefined) => void;
   listThreads: () => Promise<void>;
   endRef: React.RefObject<HTMLDivElement | null>;
+  /**
+   * Smart follow scroll. When called with no args, scrolls to bottom ONLY if
+   * the user is currently stuck to the bottom (i.e. not browsing history).
+   * Pass { force: true } to always scroll (e.g. on send).
+   */
+  scrollToBottom: (opts?: { force?: boolean; smooth?: boolean }) => void;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [text, setText] = useState("");
@@ -164,10 +171,10 @@ export function useChat({
   // Mirror of sessionAllowlist for use inside doStream's auto-approve fast path.
   const sessionAllowlistRef = useRef<Set<string>>(new Set());
 
-  const scroll = useCallback(
-    () => setTimeout(() => endRef.current?.scrollIntoView({ behavior: "smooth" }), 50),
-    [endRef],
-  );
+  // Smart follow: respects the user's scroll position. Only auto-scrolls when
+  // the user is stuck to the bottom; if they've scrolled up to read history,
+  // streaming output won't yank them back down.
+  const scroll = useCallback(() => scrollToBottom(), [scrollToBottom]);
 
   // ---- Model providers (loaded once + on workspace change) ----
   const loadModelProviders = useCallback(async () => {
@@ -297,6 +304,7 @@ export function useChat({
               return c;
             });
             listThreads();
+            scroll(); // follow only if stuck to the bottom
             break;
           }
           case "error": {
@@ -316,6 +324,7 @@ export function useChat({
               }
               return c;
             });
+            scroll(); // follow only if stuck to the bottom
             break;
           }
         }
@@ -348,7 +357,8 @@ export function useChat({
     setMsgs((p) => [...p, u, a]);
     setBusy(true);
     setAsk(null);
-    scroll();
+    // User just sent a message — force follow to the bottom.
+    scrollToBottom({ force: true, smooth: true });
     const controller = new AbortController();
     abortRef.current = controller;
     turnAcc.current = new TurnEventAccumulator();
