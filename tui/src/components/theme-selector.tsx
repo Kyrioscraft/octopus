@@ -77,11 +77,7 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
   // ---------------------------------------------------------------------------
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
-      <Box marginBottom={1}>
-        <Text bold>Select Theme {glyphs.toolPrefix}</Text>
-      </Box>
-
+    <Box flexDirection="column">
       <Box flexDirection="column" marginBottom={1}>
         {THEMES.map((theme, i) => {
           const isSelected = i === selectedIdx;
@@ -98,12 +94,6 @@ export const ThemeSelector: React.FC<ThemeSelectorProps> = ({
             </Box>
           );
         })}
-      </Box>
-
-      <Box>
-        <Text dimColor>
-          {glyphs.bullet} ↑↓ to navigate, Enter to select, Esc to dismiss
-        </Text>
       </Box>
     </Box>
   );

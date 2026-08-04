@@ -1,21 +1,21 @@
 // =============================================================================
-// Loading/spinner component — animated status indicator.
-// Equivalent to Python tui.widgets.loading.
+// Loading/spinner — blue spinner + status + elapsed timer.
+//
+//   ⠋ Thinking...  (3s, esc to interrupt)
 // =============================================================================
 
-import React from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import type { SpinnerStatus } from "../types.js";
+import { COLORS } from "../theme.js";
 
 // =============================================================================
 // Props
 // =============================================================================
 
 export interface LoadingProps {
-  /** Status text to display alongside the spinner. */
   status?: SpinnerStatus;
-  /** Additional detail text below the status. */
   detail?: string;
 }
 
@@ -24,20 +24,37 @@ export interface LoadingProps {
 // =============================================================================
 
 const LoadingImpl: React.FC<LoadingProps> = ({ status, detail }) => {
+  const [elapsed, setElapsed] = useState(0);
+  const startTimeRef = useRef(Date.now());
+
+  // Reset timer when status changes (new turn starts)
+  useEffect(() => {
+    startTimeRef.current = Date.now();
+    setElapsed(0);
+  }, [status]);
+
+  // Tick every second to update elapsed display
+  useEffect(() => {
+    if (!status) return;
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startTimeRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [status]);
+
   if (!status) return null;
 
   return (
-    <Box flexDirection="column" paddingX={1} paddingY={1}>
+    <Box flexDirection="column" paddingLeft={1} marginBottom={1}>
       <Box flexDirection="row">
-        <Text color="yellow">
+        <Text color={COLORS.primary}>
           <Spinner type="dots" />
         </Text>
-        <Text color="yellow"> {status}</Text>
+        <Text color={COLORS.primary}> {status}</Text>
+        <Text dimColor> ({elapsed}s, esc to interrupt)</Text>
       </Box>
       {detail && (
-        <Box marginLeft={2}>
-          <Text dimColor>{detail}</Text>
-        </Box>
+        <Text dimColor>  {detail}</Text>
       )}
     </Box>
   );

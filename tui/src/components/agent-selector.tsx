@@ -1,9 +1,12 @@
 // =============================================================================
 // Agent selector screen — list available agents/subagents.
 // Equivalent to Python tui.widgets.agent_selector.
+//
+// Data is injected via props (from the server's listSubagents endpoint via
+// tentacle), rather than calling @octopus/core directly.
 // =============================================================================
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import { getGlyphs } from "../config-ui.js";
 
@@ -15,6 +18,8 @@ export interface AgentSelectorProps {
   onSelect: (agentName: string) => void;
   onDismiss: () => void;
   currentAgent?: string;
+  /** Available agents, injected by the parent (from the server). */
+  agents: { name: string; description: string }[];
 }
 
 // =============================================================================
@@ -25,25 +30,10 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   onSelect,
   onDismiss,
   currentAgent,
+  agents,
 }) => {
   const glyphs = getGlyphs();
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [agents, setAgents] = useState<{ name: string; description: string }[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function loadAgents() {
-      try {
-        const { listSubagents } = await import("@octopus/core");
-        const result = listSubagents({});
-        setAgents(result);
-      } catch {
-        setAgents([]);
-      }
-      setLoading(false);
-    }
-    loadAgents();
-  }, []);
 
   // Set initial selection to current agent
   useEffect(() => {
@@ -56,7 +46,7 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   // ---------------------------------------------------------------------------
   // Key handling
   // ---------------------------------------------------------------------------
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape) {
       onDismiss();
       return;
@@ -85,16 +75,8 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
   // ---------------------------------------------------------------------------
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
-      <Box marginBottom={1}>
-        <Text bold>Select Agent {glyphs.toolPrefix}</Text>
-      </Box>
-
-      {loading ? (
-        <Box marginY={1}>
-          <Text dimColor>Loading agents...</Text>
-        </Box>
-      ) : agents.length === 0 ? (
+    <Box flexDirection="column">
+      {agents.length === 0 ? (
         <Box marginY={1}>
           <Text dimColor>No agents found. Create AGENTS.md files to add agents.</Text>
         </Box>
@@ -124,12 +106,6 @@ export const AgentSelector: React.FC<AgentSelectorProps> = ({
           })}
         </Box>
       )}
-
-      <Box>
-        <Text dimColor>
-          {glyphs.bullet} ↑↓ to navigate, Enter to select, Esc to dismiss
-        </Text>
-      </Box>
     </Box>
   );
 };

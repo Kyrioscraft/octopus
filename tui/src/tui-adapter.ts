@@ -7,7 +7,7 @@
 // callbacks to render messages, tool calls, approvals, etc.
 // =============================================================================
 
-import type { StreamEvent, ChatRequest, ChatMessage } from "@octopus/tentacle";
+import type { StreamEvent, ChatRequest, ChatMessage, ResumeRequestBody } from "@octopus/tentacle";
 import type { TuiClient } from "./client.js";
 import { getLogger } from "./logging.js";
 import type {
@@ -36,6 +36,8 @@ export interface TuiAdapterCallbacks {
   setSpinner: (status: "Thinking" | "Offloading" | null) => void;
   /** Update session token statistics. */
   updateStats: (stats: Partial<SessionStats>) => void;
+  /** Called when the server resolves/assigns a thread id (from init event). */
+  onThreadResolved: (threadId: string) => void;
   /** Request HITL approval from the user. Returns the decision. */
   requestApproval: (toolName: string, args: Record<string, unknown>) => Promise<"approve" | "reject" | "auto_approve">;
   /** Request ask_user answers from the user. */
@@ -61,6 +63,8 @@ export interface ExecutionContext {
   client: TuiClient;
   callbacks: TuiAdapterCallbacks;
   threadId?: string;
+  /** Workspace to bind the thread to (its dir becomes the agent's cwd). */
+  workspaceId?: string;
   agentName?: string;
   autoApprove?: boolean;
   abortSignal?: AbortSignal;
@@ -180,6 +184,11 @@ export async function executeAgentTask(
     const body: ChatRequest = {
       messages,
       thread_id: ctx.threadId,
+      workspace_id: ctx.workspaceId,
+      // Use "auto" mode to suppress HITL approvals for read tools;
+      // destructive shell writes are still blocked by FileEditGuard.
+      // file edits (edit_file/write_file) will trigger HITL regardless.
+      mode: "auto",
       request_id: `req_${Date.now()}`,
     };
 
@@ -242,6 +251,7 @@ function processStreamEvent(
       const meta = event.meta ?? {};
       if (meta.thread_id && !ctx.threadId) {
         ctx.threadId = meta.thread_id as string;
+        ctx.callbacks.onThreadResolved(ctx.threadId);
       }
       break;
     }
@@ -392,11 +402,14 @@ function processStreamEvent(
     }
 
     case "warning": {
-      // Non-fatal warning — display as app message
+      // Non-fatal warning — display as app message, strip technical IDs
+      let text = event.message ?? "Warning";
+      // Strip tool call IDs: "Tool call <name> with id <uuid> was cancelled..." → "Tool call <name> was cancelled..."
+      text = text.replace(/\s+with\s+id\s+\S+/, "");
       callbacks.addMessage({
         id: `warn_${Date.now()}`,
         role: "app",
-        content: `⚠ ${event.message ?? "Warning"}`,
+        content: `⚠ ${text}`,
         timestamp: Date.now(),
       });
       break;
@@ -452,7 +465,7 @@ function finalizeStream(
 
 export async function resumeAgentTask(
   ctx: ExecutionContext,
-  approved: boolean,
+  body: ResumeRequestBody,
 ): Promise<void> {
   if (!ctx.threadId) {
     ctx.callbacks.onError("Cannot resume: no active thread");
@@ -476,7 +489,7 @@ export async function resumeAgentTask(
   ctx.callbacks.setSpinner("Thinking");
 
   try {
-    const stream = await ctx.client.streamResume(ctx.threadId, approved, {
+    const stream = await ctx.client.streamResume(ctx.threadId, body, {
       signal: ctx.abortSignal,
     });
 

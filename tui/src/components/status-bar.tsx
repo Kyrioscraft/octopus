@@ -1,13 +1,23 @@
 // =============================================================================
-// Status bar component — model, thread, phase, token usage.
-// Equivalent to Python tui.widgets.status.
+// Status bar — bottom single-row.
+//
+// Layout:
+//   [MODE] [auto]  ready  ~/path  #thread ── 12.3K tokens │ model
+//
+// Left: pills + status + cwd + thread (natural spacing)
+// Right: tokens + model (│ separator)
+// Flex-grow spacer between left info and right metrics.
 // =============================================================================
 
 import React from "react";
 import { Box, Text } from "ink";
-import type { AppPhase, SpinnerStatus, SessionStats } from "../types.js";
+import Spinner from "ink-spinner";
+import type { AppPhase, SpinnerStatus, SessionStats, InputMode } from "../types.js";
 import { formatTokenCount } from "../formatting.js";
 import { getGlyphs } from "../config-ui.js";
+import { COLORS } from "../theme.js";
+import { homedir } from "node:os";
+import { sep } from "node:path";
 
 // =============================================================================
 // Props
@@ -19,7 +29,9 @@ export interface StatusBarProps {
   phase: AppPhase;
   spinner: SpinnerStatus;
   stats: SessionStats;
-  agentName?: string;
+  cwd?: string | null;
+  inputMode?: InputMode;
+  autoApprove?: boolean;
 }
 
 // =============================================================================
@@ -32,57 +44,41 @@ const StatusBarImpl: React.FC<StatusBarProps> = ({
   phase,
   spinner,
   stats,
-  agentName,
+  cwd,
+  inputMode,
+  autoApprove,
 }) => {
   const glyphs = getGlyphs();
-  const phaseLabel = getPhaseLabel(phase, spinner, glyphs);
+  const isBusy = phase === "running" || phase === "connecting";
+  const showTokens = stats.requestCount > 0;
 
   return (
-    <Box
-      flexDirection="row"
-      paddingX={1}
-      paddingY={0}
-    >
-      <Text backgroundColor="cyan" color="black"> Octopus </Text>
-      <Text> </Text>
+    <Box flexDirection="row">
+      {/* Left: pills + status + cwd + thread */}
+      <Box flexShrink={1}>
+        {inputMode && inputMode !== "normal" && <ModePill mode={inputMode} />}
+        <ApprovePill autoApprove={autoApprove ?? false} />
+        {isBusy ? (
+          <Text dimColor> <Spinner type="dots" /> {(spinner ?? "working").toLowerCase()}</Text>
+        ) : (
+          <Text dimColor> ready</Text>
+        )}
+        {cwd && <Text dimColor>  {shortenPath(cwd)}</Text>}
+        {threadId && <Text dimColor>  #{threadId.slice(7, 15)}</Text>}
+      </Box>
 
-      {/* Phase / status */}
-      <Text dimColor>{phaseLabel}</Text>
+      {/* Spacer */}
+      <Box flexGrow={1} />
 
-      {/* Separator */}
-      {model && (
-        <>
-          <Text dimColor> {glyphs.boxVertical} </Text>
-          <Text dimColor>{model}</Text>
-        </>
-      )}
-
-      {/* Agent name */}
-      {agentName && (
-        <>
-          <Text dimColor> {glyphs.boxVertical} </Text>
-          <Text dimColor>@{agentName}</Text>
-        </>
-      )}
-
-      {/* Thread ID */}
-      {threadId && (
-        <>
-          <Text dimColor> {glyphs.boxVertical} </Text>
-          <Text dimColor>#{threadId.slice(0, 8)}</Text>
-        </>
-      )}
-
-      {/* Token stats */}
-      {stats.requestCount > 0 && (
-        <>
-          <Text dimColor> {glyphs.boxVertical} </Text>
-          <Text dimColor>
-            {stats.requestCount} req{stats.requestCount !== 1 ? "s" : ""}
-            {" · "}
-            {formatTokenCount(stats.inputTokens)}↑{formatTokenCount(stats.outputTokens)}↓
-          </Text>
-        </>
+      {/* Right: tokens + model */}
+      {(showTokens || model) && (
+        <Box flexShrink={0}>
+          {showTokens && (
+            <Text dimColor>{formatTokenCount(stats.inputTokens + stats.outputTokens)} tokens</Text>
+          )}
+          {showTokens && model && <Text dimColor> │ </Text>}
+          {model && <Text dimColor>{model}</Text>}
+        </Box>
       )}
     </Box>
   );
@@ -91,26 +87,34 @@ const StatusBarImpl: React.FC<StatusBarProps> = ({
 export const StatusBar = React.memo(StatusBarImpl);
 
 // =============================================================================
+// Pills
+// =============================================================================
+
+const ModePill: React.FC<{ mode: InputMode }> = ({ mode }) => {
+  let label: string;
+  let color: string;
+  switch (mode) {
+    case "shell":        label = "$ SHELL"; color = COLORS.error;      break;
+    case "shell_incognito": label = "$ SHELL"; color = COLORS.incognito; break;
+    default:             return null;
+  }
+  return <Text backgroundColor={color} color="black" bold> {label} </Text>;
+};
+
+const ApprovePill: React.FC<{ autoApprove: boolean }> = ({ autoApprove }) => (
+  <Text backgroundColor={autoApprove ? COLORS.success : COLORS.warning} color="black" bold>
+    {" "}{autoApprove ? "auto" : "manual"}{" "}
+  </Text>
+);
+
+// =============================================================================
 // Helpers
 // =============================================================================
 
-function getPhaseLabel(
-  phase: AppPhase,
-  spinner: SpinnerStatus,
-  glyphs: ReturnType<typeof getGlyphs>,
-): string {
-  switch (phase) {
-    case "connecting":
-      return `${glyphs.spinnerFrames[0]} Connecting...`;
-    case "startup_error":
-      return `${glyphs.cross} Error`;
-    case "ready":
-      return `${glyphs.checkmark} Ready`;
-    case "running":
-      return `${glyphs.spinnerFrames[0]} ${spinner ?? "Running"}...`;
-    case "blocked":
-      return `${glyphs.bullet} Waiting for input`;
-    default:
-      return phase;
+function shortenPath(p: string): string {
+  const home = homedir();
+  if (home && (p === home || p.startsWith(home + sep))) {
+    return "~" + p.slice(home.length);
   }
+  return p;
 }

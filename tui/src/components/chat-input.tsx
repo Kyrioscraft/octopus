@@ -7,14 +7,11 @@
 
 import React, { useState, useRef, useCallback, useMemo, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
-import { execSync } from "node:child_process";
-import { cwd } from "node:process";
 import { SLASH_COMMANDS, buildSkillCommands } from "../command-registry.js";
 import type { CommandEntry } from "../command-registry.js";
 import type { AppPhase, InputMode } from "../types.js";
 import { getGlyphs, MODE_DISPLAY_GLYPHS, detectModePrefix } from "../config-ui.js";
-import type { StatusBarProps } from "./status-bar.js";
-import { formatTokenCount } from "../formatting.js";
+import { COLORS } from "../theme.js";
 
 // =============================================================================
 // Props
@@ -31,8 +28,13 @@ export interface ChatInputProps {
   onSubmit: (text: string, mode: InputMode) => void;
   /** Discovered skills for autocomplete (optional). */
   skills?: { name: string; description: string }[];
-  /** Status bar info rendered above the footer. */
-  statusBar?: StatusBarProps;
+  /**
+   * Merged slash-command entries (remote + local). When provided, these
+   * replace the module-level SLASH_COMMANDS constant so the autocomplete
+   * reflects the server-authoritative list. Falls back to SLASH_COMMANDS
+   * when not supplied (e.g. before the initial fetch completes).
+   */
+  commands?: CommandEntry[];
 }
 
 // =============================================================================
@@ -108,9 +110,13 @@ function fuzzyMatch(query: string, entry: CommandEntry): number {
   return 0;
 }
 
-function getCompletions(query: string, skills?: { name: string; description: string }[]): CommandEntry[] {
+function getCompletions(
+  query: string,
+  skills?: { name: string; description: string }[],
+  commands?: CommandEntry[],
+): CommandEntry[] {
   const allCommands = [
-    ...SLASH_COMMANDS,
+    ...(commands ?? SLASH_COMMANDS),
     ...buildSkillCommands(skills ?? []),
   ];
 
@@ -135,7 +141,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   onModeChange,
   onSubmit,
   skills,
-  statusBar,
+  commands,
 }) => {
   const [value, setValue] = useState("");
   const [cursorPos, setCursorPos] = useState(0);
@@ -148,23 +154,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const isBusy = phase === "running" || phase === "blocked";
 
   // ---------------------------------------------------------------------------
-  // Git branch (cached once on mount)
+  // (Git branch + cwd display moved to StatusBar)
   // ---------------------------------------------------------------------------
-  const [gitBranch, setGitBranch] = useState<string | null>(null);
-
-  useEffect(() => {
-    try {
-      const branch = execSync("git rev-parse --abbrev-ref HEAD", {
-        encoding: "utf-8",
-        stdio: ["pipe", "pipe", "pipe"],
-      }).trim();
-      if (branch && !branch.includes("fatal:")) {
-        setGitBranch(branch);
-      }
-    } catch {
-      // Not a git repo, or git not installed — leave as null.
-    }
-  }, []);
 
   // ---------------------------------------------------------------------------
   // Extract the current slash-command query from the input text
@@ -181,8 +172,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   // Compute completions
   const completions = useMemo(() => {
     if (!slashQuery) return [];
-    return getCompletions(slashQuery, skills);
-  }, [slashQuery, skills]);
+    return getCompletions(slashQuery, skills, commands);
+  }, [slashQuery, skills, commands]);
 
   // Auto-show completions when there are matches
   const showCompletions = completions.length > 0;
@@ -408,7 +399,14 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   // Render helpers
   // ---------------------------------------------------------------------------
 
-  const prompt = isBusy ? "[busy]" : ">";
+  // Prompt glyph — ">" in blue (primary), recolors per mode
+  const promptGlyph = isBusy ? glyphs.dashed : ">";
+  const promptColor = isBusy ? COLORS.muted
+    : inputMode === "shell" || inputMode === "shell_incognito" ? COLORS.error
+    : COLORS.primary;
+  const borderColor = isBusy ? COLORS.muted
+    : inputMode === "shell" || inputMode === "shell_incognito" ? COLORS.error
+    : COLORS.primary;
   const modeGlyph = MODE_DISPLAY_GLYPHS[inputMode] ?? "";
 
   // Split value at cursor for rendering
@@ -423,16 +421,17 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         <Box
           flexDirection="column"
           borderStyle="round"
-          borderColor="cyan"
+          borderColor={COLORS.primary}
           paddingX={1}
           marginX={1}
+          marginBottom={0}
         >
           {completions.map((entry, i) => {
             const isSelected = i === completionIdx;
             return (
               <Box key={entry.name}>
-                <Text color={isSelected ? "cyan" : undefined} bold={isSelected}>
-                  {isSelected ? `${glyphs.arrow} ` : "  "}
+                <Text color={isSelected ? COLORS.primary : undefined} bold={isSelected}>
+                  {isSelected ? `${">"} ` : "  "}
                   {entry.name}
                 </Text>
                 <Text dimColor> — {entry.description}</Text>
@@ -442,40 +441,24 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         </Box>
       )}
 
-      {/* Row ABOVE the input: thread id (left) · cwd + git branch (right) */}
-      <Box flexDirection="row" paddingX={1}>
-        <Box flexGrow={0}>
-          {statusBar?.threadId ? (
-            <Text dimColor>#{statusBar.threadId.slice(0, 8)}</Text>
-          ) : (
-            <Text dimColor>#(no thread)</Text>
-          )}
-        </Box>
-        <Box flexGrow={1} justifyContent="flex-end">
-          <Text dimColor>{cwd()}</Text>
-          {gitBranch && (
-            <Text dimColor>  🐙 {gitBranch}</Text>
-          )}
-        </Box>
-      </Box>
-
-      {/* Input line — framed so the prompt is the visual focus. */}
+      {/* Input — solid border box with > prompt glyph */}
       <Box
         flexDirection="row"
-        borderStyle="round"
-        borderColor="cyan"
+        borderStyle="single"
+        borderColor={borderColor}
         paddingX={1}
       >
-        {/* Prompt */}
-        <Text color={isBusy ? "gray" : "cyan"}>{prompt} </Text>
+        {/* Prompt glyph */}
+        <Text bold color={promptColor}>{promptGlyph}</Text>
+        <Text> </Text>
 
         {/* Mode glyph */}
         {modeGlyph && (
-          <Text color="yellow">{modeGlyph} </Text>
+          <Text color={COLORS.warning}>{modeGlyph} </Text>
         )}
 
         {/* Input text with cursor */}
-        <Box flexDirection="row">
+        <Box flexDirection="row" flexGrow={1}>
           {/* Before cursor */}
           <Text>{beforeCursor}</Text>
 
@@ -493,61 +476,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           <Text dimColor> [queued]</Text>
         )}
       </Box>
-
-      {/* Row BELOW the input: mode (left) · status (right) */}
-      <Box flexDirection="row" paddingX={1}>
-        {/* Left: current input mode */}
-        <Box flexGrow={0}>
-          <Text color="yellow" bold>{inputMode}</Text>
-          <Text dimColor>  Shift+Tab 切换</Text>
-        </Box>
-
-        {/* Right: status (phase, model, agent, token usage) */}
-        {statusBar && (
-          <Box flexGrow={1} justifyContent="flex-end">
-            <StatusBarInline statusBar={statusBar} />
-          </Box>
-        )}
-      </Box>
     </Box>
   );
 };
-
-// =============================================================================
-// StatusBarInline — status string rendered right-aligned below the input.
-// Shows phase · model · agent · token usage. threadId lives on the row above
-// the input, so it is intentionally omitted here.
-// =============================================================================
-
-const StatusBarInline: React.FC<{ statusBar: StatusBarProps }> = ({ statusBar }) => {
-  const glyphs = getGlyphs();
-  const parts: string[] = [getStatusPhaseLabel(statusBar.phase, statusBar.spinner, glyphs)];
-
-  if (statusBar.model) parts.push(statusBar.model);
-  if (statusBar.agentName) parts.push(`@${statusBar.agentName}`);
-  if (statusBar.stats.requestCount > 0) {
-    parts.push(
-      `${statusBar.stats.requestCount} req · ` +
-      `${formatTokenCount(statusBar.stats.inputTokens)}↑${formatTokenCount(statusBar.stats.outputTokens)}↓`,
-    );
-  }
-
-  return (
-    <Text dimColor>{parts.join(`  ${glyphs.boxVertical}  `)}</Text>
-  );
-};
-
-function getStatusPhaseLabel(
-  phase: AppPhase,
-  spinner: string | null,
-  glyphs: ReturnType<typeof getGlyphs>,
-): string {
-  switch (phase) {
-    case "connecting":  return `${glyphs.spinnerFrames[0]} Connecting...`;
-    case "startup_error": return `${glyphs.cross} Error`;
-    case "ready":        return `${glyphs.checkmark} Ready`;
-    case "running":      return `${glyphs.spinnerFrames[0]} ${spinner ?? "Running"}...`;
-    case "blocked":      return `${glyphs.bullet} Waiting`;
-    default:             return phase;
-  }
-}

@@ -1,12 +1,26 @@
 // =============================================================================
 // Model selector screen — list available models with auth status.
 // Equivalent to Python tui.widgets.model_selector.
+//
+// Data is injected via props (from the server's listModelSettings endpoint via
+// tentacle), rather than reading the local config file directly. This keeps
+// the TUI consistent with the web client's view of available models.
 // =============================================================================
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
 import { getGlyphs } from "../config-ui.js";
-import { ModelConfig } from "@octopus/core";
+
+// =============================================================================
+// Types
+// =============================================================================
+
+export interface ModelEntry {
+  /** Full model spec, e.g. "anthropic:claude-sonnet-4-6". */
+  spec: string;
+  provider: string;
+  model: string;
+}
 
 // =============================================================================
 // Props
@@ -16,6 +30,8 @@ export interface ModelSelectorProps {
   onSelect: (modelSpec: string) => void;
   onDismiss: () => void;
   currentModel?: string | null;
+  /** Available models, injected by the parent (from the server). */
+  models: ModelEntry[];
 }
 
 // =============================================================================
@@ -26,33 +42,13 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   onSelect,
   onDismiss,
   currentModel,
+  models,
 }) => {
   const glyphs = getGlyphs();
   const [selectedIdx, setSelectedIdx] = useState(0);
 
-  // Load available models from config
-  const models = useMemo(() => {
-    try {
-      const config = ModelConfig.load();
-      const entries: { spec: string; provider: string; model: string }[] = [];
-      for (const [provider, providerConfig] of Object.entries(config.providers)) {
-        const modelsList = providerConfig.models ?? [];
-        for (const modelName of modelsList) {
-          entries.push({
-            spec: `${provider}:${modelName}`,
-            provider,
-            model: modelName,
-          });
-        }
-      }
-      return entries;
-    } catch {
-      return [];
-    }
-  }, []);
-
   // Set initial selection to current model
-  React.useEffect(() => {
+  useEffect(() => {
     if (currentModel) {
       const idx = models.findIndex((m) => m.spec === currentModel);
       if (idx >= 0) setSelectedIdx(idx);
@@ -62,7 +58,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   // ---------------------------------------------------------------------------
   // Key handling
   // ---------------------------------------------------------------------------
-  useInput((input, key) => {
+  useInput((_input, key) => {
     if (key.escape) {
       onDismiss();
       return;
@@ -91,11 +87,7 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
   // ---------------------------------------------------------------------------
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
-      <Box marginBottom={1}>
-        <Text bold>Select Model {glyphs.toolPrefix}</Text>
-      </Box>
-
+    <Box flexDirection="column">
       {models.length === 0 ? (
         <Box marginY={1}>
           <Text dimColor>No models configured. Add providers in ~/.deepagents/config.json</Text>
@@ -119,12 +111,6 @@ export const ModelSelector: React.FC<ModelSelectorProps> = ({
           })}
         </Box>
       )}
-
-      <Box>
-        <Text dimColor>
-          {glyphs.bullet} ↑↓ to navigate, Enter to select, Esc to dismiss
-        </Text>
-      </Box>
     </Box>
   );
 };

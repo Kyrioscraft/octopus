@@ -1,33 +1,25 @@
 // =============================================================================
-// ExploreWidget — expandable subagent activity view.
-//
-// Renders a `role: "subagent"` message. Shows the subagent's intent (task
-// description) prominently, followed by the system prompt in a bordered
-// section (auto-truncated if long), then a chronological list of the
-// subagent's tool executions.
-//
-// Ink 5 does not support click handlers on Text. Unlike the web client there
-// is no per-widget focus manager, so this widget renders fully expanded by
-// default. The system prompt is auto-truncated to keep the output compact;
-// long tool result summaries are also clipped.
+// ExploreWidget — subagent activity view with left-border accent strip.
 // =============================================================================
 
 import React from "react";
 import { Box, Text } from "ink";
+import Spinner from "ink-spinner";
 import type { ChatMessageData } from "../types.js";
 import type { SubagentActivityMeta, SubagentToolExec } from "../types.js";
 import { getGlyphs } from "../config-ui.js";
+import { COLORS } from "../theme.js";
+import { type DiffLine, buildDiffLines } from "./messages.js";
 
 export interface ExploreWidgetProps {
   message: ChatMessageData;
   showTimestamps?: boolean;
 }
 
-const MAX_PROMPT_LINES = 15;
+const MAX_PROMPT_LINES = 8;
 
 export const ExploreWidget: React.FC<ExploreWidgetProps> = ({ message, showTimestamps }) => {
   const glyphs = getGlyphs();
-
   const meta = (message.metadata ?? {}) as Partial<SubagentActivityMeta>;
   const agentType = meta.agentType ?? "subagent";
   const description = meta.description ?? "";
@@ -36,153 +28,181 @@ export const ExploreWidget: React.FC<ExploreWidgetProps> = ({ message, showTimes
   const tools = meta.tools ?? [];
 
   const isRunning = status === "running";
-  const statusIcon = isRunning ? glyphs.spinnerFrames[0] : glyphs.checkmark;
-  const statusColor = isRunning ? "yellow" : "green";
-
   const toolCount = tools.length;
   const doneCount = tools.filter((t) => t.status === "done").length;
 
   return (
-    <Box flexDirection="column" paddingX={1} marginBottom={1}>
-      {/* Header */}
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor={COLORS.tool}
+      borderRight={false}
+      borderTop={false}
+      borderBottom={false}
+      paddingLeft={1}
+      marginBottom={1}
+    >
+      {/* Header: ⏺ Explore  N/M */}
       <Box flexDirection="row">
-        <Text color={statusColor} bold>
-          {glyphs.bullet} Explore
+        <Text bold color={COLORS.tool}>{glyphs.toolCall} </Text>
+        <Text bold color={COLORS.tool}>
+          {agentType === "subagent" || agentType === "main" ? "Explore" : agentType}
         </Text>
-        {agentType !== "main" && (
-          <Text dimColor> ({agentType})</Text>
-        )}
-        {toolCount > 0 && (
-          <Text dimColor> · {doneCount}/{toolCount} 个操作</Text>
-        )}
-        {isRunning && (
-          <Text color="yellow"> {statusIcon}</Text>
-        )}
+        {toolCount > 0 && <Text dimColor>  {doneCount}/{toolCount}</Text>}
+        {isRunning && <Text color={COLORS.warning}> <Spinner type="dots" /></Text>}
         {showTimestamps && (
-          <Text dimColor> · {new Date(message.timestamp).toLocaleTimeString()}</Text>
+          <Text dimColor> {new Date(message.timestamp).toLocaleTimeString()}</Text>
         )}
       </Box>
 
-      {/* Intent (task description) */}
+      {/* Description — ⎿ gutter */}
       {description && (
-        <Box paddingLeft={2}>
-          <Text italic color="cyan">{description}</Text>
+        <Box flexDirection="row">
+          <Box width={2} flexShrink={0}><Text dimColor>{glyphs.branch}</Text></Box>
+          <Text dimColor italic>{description}</Text>
         </Box>
       )}
 
-      <Box flexDirection="column" paddingLeft={2} marginTop={0}>
-        {/* System prompt (only shown when available, e.g. subagent scenario) */}
-        {systemPrompt && (
-          <Box marginBottom={1}>
-            <SystemPromptSection prompt={systemPrompt} />
-          </Box>
-        )}
+      {/* System prompt — dim, truncated */}
+      {systemPrompt && <SystemPromptSection prompt={systemPrompt} />}
 
-        {/* Tool executions */}
-        {tools.length > 0 && (
-          <Box flexDirection="column">
-            {tools.map((tool, i) => (
-              <ToolExecRow key={i} tool={tool} />
-            ))}
-          </Box>
-        )}
+      {/* Tool executions */}
+      {tools.length > 0 && (
+        <Box flexDirection="column">
+          {tools.map((tool, i) => (
+            <ToolExecRow key={i} tool={tool} />
+          ))}
+        </Box>
+      )}
 
-        {tools.length === 0 && (
-          <Box paddingLeft={2}>
-            <Text dimColor>{isRunning ? "等待工具执行…" : "无工具调用"}</Text>
-          </Box>
-        )}
-      </Box>
+      {tools.length === 0 && isRunning && (
+        <Box flexDirection="row">
+          <Box width={2} flexShrink={0}><Text dimColor>{glyphs.branch}</Text></Box>
+          <Text dimColor>waiting for tool execution…</Text>
+        </Box>
+      )}
     </Box>
   );
 };
 
 // =============================================================================
-// System prompt section — bordered, truncated if long
+// System prompt
 // =============================================================================
 
 const SystemPromptSection: React.FC<{ prompt?: string }> = ({ prompt }) => {
   const glyphs = getGlyphs();
-  if (!prompt) {
-    return (
-      <Box paddingLeft={2}>
-        <Text dimColor>系统提示词不可用</Text>
-      </Box>
-    );
-  }
+  if (!prompt) return null;
 
   const lines = prompt.split("\n");
   const truncated = lines.length > MAX_PROMPT_LINES;
   const shown = truncated ? lines.slice(0, MAX_PROMPT_LINES) : lines;
 
   return (
-    <Box flexDirection="column" borderStyle="single" borderColor="gray" paddingX={1}>
-      <Text dimColor bold>System Prompt</Text>
+    <Box flexDirection="column">
+      <Box flexDirection="row">
+        <Box width={2} flexShrink={0}><Text dimColor>{glyphs.branch}</Text></Box>
+        <Text dimColor>system prompt</Text>
+      </Box>
       {shown.map((line, i) => (
-        <Text key={i} dimColor>{line || " "}</Text>
+        <Box key={i} flexDirection="row">
+          <Box width={4} flexShrink={0}><Text dimColor> </Text></Box>
+          <Text dimColor>{line || " "}</Text>
+        </Box>
       ))}
       {truncated && (
-        <Text dimColor>{glyphs.ellipsis} ({lines.length - MAX_PROMPT_LINES} more lines)</Text>
+        <Text dimColor>  {glyphs.ellipsis} {lines.length - MAX_PROMPT_LINES} more lines</Text>
       )}
     </Box>
   );
 };
 
 // =============================================================================
-// Single tool execution row
+// Tool execution row — file edits show inline diff
 // =============================================================================
+
+const FILE_EDIT_NAMES = new Set(["write_file", "write", "edit_file", "edit"]);
+const MAX_INLINE_DIFF = 8;
 
 const ToolExecRow: React.FC<{ tool: SubagentToolExec }> = ({ tool }) => {
   const glyphs = getGlyphs();
-  const icon = tool.status === "running"
-    ? glyphs.spinnerFrames[0]
-    : tool.status === "error"
-    ? glyphs.cross
-    : glyphs.checkmark;
-  const color = tool.status === "running"
-    ? "yellow"
-    : tool.status === "error"
-    ? "red"
-    : "green";
+  const isRunning = tool.status === "running";
+  const isError = tool.status === "error";
+  const isFileEdit = FILE_EDIT_NAMES.has(tool.toolName.toLowerCase());
 
-  // Extract the most relevant argument for display (file path, command, url, query).
+  const statusColor = isRunning ? COLORS.warning : isError ? COLORS.error : COLORS.tool;
+
   const detail = formatToolDetail(tool.toolName, tool.args);
-  const summary = tool.resultSummary ? ` · ${tool.resultSummary}` : "";
+  const summary = tool.resultSummary || "";
+  const diffStats = tool.diffStats;
+
+  // Build diff lines for file-edit tools
+  const diffLines: DiffLine[] = isFileEdit ? buildDiffLines(tool.toolName, tool.args as Record<string, unknown>) : [];
+  const diffShown = diffLines.slice(0, MAX_INLINE_DIFF);
 
   return (
-    <Box flexDirection="row">
-      <Text color={color}>{icon} </Text>
-      <Text bold color={color}>{tool.toolName}</Text>
-      {detail && <Text> {detail}</Text>}
-      {summary && <Text dimColor>{summary}</Text>}
+    <Box flexDirection="column">
+      {/* Tool call line */}
+      <Box flexDirection="row">
+        <Text color={statusColor}>
+          {isRunning ? <Spinner type="dots" /> : isError ? glyphs.cross : glyphs.toolCall}
+        </Text>
+        <Text bold color={statusColor}> {tool.toolName}</Text>
+        {detail && <Text> {detail}</Text>}
+        {diffStats && (diffStats.added > 0 || diffStats.removed > 0) && (
+          <Text>
+            {"  "}
+            <Text color={COLORS.success}>+{diffStats.added}</Text>
+            {" "}
+            <Text color={COLORS.error}>-{diffStats.removed}</Text>
+          </Text>
+        )}
+      </Box>
+
+      {/* Inline diff for file edits */}
+      {diffShown.length > 0 && (
+        <Box flexDirection="column" marginLeft={2}>
+          {diffShown.map((line, i) => (
+            <Text key={i} color={line.color}>{line.text}</Text>
+          ))}
+          {diffLines.length > MAX_INLINE_DIFF && (
+            <Text dimColor>{glyphs.ellipsis} {diffLines.length - MAX_INLINE_DIFF} more lines</Text>
+          )}
+        </Box>
+      )}
+
+      {/* Result summary for non-file-edit tools */}
+      {summary && !isFileEdit && (
+        <Box flexDirection="row">
+          <Box width={2} flexShrink={0}><Text dimColor>{glyphs.branch}</Text></Box>
+          <Text dimColor>{summary}</Text>
+        </Box>
+      )}
     </Box>
   );
 };
 
-/** Format the most informative argument for a tool call. */
+// =============================================================================
+// Format tool detail for inline display
+// =============================================================================
+
 function formatToolDetail(toolName: string, args: Record<string, unknown>): string {
   const name = toolName.toLowerCase();
-  if (name === "read_file" || name === "read") {
-    return (args.file_path ?? args.path ?? "") as string;
+  let val: string;
+
+  if (name === "read_file" || name === "read" || name === "write_file" || name === "write" || name === "edit_file" || name === "edit") {
+    val = (args.file_path ?? args.path ?? "") as string;
+  } else if (name === "execute" || name === "shell" || name === "bash") {
+    val = (args.command ?? args.cmd ?? "") as string;
+  } else if (name.includes("search")) {
+    val = (args.query ?? args.url ?? "") as string;
+  } else if (name.includes("fetch")) {
+    val = (args.url ?? "") as string;
+  } else {
+    val = "";
+    for (const v of Object.values(args)) {
+      if (typeof v === "string" && v.length > 0) { val = v; break; }
+    }
   }
-  if (name === "write_file" || name === "write") {
-    return (args.file_path ?? args.path ?? "") as string;
-  }
-  if (name === "edit_file" || name === "edit") {
-    return (args.file_path ?? args.path ?? "") as string;
-  }
-  if (name === "execute" || name === "shell" || name === "bash") {
-    return (args.command ?? args.cmd ?? "") as string;
-  }
-  if (name.includes("search")) {
-    return (args.query ?? args.url ?? "") as string;
-  }
-  if (name.includes("fetch")) {
-    return (args.url ?? "") as string;
-  }
-  // Generic: show first string-valued arg.
-  for (const val of Object.values(args)) {
-    if (typeof val === "string" && val.length > 0) return val.length > 60 ? val.slice(0, 60) + "…" : val;
-  }
-  return "";
+  if (!val) return "";
+  return val.length > 60 ? val.slice(0, 60) + "…" : val;
 }

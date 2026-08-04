@@ -6,13 +6,13 @@
 // =============================================================================
 
 import { OctopusClient, StreamHttpError, StreamServerError } from "@octopus/tentacle";
-import type { ChatRequest, StreamCallOptions, StreamEvent, Thread } from "@octopus/tentacle";
+import type { ChatRequest, ResumeRequestBody, StreamCallOptions, StreamEvent, Thread } from "@octopus/tentacle";
 import { getLogger } from "./logging.js";
 
 const logger = getLogger("tui.client");
 
 export { StreamHttpError, StreamServerError };
-export type { StreamEvent, Thread };
+export type { StreamEvent, Thread, ResumeRequestBody };
 
 // =============================================================================
 // TuiClient — extends OctopusClient with TUI-specific convenience methods
@@ -111,12 +111,16 @@ export class TuiClient {
 
   /**
    * Resume a chat after HITL interrupt.
+   *
+   * Sends a structured resume body (kind + decisions/answers). The caller is
+   * responsible for building the `ResumeRequestBody` — see `tui-adapter.ts`
+   * `buildResumeBody()` for the tool_approval case.
    */
   async streamResume(
     threadId: string,
-    approved: boolean,
+    body: ResumeRequestBody,
     opts: StreamCallOptions = {}
   ): Promise<AsyncGenerator<StreamEvent>> {
-    return this.#client.streamAgentResume(threadId, approved, opts);
+    return this.#client.streamAgentResume(threadId, body, opts);
   }
 }

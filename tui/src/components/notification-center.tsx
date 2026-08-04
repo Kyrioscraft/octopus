@@ -62,11 +62,7 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
   // ---------------------------------------------------------------------------
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
-      <Box marginBottom={1}>
-        <Text bold>Notifications {glyphs.toolPrefix}</Text>
-      </Box>
-
+    <Box flexDirection="column">
       {notifications.length === 0 ? (
         <Box marginY={1}>
           <Text dimColor>No notifications.</Text>
@@ -98,12 +94,6 @@ export const NotificationCenter: React.FC<NotificationCenterProps> = ({
           })}
         </Box>
       )}
-
-      <Box>
-        <Text dimColor>
-          {glyphs.bullet} ↑↓ to navigate, Esc to dismiss
-        </Text>
-      </Box>
     </Box>
   );
 };

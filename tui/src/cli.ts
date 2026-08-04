@@ -149,13 +149,6 @@ async function runInteractive(opts: CliOpts): Promise<void> {
   });
   const startResult = await sm.start();
 
-  // Enable SGR mouse reporting so we can capture scroll wheel events inside the
-  // alternate screen. ESC[?1000h = basic mouse tracking, ESC[?1006h = SGR
-  // extended mode (gives us button codes and coordinates).
-  // These must be set before render() — Ink takes stdin raw mode, and we need
-  // mouse escape sequences to flow through to useInput handlers.
-  process.stdout.write("\x1b[?1000h\x1b[?1006h");
-
   const appProps = {
     modelSpec: opts.model,
     initialPrompt: opts.prompt,
@@ -171,10 +164,13 @@ async function runInteractive(opts: CliOpts): Promise<void> {
   };
 
   try {
-    // alternateScreen: true — Ink enters the alternate screen buffer
-    // (ESC[?1049h) on mount and restores the primary screen (ESC[?1049l) on
-    // unmount.  The alternate screen gives us full control over every row so
-    // the input bar stays pinned at the bottom regardless of message scrolling.
+    // Render options:
+    //
+    // alternateScreen is OFF — we use the normal screen buffer so that Ink's
+    // <Static> component can write completed messages into the terminal's scroll
+    // backlog (alternate screen has no scrollback, so static output would be
+    // lost). The user scrolls history with the terminal's native scrollback
+    // (mouse wheel, Shift+PgUp, scrollbar).
     //
     // incrementalRendering: true — per-line diff updates reduce flicker during
     // streaming (Ink's Branch B rendering).
@@ -184,14 +180,9 @@ async function runInteractive(opts: CliOpts): Promise<void> {
     const { waitUntilExit } = render(createElement(App, appProps), {
       patchConsole: false,
       incrementalRendering: true,
-      alternateScreen: true,
     });
     await waitUntilExit();
   } finally {
-    // Disable mouse reporting — restore terminal to its normal state.
-    // ESC[?1006l = disable SGR extended mode, ESC[?1000l = disable basic tracking.
-    process.stdout.write("\x1b[?1006l\x1b[?1000l");
-
     // Tear down the server we spawned. If we reused an externally-launched
     // server, ServerManager.stop() is a no-op (it tracks what it started).
     await sm.stop();
@@ -215,10 +206,21 @@ async function runNonInteractive(opts: CliOpts): Promise<void> {
       process.exit(1);
     }
 
+    // Open the launch directory as the agent's workspace so the agent operates
+    // in the same cwd the user invoked `oc` from (mirrors interactive mode).
+    let workspaceId: string | undefined;
+    try {
+      const ws = await client.client.openWorkspace(process.cwd());
+      workspaceId = ws.id;
+    } catch {
+      // Best-effort — server will fall back to its default workspace.
+    }
+
     console.error(`Sending: ${opts.prompt}`);
 
     const stream = await client.streamChat({
       messages: [{ role: "user", content: opts.prompt }],
+      workspace_id: workspaceId,
     });
 
     let buffer = "";

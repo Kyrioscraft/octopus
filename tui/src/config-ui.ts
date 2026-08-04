@@ -18,11 +18,11 @@ export interface Glyphs {
   cross: string;
   /** Right-pointing arrow. */
   arrow: string;
-  /** Bullet point. */
+  /** Bullet point (legacy). */
   bullet: string;
   /** Horizontal line/rule. */
   hrule: string;
-  /** Tool prefix indicator. */
+  /** Tool prefix indicator (legacy). */
   toolPrefix: string;
   /** Spinner frames (array of animation frames). */
   spinnerFrames: string[];
@@ -56,6 +56,25 @@ export interface Glyphs {
   scrollTrack: string;
   /** Scrollbar: thumb indicator (full block / hash). */
   scrollThumb: string;
+  // ---- Premium CLI glyphs (Claude Code / Vercel CLI style) ----
+  /** Filled circle — assistant message lead glyph (●). */
+  dot: string;
+  /** Filled circle with right arrow — tool/action call (⏺). */
+  toolCall: string;
+  /** Corner branch — nested result indenter (⎿). */
+  branch: string;
+  /** Dashed prefix — system/app messages (┄). */
+  dashed: string;
+  /** Chevron right — input prompt glyph (❯). */
+  prompt: string;
+  /** Rounded top-left corner for user rail (╭). */
+  railTop: string;
+  /** Rounded bottom-left corner for user rail (╰). */
+  railBottom: string;
+  /** Empty circle — pending/todo state (○). */
+  circleEmpty: string;
+  /** Filled circle — in-progress/active state (●). */
+  circleFilled: string;
 }
 
 export const UNICODE_GLYPHS: Glyphs = {
@@ -82,6 +101,16 @@ export const UNICODE_GLYPHS: Glyphs = {
   scrollDown: "▼",
   scrollTrack: "░",
   scrollThumb: "█",
+  // Premium CLI glyphs
+  dot: "●",
+  toolCall: "⏺",
+  branch: "⎿",
+  dashed: "┄",
+  prompt: "❯",
+  railTop: "╭",
+  railBottom: "╰",
+  circleEmpty: "○",
+  circleFilled: "●",
 };
 
 export const ASCII_GLYPHS: Glyphs = {
@@ -108,6 +137,16 @@ export const ASCII_GLYPHS: Glyphs = {
   scrollDown: "v",
   scrollTrack: ".",
   scrollThumb: "#",
+  // Premium CLI glyphs (ASCII fallback)
+  dot: "*",
+  toolCall: ">",
+  branch: "\\",
+  dashed: ".",
+  prompt: ">",
+  railTop: "+",
+  railBottom: "+",
+  circleEmpty: "( )",
+  circleFilled: "(*)",
 };
 
 // =============================================================================

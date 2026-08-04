@@ -5,7 +5,15 @@
 //
 // Every slash command is declared once as a SlashCommand entry in COMMANDS.
 // Bypass-tier frozensets and autocomplete entries are derived automatically.
+//
+// At runtime, the TUI also fetches the server-authoritative command list via
+// `listSlashCommands("tui")` (see fetchRemoteCommands). The remote list is the
+// source of truth for command names/descriptions/systemAction; the local
+// COMMANDS array supplies the TUI-specific `bypassTier` metadata that the
+// server does not know about. See `mergeCommands`.
 // =============================================================================
+
+import type { SlashCommandEntry, SystemAction } from "@octopus/tentacle";
 
 // =============================================================================
 // Bypass tier — controls whether a command can skip the message queue
@@ -280,6 +288,176 @@ function toEntry(cmd: SlashCommand): CommandEntry {
 
 /** Autocomplete entries derived from COMMANDS. */
 export const SLASH_COMMANDS: readonly CommandEntry[] = COMMANDS.map(toEntry);
+
+// =============================================================================
+// Remote command source — fetch from server, merge with local bypass-tier data
+// =============================================================================
+
+/**
+ * The name→systemAction mapping for commands whose action differs from the
+ * trivial "strip the leading slash" derivation. Most commands have a
+ * systemAction equal to their name (e.g. "/quit" → "quit", "/model" →
+ * "model"), so we only need to list the exceptions here.
+ *
+ * Aliases are also mapped so dispatch works regardless of which name the user
+ * typed.
+ */
+const NAME_TO_SYSTEM_ACTION: Record<string, SystemAction> = {
+  "/copy": "copy-last",
+  "/q": "quit",
+  "/about": "version",
+  "/connect": undefined as never, // /auth has no core action; handled locally
+  "/compact": "offload",
+  "/force-clear": undefined as never,
+  "/reload": undefined as never,
+  "/restart": undefined as never,
+  "/debug-error": undefined as never,
+  "/log": undefined as never,
+  "/timestamps": undefined as never,
+};
+
+/**
+ * Resolve the SystemAction for a command name. Falls back to the name itself
+ * (without the leading slash) when no explicit mapping exists — this covers
+ * the majority of commands whose action equals their name.
+ */
+export function resolveSystemAction(name: string): SystemAction | undefined {
+  if (name in NAME_TO_SYSTEM_ACTION) {
+    const mapped = NAME_TO_SYSTEM_ACTION[name];
+    return mapped === undefined ? undefined : mapped;
+  }
+  // Default: strip leading slash → systemAction (e.g. "/model" → "model")
+  const bare = name.startsWith("/") ? name.slice(1) : name;
+  return bare as SystemAction;
+}
+
+/** A minimal client interface — only the method fetchRemoteCommands needs. */
+interface RemoteCommandClient {
+  listSlashCommands(platform?: "web" | "tui" | "all"): Promise<SlashCommandEntry[]>;
+}
+
+/**
+ * Fetch the server-authoritative command list for the TUI platform.
+ * Returns an empty array on failure (the caller falls back to local COMMANDS).
+ */
+export async function fetchRemoteCommands(
+  client: RemoteCommandClient
+): Promise<SlashCommandEntry[]> {
+  try {
+    return await client.listSlashCommands("tui");
+  } catch {
+    return [];
+  }
+}
+
+/** A merged command entry: autocomplete data + systemAction for dispatch. */
+export interface MergedCommand extends CommandEntry {
+  systemAction: SystemAction | undefined;
+  kind: "system" | "prompt";
+  /** Prompt template (only for kind === "prompt"). */
+  promptTemplate?: string | null;
+  /** Whether to auto-send after inserting the prompt template. */
+  promptAction?: "insert" | "send" | null;
+}
+
+/**
+ * Merge remote server commands with local bypass-tier metadata.
+ *
+ * - Remote commands are authoritative for name/description/systemAction/kind.
+ * - Local COMMANDS supplies bypassTier (used to classify queue behavior).
+ * - Commands present locally but missing remotely (e.g. /reload, /force-clear,
+ *   /log, /timestamps — TUI-only commands not registered in core) are kept as
+ *   fallback so they remain usable offline.
+ */
+export function mergeCommands(
+  remote: SlashCommandEntry[],
+  localSkills: CommandEntry[] = [],
+): MergedCommand[] {
+  const localByName = new Map<string, SlashCommand>();
+  for (const cmd of COMMANDS) {
+    localByName.set(cmd.name, cmd);
+    for (const alias of cmd.aliases ?? []) {
+      localByName.set(alias, cmd);
+    }
+  }
+
+  const seen = new Set<string>();
+  const merged: MergedCommand[] = [];
+
+  // Remote commands first (authoritative)
+  for (const entry of remote) {
+    const name = "/" + entry.name;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const local = localByName.get(name);
+    merged.push({
+      name,
+      description: entry.description || entry.displayName || local?.description || "",
+      hiddenKeywords: local?.hiddenKeywords ?? entry.name,
+      argumentHint: local?.argumentHint ?? "",
+      systemAction: entry.systemAction ?? undefined,
+      kind: entry.kind,
+      promptTemplate: entry.promptTemplate ?? undefined,
+      promptAction: entry.action ?? undefined,
+    });
+  }
+
+  // Local-only commands (not in the server's builtin list)
+  for (const cmd of COMMANDS) {
+    if (seen.has(cmd.name)) continue;
+    seen.add(cmd.name);
+    merged.push({
+      name: cmd.name,
+      description: cmd.description,
+      hiddenKeywords: cmd.hiddenKeywords ?? "",
+      argumentHint: cmd.argumentHint ?? "",
+      systemAction: resolveSystemAction(cmd.name),
+      kind: "system",
+    });
+    for (const alias of cmd.aliases ?? []) {
+      if (seen.has(alias)) continue;
+      seen.add(alias);
+      merged.push({
+        name: alias,
+        description: cmd.description,
+        hiddenKeywords: cmd.hiddenKeywords ?? "",
+        argumentHint: cmd.argumentHint ?? "",
+        systemAction: resolveSystemAction(alias),
+        kind: "system",
+      });
+    }
+  }
+
+  // Skill commands (/skill:<name>)
+  for (const skill of localSkills) {
+    if (seen.has(skill.name)) continue;
+    seen.add(skill.name);
+    merged.push({
+      name: skill.name,
+      description: skill.description,
+      hiddenKeywords: skill.hiddenKeywords,
+      argumentHint: skill.argumentHint,
+      systemAction: undefined,
+      kind: "prompt",
+    });
+  }
+
+  return merged;
+}
+
+/**
+ * Build a lookup map from command name (including aliases) to its MergedCommand.
+ * Used by dispatchCommand to resolve systemAction by name.
+ */
+export function buildCommandIndex(
+  merged: MergedCommand[],
+): Map<string, MergedCommand> {
+  const index = new Map<string, MergedCommand>();
+  for (const cmd of merged) {
+    index.set(cmd.name, cmd);
+  }
+  return index;
+}
 
 // =============================================================================
 // Skill command helpers

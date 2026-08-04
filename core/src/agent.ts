@@ -401,7 +401,7 @@ export async function makeGraph(
     .map((s) => `${s.name}:${(s.tools ?? []).slice().sort().join(",")}:${s.model ?? ""}:${s.enabled ?? true}`)
     .sort()
     .join("|");
-  const key = _cacheKey(config, mcpSignature, subagentSignature) + wsSignature + ":" + modeSignature;
+  const key = _cacheKey(config, mcpSignature, subagentSignature) + wsSignature + ":" + modeSignature + ":cwd=" + (options?.cwd ?? "");
 
   // Return cached graph if available
   const cached = _graphCache.get(key);

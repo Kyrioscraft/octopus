@@ -1,17 +1,21 @@
 // =============================================================================
 // MCP server viewer — display MCP server statuses.
 // Equivalent to Python tui.widgets.mcp_viewer.
+//
+// Data is injected via props (from the server's listMcp endpoint via tentacle),
+// which provides live connection status, rather than reading the local config
+// file.
 // =============================================================================
 
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import { getGlyphs } from "../config-ui.js";
 
 // =============================================================================
-// MCP server status type
+// Types
 // =============================================================================
 
-interface McpServerEntry {
+export interface McpServerEntry {
   name: string;
   transport: string;
   enabled: boolean;
@@ -26,44 +30,17 @@ interface McpServerEntry {
 
 export interface McpViewerProps {
   onDismiss: () => void;
+  /** MCP server entries, injected by the parent (from the server). */
+  servers: McpServerEntry[];
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export const McpViewer: React.FC<McpViewerProps> = ({ onDismiss }) => {
+export const McpViewer: React.FC<McpViewerProps> = ({ onDismiss, servers }) => {
   const glyphs = getGlyphs();
   const [selectedIdx, setSelectedIdx] = useState(0);
-  const [servers, setServers] = useState<McpServerEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function load() {
-      try {
-        const { loadMcpConfig, DEFAULT_CONFIG_PATH } = await import("@octopus/core");
-        const config = loadMcpConfig(DEFAULT_CONFIG_PATH);
-        const entries: McpServerEntry[] = [];
-        if (config && config.servers) {
-          for (const [name, server] of Object.entries(config.servers)) {
-            const srv = server as Record<string, unknown>;
-            entries.push({
-              name,
-              transport: (srv.transport as string) ?? (srv.type as string) ?? "stdio",
-              enabled: !(srv.disabled as boolean),
-              connected: false,
-              toolCount: 0,
-            });
-          }
-        }
-        setServers(entries);
-      } catch {
-        setServers([]);
-      }
-      setLoading(false);
-    }
-    load();
-  }, []);
 
   // ---------------------------------------------------------------------------
   // Key handling
@@ -89,16 +66,8 @@ export const McpViewer: React.FC<McpViewerProps> = ({ onDismiss }) => {
   // ---------------------------------------------------------------------------
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1}>
-      <Box marginBottom={1}>
-        <Text bold>MCP Servers {glyphs.toolPrefix}</Text>
-      </Box>
-
-      {loading ? (
-        <Box marginY={1}>
-          <Text dimColor>Loading MCP config...</Text>
-        </Box>
-      ) : servers.length === 0 ? (
+    <Box flexDirection="column">
+      {servers.length === 0 ? (
         <Box marginY={1}>
           <Text dimColor>No MCP servers configured.</Text>
           <Text dimColor> Add servers to ~/.deepagents/.mcp.json or project .mcp.json</Text>
@@ -107,9 +76,21 @@ export const McpViewer: React.FC<McpViewerProps> = ({ onDismiss }) => {
         <Box flexDirection="column" marginBottom={1}>
           {servers.map((srv, i) => {
             const isSelected = i === selectedIdx;
-            const statusIcon = srv.enabled ? glyphs.checkmark : glyphs.cross;
-            const statusColor = srv.enabled ? "green" : "red";
-            const statusLabel = srv.enabled ? "enabled" : "disabled";
+            const statusIcon = srv.connected
+              ? glyphs.checkmark
+              : srv.enabled
+                ? glyphs.spinnerFrames[0]
+                : glyphs.cross;
+            const statusColor = srv.connected
+              ? "green"
+              : srv.enabled
+                ? "yellow"
+                : "red";
+            const statusLabel = srv.connected
+              ? "connected"
+              : srv.enabled
+                ? "enabled"
+                : "disabled";
             return (
               <Box key={srv.name} flexDirection="column">
                 <Box>
@@ -119,18 +100,20 @@ export const McpViewer: React.FC<McpViewerProps> = ({ onDismiss }) => {
                   </Text>
                   <Text dimColor> — {srv.transport}</Text>
                   <Text color={statusColor}> [{statusLabel}]</Text>
+                  {srv.toolCount > 0 && (
+                    <Text dimColor> · {srv.toolCount} tools</Text>
+                  )}
                 </Box>
+                {srv.error && (
+                  <Box paddingLeft={4}>
+                    <Text color="red">{srv.error}</Text>
+                  </Box>
+                )}
               </Box>
             );
           })}
         </Box>
       )}
-
-      <Box>
-        <Text dimColor>
-          {glyphs.bullet + " ↑↓ to navigate, Esc to dismiss. Use /mcp login <server> to authenticate."}
-        </Text>
-      </Box>
     </Box>
   );
 };
