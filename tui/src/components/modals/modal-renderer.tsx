@@ -4,7 +4,7 @@
 // =============================================================================
 
 import React from "react";
-import { TuiClient } from "../../client.js";
+import { TuiClient } from "../../client/client.js";
 import type { ModelEntry } from "../model-selector.js";
 import type { McpServerEntry } from "../mcp-viewer.js";
 import { ThreadSelector } from "../thread-selector.js";

@@ -13,8 +13,8 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { COLORS, BORDERS, NAV_HINT } from "../theme.js";
-import { getGlyphs } from "../config-ui.js";
+import { COLORS, BORDERS, NAV_HINT } from "../terminal/theme.js";
+import { getGlyphs } from "../terminal/config-ui.js";
 
 // =============================================================================
 // Props

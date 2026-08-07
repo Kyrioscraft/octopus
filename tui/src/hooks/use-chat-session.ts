@@ -18,13 +18,16 @@ import { useState, useRef, useCallback } from "react";
 import { cwd as processCwd } from "node:process";
 import type {
   ChatMessageData, SpinnerStatus, AppPhase, InputMode,
+  SessionState, AgentBlock, BlockId, BlockStreamCallbacks,
 } from "../types.js";
-import { TuiClient } from "../client.js";
-import type { ResumeRequestBody } from "../client.js";
-import { executeAgentTask, resumeAgentTask } from "../tui-adapter.js";
-import type { TuiAdapterCallbacks, ExecutionContext } from "../tui-adapter.js";
+import { TuiClient } from "../client/client.js";
+import type { ResumeRequestBody } from "../client/client.js";
+import { executeAgentTask, resumeAgentTask } from "../core/tui-adapter.js";
+import type { TuiAdapterCallbacks, ExecutionContext } from "../core/tui-adapter.js";
+import { mapStreamToBlocks } from "../core/block-stream.js";
+import { useTextBuffer } from "./use-text-buffer.js";
 import type { ApprovalRequest, ApprovalResult } from "../components/approval.js";
-import { getLogger } from "../logging.js";
+import { getLogger } from "../utils/logging.js";
 
 const logger = getLogger("tui.hooks.chat");
 
@@ -84,6 +87,12 @@ export interface UseChatSessionReturn {
   enqueueOrExecute: (text: string, mode: InputMode) => void;
   /** Handle a HITL approval decision (approve/reject). */
   handleApprovalDecision: (result: ApprovalResult) => Promise<void>;
+  /** Block-level session state (new block rendering model). */
+  sessionState: SessionState;
+  /** Execute a user message using the block-level rendering path. */
+  executeMessageAsBlocks: (text: string, mode: InputMode) => Promise<void>;
+  /** Resolve a pending confirm block (called when user presses y/n). */
+  handleConfirmAnswer: (approved: boolean) => void;
 }
 
 // =============================================================================
@@ -108,6 +117,14 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
   const [pendingApproval, setPendingApproval] = useState<{
     requests: ApprovalRequest[];
   } | null>(null);
+
+  // --- Block-level state (new rendering model per tui-solution.md) ---
+  const [sessionState, setSessionState] = useState<SessionState>({
+    turns: [],
+    pendingConfirm: null,
+  });
+  // Resolver for the confirm Promise — set when a confirm block is pending.
+  const confirmResolveRef = useRef<((approved: boolean) => void) | null>(null);
 
   // --- Refs ---
   const threadRef = useRef(currentThreadId);
@@ -202,6 +219,144 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
     };
     setMessages((prev) => [...prev, msg]);
   }, []);
+
+  // ===========================================================================
+  // Block-level helpers — drive the SessionState from BlockStreamCallbacks
+  // ===========================================================================
+
+  /** Generate a unique block ID. */
+  const makeBlockId = useCallback((prefix: string): BlockId => {
+    return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  }, []);
+
+  /** Add a block to the last (assistant) turn. */
+  const addBlock = useCallback((block: AgentBlock) => {
+    setSessionState((prev) => {
+      const turns = [...prev.turns];
+      if (turns.length === 0) return prev;
+      const lastTurn = { ...turns[turns.length - 1]! };
+      lastTurn.blocks = [...lastTurn.blocks, block];
+      turns[turns.length - 1] = lastTurn;
+      return { ...prev, turns };
+    });
+  }, []);
+
+  /** Update an existing block by ID in the last turn. */
+  const updateBlock = useCallback((id: BlockId, patch: Partial<AgentBlock>) => {
+    setSessionState((prev) => {
+      const turns = [...prev.turns];
+      if (turns.length === 0) return prev;
+      const lastTurn = { ...turns[turns.length - 1]! };
+      lastTurn.blocks = lastTurn.blocks.map((b) =>
+        b.id === id ? { ...b, ...patch } as AgentBlock : b,
+      );
+      turns[turns.length - 1] = lastTurn;
+      return { ...prev, turns };
+    });
+  }, []);
+
+  /** Remove a block by ID from the last turn. */
+  const removeBlock = useCallback((id: BlockId) => {
+    setSessionState((prev) => {
+      const turns = [...prev.turns];
+      if (turns.length === 0) return prev;
+      const lastTurn = { ...turns[turns.length - 1]! };
+      lastTurn.blocks = lastTurn.blocks.filter((b) => b.id !== id);
+      turns[turns.length - 1] = lastTurn;
+      return { ...prev, turns };
+    });
+  }, []);
+
+  // --- Text buffer for rAF-throttled streaming ---
+  const textBuffer = useTextBuffer((updates) => {
+    setSessionState((prev) => {
+      const turns = [...prev.turns];
+      if (turns.length === 0) return prev;
+      const lastTurn = { ...turns[turns.length - 1]! };
+      lastTurn.blocks = lastTurn.blocks.map((b) => {
+        if (b.type === "text" && updates.has(b.id)) {
+          const delta = updates.get(b.id) ?? "";
+          return { ...b, content: b.content + delta } as AgentBlock;
+        }
+        return b;
+      });
+      turns[turns.length - 1] = lastTurn;
+      return { ...prev, turns };
+    });
+  });
+
+  // --- BlockStreamCallbacks ---
+  const blockCallbacks = useRef<BlockStreamCallbacks>({
+    onThinkingStart: (id) => {
+      addBlock({ id, type: "thinking", status: "running" });
+    },
+    onThinkingEnd: (id, content) => {
+      updateBlock(id, { status: "done", content } as Partial<AgentBlock>);
+    },
+    onTextStart: (id) => {
+      addBlock({ id, type: "text", status: "streaming", content: "" });
+    },
+    onTextDelta: (id, token) => {
+      textBuffer.push(id, token);
+    },
+    onTextEnd: (id) => {
+      // Flush any remaining buffered tokens before finalizing
+      // (the buffer flush is async via rAF, so we just mark done)
+      updateBlock(id, { status: "done" } as Partial<AgentBlock>);
+    },
+    onToolStart: (id, tool, input) => {
+      addBlock({ id, type: "tool_call", status: "running", tool, input });
+    },
+    onToolEnd: (id, output, error) => {
+      updateBlock(id, { status: "done", output, error } as Partial<AgentBlock>);
+    },
+    onConfirm: async (id, message, action) => {
+      addBlock({ id, type: "confirm", status: "pending", message, action });
+      setSessionState((prev) => ({ ...prev, pendingConfirm: id }));
+      setPhase("blocked");
+      // Return a Promise that resolves when the user presses y/n.
+      return new Promise<boolean>((resolve) => {
+        confirmResolveRef.current = (approved: boolean) => {
+          setSessionState((prev) => ({
+            ...prev,
+            pendingConfirm: null,
+          }));
+          if (approved) {
+            updateBlock(id, { status: "approved" } as Partial<AgentBlock>);
+          } else {
+            updateBlock(id, { status: "rejected" } as Partial<AgentBlock>);
+          }
+          resolve(approved);
+        };
+      });
+    },
+    onTurnStart: () => {
+      setSessionState((prev) => ({
+        ...prev,
+        turns: [
+          ...prev.turns,
+          {
+            id: `turn_${Date.now()}`,
+            role: "assistant",
+            blocks: [],
+            finished: false,
+          },
+        ],
+      }));
+    },
+    onTurnEnd: () => {
+      setSessionState((prev) => {
+        const turns = [...prev.turns];
+        if (turns.length > 0) {
+          turns[turns.length - 1] = { ...turns[turns.length - 1]!, finished: true };
+        }
+        return { ...prev, turns };
+      });
+    },
+  });
+
+  // Keep the ref current (for any closures that reference it)
+  blockCallbacks.current = blockCallbacks.current;
 
   // --- Thread history ---
 
@@ -333,6 +488,121 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
     }
   }, [agentName, autoApprove, addAppMessage, setPhase, phaseRef]);
 
+  // --- Block-level agent execution ---
+
+  const executeMessageAsBlocks = useCallback(async (text: string, _mode: InputMode) => {
+    const client = clientRef.current;
+    if (!client) {
+      addAppMessage("Error: No server connection.");
+      setPhase("ready");
+      return;
+    }
+
+    // Add user turn
+    const userTurnId = `turn_${Date.now()}`;
+    setSessionState((prev) => ({
+      ...prev,
+      turns: [
+        ...prev.turns,
+        {
+          id: userTurnId,
+          role: "user",
+          blocks: [
+            {
+              id: `user_${Date.now()}`,
+              type: "text",
+              status: "done",
+              content: text,
+            },
+          ],
+          finished: true,
+        },
+      ],
+    }));
+
+    // Also add to the message-based history for thread persistence
+    const userMsg: ChatMessageData = {
+      id: `msg_${Date.now()}`,
+      role: "user",
+      content: text,
+      timestamp: Date.now(),
+    };
+    setMessages((prev) => [...prev, userMsg]);
+
+    setPhase("running");
+    setSpinnerStatus("Thinking");
+
+    const abortController = new AbortController();
+
+    try {
+      const stream = await client.streamChat(
+        {
+          messages: [{ role: "user", content: text }],
+          thread_id: threadRef.current ?? undefined,
+          workspace_id: workspaceIdRef.current ?? undefined,
+          mode: "auto",
+          request_id: `req_${Date.now()}`,
+        },
+        { signal: abortController.signal },
+      );
+
+      await mapStreamToBlocks(stream, blockCallbacks.current, abortController.signal);
+    } catch (err) {
+      if ((err as Error).name === "AbortError") {
+        // User cancelled
+      } else {
+        logger.exception("executeMessageAsBlocks failed", err);
+        // Add an error block
+        setSessionState((prev) => {
+          const turns = [...prev.turns];
+          if (turns.length > 0) {
+            const lastTurn = { ...turns[turns.length - 1]! };
+            lastTurn.blocks = [
+              ...lastTurn.blocks,
+              {
+                id: `err_${Date.now()}`,
+                type: "text",
+                status: "done",
+                content: `Error: ${(err as Error).message}`,
+              },
+            ];
+            turns[turns.length - 1] = lastTurn;
+          }
+          return { ...prev, turns };
+        });
+      }
+    }
+
+    // Check if we're blocked on confirmation
+    setSessionState((prev) => {
+      if (prev.pendingConfirm) {
+        setPhase("blocked");
+      } else {
+        setPhase("ready");
+        setSpinnerStatus(null);
+        // Drain queue
+        const queued = queueRef.current;
+        if (queued.length > 0) {
+          const next = queued[0]!;
+          setMessageQueue((p) => p.slice(1));
+          // Use setTimeout to avoid setState during render
+          setTimeout(() => executeMessageAsBlocks(next.text, next.mode), 0);
+        }
+      }
+      return prev;
+    });
+  }, [agentName, addAppMessage, setPhase, phaseRef]);
+
+  /** Resolve a pending confirm block (called when user presses y/n). */
+  const handleConfirmAnswer = useCallback((approved: boolean) => {
+    if (confirmResolveRef.current) {
+      const resolve = confirmResolveRef.current;
+      confirmResolveRef.current = null;
+      resolve(approved);
+      setPhase("running");
+    }
+  }, [setPhase]);
+
   // --- Drain queue ---
 
   const drainQueue = useCallback(() => {
@@ -425,5 +695,8 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
     drainQueue,
     enqueueOrExecute,
     handleApprovalDecision,
+    sessionState,
+    executeMessageAsBlocks,
+    handleConfirmAnswer,
   };
 }

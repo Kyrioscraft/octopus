@@ -6,10 +6,10 @@
 // =============================================================================
 
 import { useState, useCallback } from "react";
-import { TuiClient } from "../client.js";
+import { TuiClient } from "../client/client.js";
 import type { ModelEntry } from "../components/model-selector.js";
 import type { McpServerEntry } from "../components/mcp-viewer.js";
-import { getLogger } from "../logging.js";
+import { getLogger } from "../utils/logging.js";
 
 const logger = getLogger("tui.hooks.modal");
 

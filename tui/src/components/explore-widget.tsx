@@ -6,9 +6,9 @@ import React from "react";
 import { Box, Text } from "ink";
 import type { ChatMessageData } from "../types.js";
 import type { SubagentActivityMeta } from "../types.js";
-import { getGlyphs } from "../config-ui.js";
-import { useFrame } from "../use-frame.js";
-import { COLORS } from "../theme.js";
+import { getGlyphs } from "../terminal/config-ui.js";
+import { useFrame } from "../terminal/use-frame.js";
+import { COLORS } from "../terminal/theme.js";
 
 export interface ExploreWidgetProps {
   message: ChatMessageData;

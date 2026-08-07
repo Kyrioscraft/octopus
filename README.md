@@ -68,7 +68,7 @@ Set these in `server/.env`:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OPENAI_API_KEY` | — | LLM API key (Anthropic, DeepSeek, OpenRouter also supported) |
-| `OCTOPUS_WEB_PORT` | `5050` | Server port |
+| `OCTOPUS_WEB_PORT` | `9876` | Server port |
 | `OCTOPUS_MODEL` | — | Override default model (`provider:model`) |
 | `OCTOPUS_ENABLE_SHELL` | `false` | Allow agent shell execution |
 | `OCTOPUS_ENABLE_WEB_SEARCH` | `true` | Enable web search tool |

@@ -52,7 +52,7 @@ export class OctopusClient {
 
   constructor(opts: { baseUrl?: string; token?: string } = {}) {
     // Default to same-origin (relative) so requests go through the dev proxy
-    // (Vite: /api → 127.0.0.1:5050) and the production reverse proxy.
+    // (Vite: /api → 127.0.0.1:9876) and the production reverse proxy.
     // Pass an explicit baseUrl only for non-browser / cross-origin use.
     this.#baseUrl = opts.baseUrl?.replace(/\/$/, "") ?? "";
     this.#token = opts.token ?? null;

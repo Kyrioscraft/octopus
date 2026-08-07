@@ -365,7 +365,12 @@ export function getSystemPrompt(options: SystemPromptOptions): string {
       "The user sends you messages and you respond with text and tool " +
       "calls. Your tools run on the user's machine. The user can see " +
       "your responses and tool outputs in real time, so keep them " +
-      "informed — but don't over-explain.";
+      "informed — but don't over-explain.\n\n" +
+      "IMPORTANT: Your responses are displayed in a terminal as PLAIN TEXT. " +
+      "Do NOT use markdown formatting — no #, **, *, `, ```code fences```, " +
+      "tables (|), or markdown lists. Write in plain readable text using " +
+      "indentation and line breaks for structure. For code, just indent it " +
+      "with spaces — do not wrap it in backtick fences.";
     ambiguityGuidance =
       "- If the request is ambiguous, ask questions before acting.\n" +
       "- If asked how to approach something, explain first, then act.\n" +

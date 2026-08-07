@@ -9,7 +9,7 @@
 
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
-import { getGlyphs } from "../config-ui.js";
+import { getGlyphs } from "../terminal/config-ui.js";
 
 // =============================================================================
 // Types

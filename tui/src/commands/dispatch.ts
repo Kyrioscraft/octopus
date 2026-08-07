@@ -9,7 +9,7 @@
 
 import type { InputMode, AppPhase, ChatMessageData, SessionStats, SpinnerStatus } from "../types.js";
 import type { MergedCommand } from "../command-registry.js";
-import { formatTokenCount } from "../formatting.js";
+import { formatTokenCount } from "../utils/formatting.js";
 
 // =============================================================================
 // Types

@@ -7,8 +7,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Box, Text } from "ink";
 import type { SpinnerStatus } from "../types.js";
-import { useFrame } from "../use-frame.js";
-import { COLORS } from "../theme.js";
+import { useFrame } from "../terminal/use-frame.js";
+import { COLORS } from "../terminal/theme.js";
 
 // =============================================================================
 // Props

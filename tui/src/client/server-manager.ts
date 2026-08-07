@@ -36,7 +36,7 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { mkdirSync, openSync, closeSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { getLogger } from "./logging.js";
+import { getLogger } from "../utils/logging.js";
 
 const logger = getLogger("tui.server-manager");
 
@@ -59,7 +59,7 @@ const SHUTDOWN_GRACE_MS = 3_000;
 // =============================================================================
 
 export interface ServerManagerOptions {
-  /** Full server URL, e.g. "http://127.0.0.1:5050". */
+  /** Full server URL, e.g. "http://127.0.0.1:9876". */
   serverUrl: string;
   /** When false (--no-auto-server), skip spawning and only probe. */
   autoStart: boolean;
@@ -79,26 +79,25 @@ export interface StartResult {
 // =============================================================================
 
 /**
- * Resolve the server entry point relative to this compiled file.
- *
- * This module runs as `tui/dist/server-manager.js`; the repo root is two
- * levels up (`tui/dist` → `tui` → repo root), and the server entry is
- * `server/dist/main.js` under that root.
- */
-function resolveServerScript(): string {
-  // `import.meta.url` is the canonical ESM way to get the current module URL.
-  const here = dirname(fileURLToPath(import.meta.url));
-  const repoRoot = join(here, "..", "..");
+	 * resolveServerScript — this module now runs as
+	 * `tui/dist/client/server-manager.js`; the repo root is three
+	 * levels up (`tui/dist/client` → `tui/dist` → `tui` → repo root),
+	 * and the server entry is `server/dist/main.js` under that root.
+	 */
+	function resolveServerScript(): string {
+	  // `import.meta.url` is the canonical ESM way to get the current module URL.
+	  const here = dirname(fileURLToPath(import.meta.url));
+	  const repoRoot = join(here, "..", "..", "..");
   return join(repoRoot, "server", "dist", "main.js");
 }
 
-/** Extract the TCP port from a server URL string (falls back to 5050). */
+/** Extract the TCP port from a server URL string (falls back to 9876). */
 function portFromUrl(serverUrl: string): number {
   try {
     const port = new URL(serverUrl).port;
-    return port ? parseInt(port, 10) : 5050;
+    return port ? parseInt(port, 10) : 9876;
   } catch {
-    return 5050;
+    return 9876;
   }
 }
 

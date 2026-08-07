@@ -8,7 +8,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { getGlyphs } from "../config-ui.js";
+import { getGlyphs } from "../terminal/config-ui.js";
 
 // =============================================================================
 // Rendered result

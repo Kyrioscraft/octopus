@@ -8,7 +8,7 @@
 
 import React, { useState, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
-import { getGlyphs } from "../config-ui.js";
+import { getGlyphs } from "../terminal/config-ui.js";
 import type { Question, AskUserWidgetResult } from "../types.js";
 
 // =============================================================================
@@ -85,10 +85,16 @@ export const AskUserMenu: React.FC<AskUserMenuProps> = ({ questions, onAnswer })
     } else {
       // All done — collect answers and submit
       const answers = states.map((s, i) => {
-        if (i === currentQuestion) {
-          return isMultipleChoice ? choices[state.choiceIdx] : state.answer;
+        const q = questions[i];
+        const answer: import("../types.js").AskUserAnswerEntry = {
+          question_id: q?.question_id ?? String(i),
+        };
+        if (isMultipleChoice && i === currentQuestion) {
+          answer.selection = choices[state.choiceIdx];
+        } else {
+          answer.text = s.answer;
         }
-        return s.answer;
+        return answer;
       });
       onAnswer({ type: "answered", answers });
     }
@@ -121,8 +127,16 @@ export const AskUserMenu: React.FC<AskUserMenuProps> = ({ questions, onAnswer })
           setCurrentQuestion(currentQuestion + 1);
         } else {
           const answers = states.map((s, i) => {
-            if (i === currentQuestion) return currentAnswer;
-            return s.answer;
+            const q = questions[i];
+            const entry: import("../types.js").AskUserAnswerEntry = {
+              question_id: q?.question_id ?? String(i),
+            };
+            if (i === currentQuestion) {
+              entry.text = currentAnswer;
+            } else {
+              entry.text = s.answer;
+            }
+            return entry;
           });
           onAnswer({ type: "answered", answers });
         }

@@ -4,7 +4,7 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import { COLORS } from "../theme.js";
+import { COLORS } from "../terminal/theme.js";
 
 // =============================================================================
 // Props

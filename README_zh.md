@@ -68,7 +68,7 @@ oc agents       # 无界面子命令
 | 变量 | 默认值 | 说明 |
 |----------|---------|-------------|
 | `OPENAI_API_KEY` | — | LLM API 密钥（同样支持 Anthropic、DeepSeek、OpenRouter 等） |
-| `OCTOPUS_WEB_PORT` | `5050` | 服务端口 |
+| `OCTOPUS_WEB_PORT` | `9876` | 服务端口 |
 | `OCTOPUS_MODEL` | — | 覆盖默认模型（格式：`provider:model`） |
 | `OCTOPUS_ENABLE_SHELL` | `false` | 允许智能体执行 shell 命令 |
 | `OCTOPUS_ENABLE_WEB_SEARCH` | `true` | 启用网络搜索工具 |

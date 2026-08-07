@@ -6,13 +6,13 @@
 // =============================================================================
 
 import { OctopusClient, StreamHttpError, StreamServerError } from "@octopus/tentacle";
-import type { ChatRequest, ResumeRequestBody, StreamCallOptions, StreamEvent, Thread } from "@octopus/tentacle";
-import { getLogger } from "./logging.js";
+import type { ChatRequest, ResumeRequestBody, StreamCallOptions, StreamEvent, Thread, AskKind, AskQuestion } from "@octopus/tentacle";
+import { getLogger } from "../utils/logging.js";
 
 const logger = getLogger("tui.client");
 
 export { StreamHttpError, StreamServerError };
-export type { StreamEvent, Thread, ResumeRequestBody };
+export type { StreamEvent, Thread, ResumeRequestBody, AskKind, AskQuestion };
 
 // =============================================================================
 // TuiClient — extends OctopusClient with TUI-specific convenience methods

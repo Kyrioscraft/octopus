@@ -13,7 +13,7 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useInput, useApp, useWindowSize } from "ink";
 import type { AppPhase, InputMode, SessionStats } from "./types.js";
-import { TuiClient } from "./client.js";
+import { TuiClient } from "./client/client.js";
 import {
   ALWAYS_IMMEDIATE, BYPASS_WHEN_CONNECTING, IMMEDIATE_UI, SIDE_EFFECT_FREE,
   STARTUP_RECOVERY_COMMANDS, parseSkillCommand,
@@ -26,7 +26,7 @@ import { createDispatchCommand } from "./commands/dispatch.js";
 import { ConnectingScreen } from "./components/screens/connecting-screen.js";
 import { ErrorScreen } from "./components/screens/error-screen.js";
 import { MainScreen } from "./components/screens/main-screen.js";
-import { getLogFilePath, isDebugEnabled } from "./logging.js";
+import { getLogFilePath, isDebugEnabled } from "./utils/logging.js";
 
 // =============================================================================
 // Props
@@ -62,6 +62,8 @@ export const App: React.FC<AppProps> = (props) => {
     requestCount: 0, inputTokens: 0, outputTokens: 0, wallTimeSeconds: 0, perModel: {},
   });
   const [showTimestamps, setShowTimestamps] = useState(false);
+  /** Toggle between block-level (new) and message-level (legacy) rendering. */
+  const [useBlockRendering] = useState(true);
 
   // ---------------------------------------------------------------------------
   // Shared refs (used by both connection and chat hooks)
@@ -231,9 +233,13 @@ export const App: React.FC<AppProps> = (props) => {
       return;
     }
 
-    // Normal message
-    chat.enqueueOrExecute(trimmed, mode);
-  }, [phaseRef, dispatch, chat.enqueueOrExecute]);
+    // Normal message — route to block or legacy path
+    if (useBlockRendering) {
+      chat.executeMessageAsBlocks(trimmed, mode);
+    } else {
+      chat.enqueueOrExecute(trimmed, mode);
+    }
+  }, [phaseRef, dispatch, chat.enqueueOrExecute, chat.executeMessageAsBlocks, useBlockRendering]);
 
   // ---------------------------------------------------------------------------
   // Initial connection (runs once on mount)
@@ -334,6 +340,9 @@ export const App: React.FC<AppProps> = (props) => {
       sessionStats={sessionStats}
       columns={columns}
       agentName={props.agentName}
+      sessionState={chat.sessionState}
+      useBlockRendering={useBlockRendering}
+      onConfirmAnswer={chat.handleConfirmAnswer}
     />
   );
 };

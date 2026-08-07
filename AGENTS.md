@@ -19,11 +19,11 @@ It is a **pnpm/npm workspaces monorepo** (package names scoped under
 - `core/` — `@octopus/core`. Agent engine: builds LangGraph graphs from
   `ServerConfig`, reads `~/.deepagents/config.toml`, resolves model providers,
   exposes logging, config, and built-in tools. Pure library — no HTTP.
-- `server/` — `@octopus/server`. Hono HTTP server (port 5050) serving
+- `server/` — `@octopus/server`. Hono HTTP server (port 9876) serving
   `/api/auth/*` and `/api/chat/*`. Streams agent output as **NDJSON**. Depends
   on `@octopus/core`.
 - `web/` — `@octopus/web`. React 19 + Ant Design + Zustand SPA (Vite, port
-  5173). Proxies `/api` → `http://127.0.0.1:5050`. Depends on `@octopus/tentacle`.
+  5173). Proxies `/api` → `http://127.0.0.1:9876`. Depends on `@octopus/tentacle`.
 - `tentacle/` — `@octopus/tentacle`. Typed browser/Node client for the server
   API (`OctopusClient`) plus NDJSON stream parsing. Shared by `web`.
 
@@ -112,7 +112,7 @@ Config resolution precedence (highest first), in `core/src/config.ts`:
 4. Hardcoded `"anthropic:claude-sonnet-4-6"`
 
 Key env vars (see `core/src/constants.ts` for the full provider registry):
-- `OCTOPUS_WEB_PORT` (default 5050), `OCTOPUS_LOG_LEVEL` (default INFO)
+- `OCTOPUS_WEB_PORT` (default 9876), `OCTOPUS_LOG_LEVEL` (default INFO)
 - `OCTOPUS_INTERACTIVE`, `OCTOPUS_AUTO_APPROVE`, `OCTOPUS_ENABLE_SHELL`,
   `OCTOPUS_ENABLE_WEB_SEARCH`
 - Provider API keys follow the registry (e.g. `OPENAI_API_KEY`,
@@ -130,5 +130,5 @@ Key env vars (see `core/src/constants.ts` for the full provider registry):
   `makeGraph()` for new code.
 - The DB layer is in-memory + JSON file; it is **not** safe for concurrent
   multi-process writes. Don't assume transactional safety.
-- Vite dev server proxies `/api` to port 5050 — both `server` and `web` must
+- Vite dev server proxies `/api` to port 9876 — both `server` and `web` must
   run for local development.

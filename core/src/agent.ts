@@ -42,6 +42,7 @@ import { ResumeStateMiddleware } from "./middleware/resume_state.js";
 import { ShellAllowListMiddleware } from "./middleware/shell_allow_list.js";
 import { LocalContextMiddleware } from "./middleware/local_context.js";
 import { ConfigurableModelMiddleware } from "./middleware/configurable_model.js";
+import { FilesystemPolicyMiddleware } from "./middleware/filesystem_policy_middleware.js";
 import { getBuiltinToolsAsStructuredTools } from "./tools.js";
 import { createAskUserQuestionTool } from "./tools/ask_user_question.js";
 import { listSkills } from "./skills.js";
@@ -588,6 +589,12 @@ async function _makeGraphUncached(
   );
   middleware.push(new ToolExceptionRecoveryMiddleware());
   middleware.push(new ResumeStateMiddleware());
+
+  // Filesystem policy middleware — runs after the SDK's FilesystemMiddleware
+  // (which appends its own tool descriptions and FILESYSTEM_SYSTEM_PROMPT).
+  // Rewrites the FS tool descriptions and strips the SDK prompt so that
+  // Octopus's "prefer grep/glob" guidance is the last word the model sees.
+  middleware.push(new FilesystemPolicyMiddleware());
 
   // Local context middleware (project detection via bash script)
   // Added when the backend supports shell execution (LocalShellBackend)

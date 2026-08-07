@@ -6,13 +6,13 @@
 
 import React from "react";
 import { Box } from "ink";
-import type { AppPhase, InputMode, ChatMessageData, SessionStats, SpinnerStatus } from "../../types.js";
+import type { AppPhase, InputMode, ChatMessageData, SessionStats, SpinnerStatus, SessionState } from "../../types.js";
 import type { MergedCommand } from "../../command-registry.js";
 import type { ModelEntry } from "../model-selector.js";
 import type { McpServerEntry } from "../mcp-viewer.js";
 import type { ApprovalRequest, ApprovalResult } from "../approval.js";
-import { TuiClient } from "../../client.js";
-import { MessageList } from "../messages.js";
+import { TuiClient } from "../../client/client.js";
+import { MessageList, ChatRenderer } from "../messages.js";
 import { ChatInput } from "../chat-input.js";
 import { WelcomeScreen } from "../welcome.js";
 import { StatusBar } from "../status-bar.js";
@@ -77,6 +77,14 @@ export interface MainScreenProps {
 
   // --- Agent ---
   agentName: string;
+
+  // --- Block-level rendering (new per tui-solution.md) ---
+  /** Block-based session state for the ChatRenderer. */
+  sessionState?: SessionState;
+  /** Whether to use the new block-level rendering (default: false). */
+  useBlockRendering?: boolean;
+  /** Called when a confirm block is answered by the user (y/n). */
+  onConfirmAnswer?: (approved: boolean) => void;
 }
 
 // =============================================================================
@@ -98,12 +106,17 @@ export const MainScreen: React.FC<MainScreenProps> = (props) => {
     pendingApproval, onApprovalDecide, autoApprove,
     skills, mergedCommands,
     sessionStats, columns, agentName,
+    sessionState, useBlockRendering, onConfirmAnswer,
   } = props;
+
+  const hasContent = useBlockRendering
+    ? (sessionState?.turns.length ?? 0) > 0
+    : messages.length > 0;
 
   return (
     <Box flexDirection="column">
       {/* Welcome screen — shown when idle with no messages */}
-      {messages.length === 0 && phase === "ready" && (
+      {!hasContent && phase === "ready" && (
         <WelcomeScreen
           model={effectiveModel}
           agentName={agentName}
@@ -112,7 +125,15 @@ export const MainScreen: React.FC<MainScreenProps> = (props) => {
         />
       )}
 
-      <MessageList messages={messages} showTimestamps={showTimestamps} />
+      {/* Block-level renderer (new) or Message list (legacy) */}
+      {useBlockRendering && sessionState ? (
+        <ChatRenderer
+          session={sessionState}
+          onConfirmAnswer={onConfirmAnswer}
+        />
+      ) : (
+        <MessageList messages={messages} showTimestamps={showTimestamps} />
+      )}
 
       {/* Chrome region — dynamic chrome (approval, modals) */}
       <Box flexDirection="column" flexShrink={0}>

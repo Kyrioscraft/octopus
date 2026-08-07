@@ -15,14 +15,14 @@ configure();
 
 const logger = getLogger("server.main");
 
-const port = parseInt(process.env["OCTOPUS_WEB_PORT"] ?? "5050", 10);
+const port = parseInt(process.env["OCTOPUS_WEB_PORT"] ?? "9876", 10);
 // Bind explicitly to an IPv4 address. Without this @hono/node-server falls
 // back to the dual-stack IPv6 wildcard "::", which on Windows creates two
 // separate listen sockets (0.0.0.0:port and [::]:port). Killing one of them
 // leaves the other holding the port, so the next start fails with EADDRINUSE
 // even after "the" process appears to be gone. Pinning to 127.0.0.1 keeps the
 // log line below truthful and makes the dev server loopback-only (Vite proxy
-// already targets 127.0.0.1:5050). Set OCTOPUS_HOST to override.
+// already targets 127.0.0.1:9876). Set OCTOPUS_HOST to override.
 const hostname = process.env["OCTOPUS_HOST"] ?? "127.0.0.1";
 const app = createApp();
 

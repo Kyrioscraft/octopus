@@ -14,7 +14,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import chalk from "chalk";
 import { loadDotEnv } from "@octopus/core";
-import { initTuiLogging, getLogger } from "./logging.js";
+import { initTuiLogging, getLogger } from "./utils/logging.js";
 
 const logger = getLogger("tui.cli");
 
@@ -41,7 +41,7 @@ program
   .option("--auto-approve", "Auto-approve all tool calls")
   .option("--enable-shell", "Enable shell execution tool")
   .option("--no-shell", "Disable shell execution tool")
-  .option("--server <url>", "Server URL (default: http://127.0.0.1:5050)")
+  .option("--server <url>", "Server URL (default: http://127.0.0.1:9876)")
   .option("--no-auto-server", "Don't auto-start the server; connect to an existing one")
   .option("--token <jwt>", "JWT access token for authentication")
   .option("--debug", "Enable debug logging to ~/.deepagents/logs/tui.log (stackable for verbose)")
@@ -136,9 +136,9 @@ async function runInteractive(opts: CliOpts): Promise<void> {
   const { render } = await import("ink");
   const { createElement } = await import("react");
   const { App } = await import("./app.js");
-  const { ServerManager } = await import("./server-manager.js");
+  const { ServerManager } = await import("./client/server-manager.js");
 
-  const serverUrl = opts.server ?? "http://127.0.0.1:5050";
+  const serverUrl = opts.server ?? "http://127.0.0.1:9876";
 
   // Auto-start the server before clearing the screen so its startup logs
   // (redirected to ~/.deepagents/logs/server.log) never hit this terminal.
@@ -190,14 +190,14 @@ async function runInteractive(opts: CliOpts): Promise<void> {
 }
 
 async function runNonInteractive(opts: CliOpts): Promise<void> {
-  const { TuiClient } = await import("./client.js");
+  const { TuiClient } = await import("./client/client.js");
 
   if (!opts.prompt) {
     console.error("Error: --non-interactive requires --prompt");
     process.exit(2);
   }
 
-  const client = new TuiClient({ baseUrl: opts.server ?? "http://127.0.0.1:5050", token: opts.token });
+  const client = new TuiClient({ baseUrl: opts.server ?? "http://127.0.0.1:9876", token: opts.token });
 
   try {
     const health = await client.checkHealth();

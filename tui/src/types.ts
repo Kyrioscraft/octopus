@@ -20,18 +20,39 @@ export type InputMode = "normal" | "shell" | "shell_incognito";
 // Ask-user interrupt protocol types
 // =============================================================================
 
+/**
+ * One selectable option. We accept both the wire shape
+ * (`{ label, value, description }`) and a legacy `{ value }` shorthand.
+ */
 export interface Choice {
-  /** The display label for this choice. */
+  /** The display label for this choice. Defaults to `value` when absent. */
+  label?: string;
+  /** The value returned to the agent on selection. */
   value: string;
+  /** Optional helper text shown beneath the label. */
+  description?: string;
 }
 
 export interface Question {
+  /** Stable id used to pair the answer back on resume (wire protocol). */
+  question_id?: string;
   /** The question text to display. */
   question: string;
+  /** Short label (≤12 chars) for the header chip (wire protocol). */
+  header?: string;
   /** Question type: 'text' for free-form, 'multiple_choice' for predefined options. */
-  type: "text" | "multiple_choice";
-  /** Options for multiple_choice questions. An "Other" free-form option is always appended. */
+  type?: "text" | "multiple_choice";
+  /**
+   * Options for multiple_choice questions. Mirrors the wire `options` field.
+   * `choices` is kept as a legacy alias — `AskUserMenu` reads `options` first.
+   */
+  options?: Choice[];
+  /** Legacy alias for `options` (older callers). */
   choices?: Choice[];
+  /** Allow multiple selections (discussion only). Defaults to false. */
+  multi_select?: boolean;
+  /** Show an "Other…" free-text input alongside the options. Defaults to false. */
+  allow_other?: boolean;
   /** Whether the user must answer. Defaults to true if omitted. */
   required?: boolean;
 }
@@ -45,10 +66,19 @@ export interface AskUserRequest {
   tool_call_id: string;
 }
 
+/** One answered question, keyed by `question_id` (matches ResumeRequestBody). */
+export interface AskUserAnswerEntry {
+  question_id: string;
+  /** Single value (radio) or values (checkbox). */
+  selection?: string | string[];
+  /** Free-text — clarify answer, or the "Other…" supplement when allow_other. */
+  text?: string;
+}
+
 export interface AskUserAnswered {
   type: "answered";
-  /** User-provided answers, one per question. */
-  answers: string[];
+  /** User-provided answers, one per question (same order as `questions`). */
+  answers: AskUserAnswerEntry[];
 }
 
 export interface AskUserCancelled {
@@ -156,4 +186,112 @@ export interface SubagentActivityMeta {
   systemPrompt?: string;
   status: "running" | "done";
   tools: SubagentToolExec[];
+}
+
+// =============================================================================
+// AgentBlock data model — block-level rendering units within a turn.
+// Equivalent to Python (new design per tui-solution.md).
+//
+// Each agent turn (user → assistant) is composed of multiple AgentBlocks
+// that have independent lifecycles: thinking, text streaming, tool calls,
+// and confirmation prompts. Completed blocks are immediately frozen into
+// Ink's <Static> to avoid React diff on historical content.
+// =============================================================================
+
+/** Unique identifier for an AgentBlock. */
+export type BlockId = string;
+
+/** Block lifecycle status. */
+export type BlockStatus =
+  | "pending"      // About to start (tool_call / confirm only)
+  | "running"      // In progress (thinking / tool_call)
+  | "streaming"    // Streaming output (text only)
+  | "done"         // Completed
+  | "approved"     // User approved (confirm only)
+  | "rejected";    // User rejected (confirm only)
+
+/** AgentBlock discriminated union — the minimum renderable unit. */
+export type AgentBlock =
+  // ── Thinking / reasoning ──
+  | {
+      id: BlockId;
+      type: "thinking";
+      status: "running" | "done";
+      /** Thinking content (some models stream thinking tokens). */
+      content?: string;
+    }
+
+  // ── Streaming text reply ──
+  | {
+      id: BlockId;
+      type: "text";
+      status: "streaming" | "done";
+      content: string;
+    }
+
+  // ── Tool call ──
+  | {
+      id: BlockId;
+      type: "tool_call";
+      status: "pending" | "running" | "done";
+      /** Tool name, e.g. "read_file". */
+      tool: string;
+      /** Tool arguments. */
+      input: Record<string, unknown>;
+      /** Tool return value (present when done). */
+      output?: string;
+      /** Error message (present on failure). */
+      error?: string;
+    }
+
+  // ── User confirmation ──
+  | {
+      id: BlockId;
+      type: "confirm";
+      status: "pending" | "approved" | "rejected";
+      /** Confirmation prompt, e.g. "确认执行: rm -rf /dist ?". */
+      message: string;
+      /** Optional action description. */
+      action?: string;
+      /** Result text after approval. */
+      result?: string;
+    };
+
+/** A single conversation turn: one user message + one assistant reply (multiple blocks). */
+export interface Turn {
+  id: string;
+  role: "user" | "assistant";
+  blocks: AgentBlock[];
+  /** Whether this turn has fully completed. */
+  finished: boolean;
+}
+
+/** Global session state — all turns + pending confirmation tracking. */
+export interface SessionState {
+  turns: Turn[];
+  /** Block ID of the currently pending confirmation (at most one at a time). */
+  pendingConfirm: BlockId | null;
+}
+
+/** Callbacks produced by the agent core and consumed by the TUI renderer. */
+export interface BlockStreamCallbacks {
+  // ── thinking ──
+  onThinkingStart: (id: BlockId) => void;
+  onThinkingEnd: (id: BlockId, content?: string) => void;
+
+  // ── text ──
+  onTextStart: (id: BlockId) => void;
+  onTextDelta: (id: BlockId, token: string) => void;
+  onTextEnd: (id: BlockId) => void;
+
+  // ── tool_call ──
+  onToolStart: (id: BlockId, tool: string, input: Record<string, unknown>) => void;
+  onToolEnd: (id: BlockId, output: string, error?: string) => void;
+
+  // ── confirm ──
+  onConfirm: (id: BlockId, message: string, action?: string) => Promise<boolean>;
+
+  // ── turn lifecycle ──
+  onTurnStart: () => void;
+  onTurnEnd: () => void;
 }

@@ -7,12 +7,12 @@
 // =============================================================================
 
 import { useState, useCallback } from "react";
-import { TuiClient } from "../client.js";
+import { TuiClient } from "../client/client.js";
 import {
   fetchRemoteCommands, mergeCommands, buildCommandIndex, buildSkillCommands,
 } from "../command-registry.js";
 import type { MergedCommand } from "../command-registry.js";
-import { getLogger } from "../logging.js";
+import { getLogger } from "../utils/logging.js";
 
 const logger = getLogger("tui.hooks.commands");
 

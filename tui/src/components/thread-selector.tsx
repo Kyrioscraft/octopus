@@ -5,11 +5,11 @@
 
 import React, { useState, useEffect } from "react";
 import { Box, Text, useInput } from "ink";
-import { getGlyphs } from "../config-ui.js";
-import { formatRelativeTimestamp } from "../formatting.js";
-import type { TuiClient } from "../client.js";
-import type { ThreadInfo } from "../sessions.js";
-import { listThreads } from "../sessions.js";
+import { getGlyphs } from "../terminal/config-ui.js";
+import { formatRelativeTimestamp } from "../utils/formatting.js";
+import type { TuiClient } from "../client/client.js";
+import type { ThreadInfo } from "../client/sessions.js";
+import { listThreads } from "../client/sessions.js";
 
 // =============================================================================
 // Props

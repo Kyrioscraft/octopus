@@ -3,7 +3,7 @@
 // Equivalent to Python tui.offload.
 // =============================================================================
 
-import type { ChatMessageData } from "./types.js";
+import type { ChatMessageData } from "../types.js";
 
 // =============================================================================
 // Offload result types

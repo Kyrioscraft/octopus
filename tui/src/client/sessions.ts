@@ -5,9 +5,9 @@
 // =============================================================================
 
 import type { Thread } from "@octopus/tentacle";
-import { formatRelativeTimestamp, formatPath } from "./formatting.js";
+import { formatRelativeTimestamp, formatPath } from "../utils/formatting.js";
 import type { TuiClient } from "./client.js";
-import { getLogger } from "./logging.js";
+import { getLogger } from "../utils/logging.js";
 import chalk from "chalk";
 
 const logger = getLogger("tui.sessions");

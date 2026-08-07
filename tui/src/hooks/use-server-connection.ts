@@ -10,8 +10,8 @@
 import { useState, useRef, useCallback } from "react";
 import { cwd as processCwd } from "node:process";
 import type { AppPhase } from "../types.js";
-import { TuiClient } from "../client.js";
-import { getLogger } from "../logging.js";
+import { TuiClient } from "../client/client.js";
+import { getLogger } from "../utils/logging.js";
 
 const logger = getLogger("tui.hooks.connection");
 

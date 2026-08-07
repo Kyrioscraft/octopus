@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { Box, Text, useInput } from "ink";
-import { getGlyphs } from "../config-ui.js";
+import { getGlyphs } from "../terminal/config-ui.js";
 import type { ToolRenderer } from "./tool-renderers.js";
 import { getRenderer } from "./tool-renderers.js";
 import { detectDangerousUnicode, summarizeIssues, checkUrlSafety } from "@octopus/core";

@@ -12,10 +12,10 @@
 import React from "react";
 import { Box, Text } from "ink";
 import type { AppPhase, SpinnerStatus, SessionStats, InputMode } from "../types.js";
-import { formatTokenCount } from "../formatting.js";
-import { getGlyphs } from "../config-ui.js";
-import { useFrame } from "../use-frame.js";
-import { COLORS } from "../theme.js";
+import { formatTokenCount } from "../utils/formatting.js";
+import { getGlyphs } from "../terminal/config-ui.js";
+import { useFrame } from "../terminal/use-frame.js";
+import { COLORS } from "../terminal/theme.js";
 import { homedir } from "node:os";
 import { sep } from "node:path";
 

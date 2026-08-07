@@ -10,8 +10,8 @@ import { Box, Text, useInput } from "ink";
 import { SLASH_COMMANDS, buildSkillCommands } from "../command-registry.js";
 import type { CommandEntry } from "../command-registry.js";
 import type { AppPhase, InputMode } from "../types.js";
-import { getGlyphs, MODE_DISPLAY_GLYPHS, detectModePrefix } from "../config-ui.js";
-import { COLORS } from "../theme.js";
+import { getGlyphs, MODE_DISPLAY_GLYPHS, detectModePrefix } from "../terminal/config-ui.js";
+import { COLORS } from "../terminal/theme.js";
 
 // =============================================================================
 // Props
