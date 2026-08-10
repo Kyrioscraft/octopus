@@ -12,6 +12,7 @@ import type { CommandEntry } from "../command-registry.js";
 import type { AppPhase, InputMode } from "../types.js";
 import { getGlyphs, MODE_DISPLAY_GLYPHS, detectModePrefix } from "../terminal/config-ui.js";
 import { COLORS } from "../terminal/theme.js";
+import { loadInputHistory, appendInputHistory } from "../utils/input-history-store.js";
 
 // =============================================================================
 // Props
@@ -38,7 +39,8 @@ export interface ChatInputProps {
 }
 
 // =============================================================================
-// History manager (in-memory; persisted to JSONL in Phase 6)
+// History manager (backed by the persistent input-history-store so recalled
+// inputs survive across TUI sessions)
 // =============================================================================
 
 class InputHistory {
@@ -46,16 +48,32 @@ class InputHistory {
   #index: number = -1;
   readonly #maxEntries: number;
 
-  constructor(maxEntries = 1000) {
+  constructor(initial?: string[], maxEntries = 1000) {
     this.#maxEntries = maxEntries;
+    if (initial) {
+      this.#entries = initial.slice(0, maxEntries);
+    }
+  }
+
+  /** Number of stored entries (newest-first). */
+  get size(): number {
+    return this.#entries.length;
   }
 
   add(entry: string): void {
     if (entry.trim()) {
-      this.#entries.unshift(entry);
-      if (this.#entries.length > this.#maxEntries) {
-        this.#entries.pop();
+      const trimmed = entry.trim();
+      // Collapse duplicates of the immediately-previous entry, and remove any
+      // older copy so the newest occurrence wins (newest-first).
+      if (this.#entries[0] !== trimmed) {
+        this.#entries = this.#entries.filter((e) => e !== trimmed);
+        this.#entries.unshift(trimmed);
+        if (this.#entries.length > this.#maxEntries) {
+          this.#entries.pop();
+        }
       }
+      // Persist to disk (debounced, no-op on blank/duplicate).
+      appendInputHistory(entry);
     }
     this.#index = -1;
   }
@@ -149,7 +167,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   // Track the last input timestamp to detect IME composition
   const lastInputTimeRef = useRef(0);
 
-  const historyRef = useRef(new InputHistory());
+  const historyRef = useRef(new InputHistory(loadInputHistory()));
   const glyphs = getGlyphs();
   const isBusy = phase === "running" || phase === "blocked";
 
@@ -197,9 +215,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     if (input.startsWith("\x1b[<")) return;
 
     // Some terminals send mouse wheel events as empty input + the arrow-key
-    // flag.  Ignore these in ChatInput — the global handler routes them to
-    // message scrolling.
-    if (input === "" && (key.upArrow || key.downArrow)) return;
+    // flag.  Ignore these in ChatInput ONLY when there's no history to recall
+    // (i.e. the keystroke couldn't be a genuine history-navigation press).
+    // Keeping the guard history-aware prevents the wheel-suppression from
+    // swallowing real Up/Down presses on terminals (Git Bash, mintty) that
+    // report empty input for actual arrow keys.
+    if (input === "" && (key.upArrow || key.downArrow) && historyRef.current.size === 0) return;
 
     // Prevent PageUp/PageDown/Home/End escape sequences from leaking as
     // typed text.  These are handled globally (scroll) or via shortcuts.
@@ -285,8 +306,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       return;
     }
 
-    // Up arrow — history previous (only on empty line or at start)
-    if (key.upArrow && cursorPos === 0) {
+    // Up arrow — recall previous input from history. Active whenever the
+    // completion popup is NOT shown (popup navigation is handled above and
+    // returns early). We no longer gate on cursorPos === 0 because that check
+    // fails under IME composition and on multi-line edits, making the feature
+    // feel broken even on a fresh empty line.
+    if (key.upArrow) {
       const prev = historyRef.current.previous(value);
       if (prev !== null) {
         setValue(prev);
@@ -295,8 +320,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       return;
     }
 
-    // Down arrow — history next
-    if (key.downArrow && cursorPos === value.length) {
+    // Down arrow — recall next (more recent) input from history.
+    if (key.downArrow) {
       const next = historyRef.current.next();
       setValue(next ?? "");
       setCursorPos(next?.length ?? 0);

@@ -23,6 +23,7 @@ import { useChatSession } from "./hooks/use-chat-session.js";
 import { useModalManager } from "./hooks/use-modal-manager.js";
 import { useCommandRegistry } from "./hooks/use-command-registry.js";
 import { createDispatchCommand } from "./commands/dispatch.js";
+import type { ServerManager } from "./client/server-manager.js";
 import { ConnectingScreen } from "./components/screens/connecting-screen.js";
 import { ErrorScreen } from "./components/screens/error-screen.js";
 import { MainScreen } from "./components/screens/main-screen.js";
@@ -42,6 +43,10 @@ export interface AppProps {
   token?: string;
   /** Skip the "connecting" phase and boot straight into the error screen. */
   initialError?: string;
+  /** Owns the spawned HTTP server. When provided, App starts it inside the
+   *  mount effect (after ConnectingScreen has rendered) so the user actually
+   *  sees the "connecting…" phase. cli.ts's finally-block still calls stop(). */
+  serverManager?: ServerManager;
 }
 
 // =============================================================================
@@ -243,21 +248,53 @@ export const App: React.FC<AppProps> = (props) => {
 
   // ---------------------------------------------------------------------------
   // Initial connection (runs once on mount)
+  //
+  // Two paths:
+  //  1. cli.ts handed us a ServerManager — start it here (after the first
+  //     render, so ConnectingScreen is visible) then proceed to connect.
+  //  2. initialError is set — skip straight to the error screen.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (props.initialError) return;
+    if (props.initialError) {
+      connection.setServerError(props.initialError);
+      setPhase("startup_error");
+      phaseRef.current = "startup_error";
+      return;
+    }
 
-    connection.initializeConnection(async (client) => {
-      // Post-connection setup: load commands, restore history, submit prompt
-      commands.loadCommands(client);
-      if (!props.initialPrompt) {
-        await chat.loadMostRecentThread();
+    let cancelled = false;
+
+    (async () => {
+      // Start the HTTP server (spawn + wait for health) before attempting the
+      // client connection. Doing this here rather than in cli.ts means the
+      // user sees ConnectingScreen with its spinner while the server boots.
+      if (props.serverManager) {
+        const startResult = await props.serverManager.start();
+        if (cancelled) return;
+        if (!startResult.ok) {
+          connection.setServerError(startResult.error ?? "Failed to start server");
+          setPhase("startup_error");
+          phaseRef.current = "startup_error";
+          return;
+        }
       }
-      if (props.initialPrompt) {
-        submitInput(props.initialPrompt, "normal");
-      }
-    });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+      await connection.initializeConnection(async (client) => {
+        if (cancelled) return;
+        // Post-connection setup: load commands, restore history, submit prompt
+        commands.loadCommands(client);
+        if (!props.initialPrompt) {
+          await chat.loadMostRecentThread();
+        }
+        if (props.initialPrompt) {
+          submitInput(props.initialPrompt, "normal");
+        }
+      });
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Keyboard input (global handlers)

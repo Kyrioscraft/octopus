@@ -19,7 +19,7 @@ import { cwd as processCwd } from "node:process";
 import type {
   ChatMessageData, SpinnerStatus, AppPhase, InputMode,
   SessionState, AgentBlock, BlockId, BlockStreamCallbacks,
-  AskUserAnswerEntry, TodoItem,
+  AskUserAnswerEntry, TodoItem, Turn,
 } from "../types.js";
 import { TuiClient } from "../client/client.js";
 import type { ResumeRequestBody } from "../client/client.js";
@@ -420,6 +420,105 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
 
   // --- Thread history ---
 
+  /** Shape of a single message row returned by `getThreadHistory`. The TUI
+   *  client wrapper declares a narrow type, but the underlying OctopusClient
+   *  returns the full MessageRow — we accept the superset defensively. */
+  type HistoryRow = {
+    id: string;
+    role: string;
+    content: string;
+    toolCalls?: unknown;
+    extraMetadata?: Record<string, unknown>;
+    createdAt: string;
+  };
+
+  /**
+   * Rebuild block-level `Turn[]` from persisted message rows so that the
+   * block-rendering path (useBlockRendering = true) can display restored
+   * history. Each user message becomes a user turn; each assistant message
+   * becomes an assistant turn (with an optional tool_call block if the row
+   * carried toolCalls). Non user/assistant rows (tool, app, …) are folded
+   * into the preceding assistant turn as extra blocks when possible.
+   */
+  const messagesToTurns = useCallback((rows: HistoryRow[]): Turn[] => {
+    const turns: Turn[] = [];
+    for (const row of rows) {
+      const role = row.role;
+      const blockId = `${role}_${row.id}`;
+
+      if (role === "user") {
+        turns.push({
+          id: `turn_${row.id}`,
+          role: "user",
+          finished: true,
+          blocks: [{
+            id: blockId,
+            type: "text",
+            status: "done",
+            content: row.content ?? "",
+          }],
+        });
+      } else {
+        // assistant / tool / other → attach to an assistant turn.
+        const blocks: AgentBlock[] = [];
+
+        // Tool rows carry the tool result; surface as a tool_call block.
+        if (role === "tool") {
+          blocks.push({
+            id: blockId,
+            type: "tool_call",
+            status: "done",
+            tool: (row.extraMetadata?.["toolName"] as string) ?? "tool",
+            input: {},
+            output: row.content ?? "",
+          });
+        } else {
+          // assistant text (skip empty placeholder assistant messages)
+          const text = row.content ?? "";
+          if (text) {
+            blocks.push({
+              id: blockId,
+              type: "text",
+              status: "done",
+              content: text,
+            });
+          }
+          // Attach tool calls if the row carried them.
+          if (row.toolCalls && Array.isArray(row.toolCalls)) {
+            for (const tc of row.toolCalls as Record<string, unknown>[]) {
+              blocks.push({
+                id: `${blockId}_tc_${String(tc["id"] ?? Math.random().toString(36).slice(2))}`,
+                type: "tool_call",
+                status: "done",
+                tool: (tc["name"] as string) ?? "tool",
+                input: (tc["args"] as Record<string, unknown>) ?? {},
+                output: typeof tc["result"] === "string" ? tc["result"] : undefined,
+              });
+            }
+          }
+        }
+
+        // Only push a turn if we produced any renderable blocks.
+        if (blocks.length === 0) continue;
+
+        // If the previous turn is an unfinished assistant turn, merge into it;
+        // otherwise start a new assistant turn.
+        const last = turns[turns.length - 1];
+        if (last && last.role === "assistant") {
+          last.blocks = [...last.blocks, ...blocks];
+        } else {
+          turns.push({
+            id: `turn_${row.id}`,
+            role: "assistant",
+            finished: true,
+            blocks,
+          });
+        }
+      }
+    }
+    return turns;
+  }, []);
+
   const rowToMessage = useCallback((row: {
     id: string;
     role: string;
@@ -453,10 +552,13 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
       const { history } = await client.getThreadHistory(threadId);
       setCurrentThreadId(threadId);
       setMessages(history.map(rowToMessage));
+      // Rebuild block-level turns so the block-rendering path (the default)
+      // renders restored history alongside the legacy `messages` array.
+      setSessionState({ turns: messagesToTurns(history), pendingConfirm: null });
     } catch (err) {
       logger.exception(`Failed to load history for thread ${threadId}`, err);
     }
-  }, [rowToMessage]);
+  }, [rowToMessage, messagesToTurns]);
 
   const loadMostRecentThread = useCallback(async (): Promise<void> => {
     const client = clientRef.current;

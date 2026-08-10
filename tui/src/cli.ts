@@ -140,14 +140,15 @@ async function runInteractive(opts: CliOpts): Promise<void> {
 
   const serverUrl = opts.server ?? "http://127.0.0.1:9876";
 
-  // Auto-start the server before clearing the screen so its startup logs
-  // (redirected to ~/.deepagents/logs/server.log) never hit this terminal.
+  // The server is NOT started here synchronously — instead we hand the
+  // ServerManager to <App>, which renders ConnectingScreen first and kicks
+  // off sm.start() inside a useEffect. This makes the "connecting…" phase
+  // genuinely visible to the user rather than flashing by in one frame.
   // --no-auto-server skips the spawn and only probes for an existing server.
   const sm = new ServerManager({
     serverUrl,
     autoStart: opts.autoStart !== false,
   });
-  const startResult = await sm.start();
 
   const appProps = {
     modelSpec: opts.model,
@@ -157,11 +158,17 @@ async function runInteractive(opts: CliOpts): Promise<void> {
     enableShell: opts.shell !== false,
     serverUrl,
     token: opts.token,
-    // If the server failed to start, hand the error to App so it boots
-    // straight into the startup_error screen instead of hanging on
-    // "Connecting..." forever.
-    initialError: startResult.ok ? undefined : startResult.error,
+    // App owns the connection lifecycle; no pre-resolved error here.
+    initialError: undefined,
+    serverManager: sm,
   };
+
+  // Clear the terminal before rendering: erase the visible screen (\x1b[2J),
+  // the scrollback buffer (\x1b[3J), and home the cursor (\x1b[H). This wipes
+  // the shell history/previous command output so the TUI starts on a clean
+  // canvas. Done before render() to avoid any flicker from Ink painting over
+  // stale content.
+  process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
 
   try {
     // Render options:
