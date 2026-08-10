@@ -48,14 +48,19 @@ export function extractToken(response: unknown): string {
     return response
       .filter((part): part is { type: "text"; text: string } =>
         typeof part === "object" && part !== null && (part as Record<string, unknown>).type === "text"
+        && typeof (part as Record<string, unknown>).text === "string"
       )
-      .map((part) => part.text)
+      .map((part) => (part as Record<string, unknown>).text as string)
       .join("");
   }
   if (typeof response === "object" && response !== null) {
     // Could be a message object with content
     const obj = response as Record<string, unknown>;
     if (typeof obj.content === "string") return obj.content;
+    // Handle content as array of content blocks (OpenAI/Anthropic format)
+    if (Array.isArray(obj.content)) {
+      return extractToken(obj.content);
+    }
     if (typeof obj.text === "string") return obj.text;
   }
   return "";

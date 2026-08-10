@@ -6,7 +6,7 @@
 
 import React from "react";
 import { Box } from "ink";
-import type { AppPhase, InputMode, ChatMessageData, SessionStats, SpinnerStatus, SessionState } from "../../types.js";
+import type { AppPhase, InputMode, ChatMessageData, SessionStats, SpinnerStatus, SessionState, Question, AskUserAnswerEntry } from "../../types.js";
 import type { MergedCommand } from "../../command-registry.js";
 import type { ModelEntry } from "../model-selector.js";
 import type { McpServerEntry } from "../mcp-viewer.js";
@@ -18,6 +18,8 @@ import { WelcomeScreen } from "../welcome.js";
 import { StatusBar } from "../status-bar.js";
 import { ApprovalMenu } from "../approval.js";
 import { ModalRenderer } from "../modals/modal-renderer.js";
+import { AskUserMenu } from "../ask-user.js";
+import { TodoPanel } from "../todo-panel.js";
 
 // =============================================================================
 // Props
@@ -85,6 +87,12 @@ export interface MainScreenProps {
   useBlockRendering?: boolean;
   /** Called when a confirm block is answered by the user (y/n). */
   onConfirmAnswer?: (approved: boolean) => void;
+  /** Ask-user questions from the server (non-null triggers AskUserMenu). */
+  askUserQuestions?: Array<Record<string, unknown>> | null;
+  /** Called when the user submits answers to ask_user questions. */
+  onAskUserAnswer?: (answers: AskUserAnswerEntry[]) => void;
+  /** Todo list from write_todos (persistent widget). */
+  todos?: import("../../types.js").TodoItem[];
 }
 
 // =============================================================================
@@ -107,6 +115,8 @@ export const MainScreen: React.FC<MainScreenProps> = (props) => {
     skills, mergedCommands,
     sessionStats, columns, agentName,
     sessionState, useBlockRendering, onConfirmAnswer,
+    askUserQuestions, onAskUserAnswer,
+    todos,
   } = props;
 
   const hasContent = useBlockRendering
@@ -135,8 +145,28 @@ export const MainScreen: React.FC<MainScreenProps> = (props) => {
         <MessageList messages={messages} showTimestamps={showTimestamps} />
       )}
 
-      {/* Chrome region — dynamic chrome (approval, modals) */}
+      {/* Todo panel — persistent widget between chat and chrome */}
+      {todos && todos.length > 0 && (
+        <TodoPanel items={todos} />
+      )}
+
+      {/* Chrome region — dynamic chrome (ask_user, approval, modals) */}
       <Box flexDirection="column" flexShrink={0}>
+        {/* Ask-user panel — inline in the chat flow */}
+        {askUserQuestions && askUserQuestions.length > 0 && onAskUserAnswer && (
+          <AskUserMenu
+            questions={askUserQuestions as unknown as Question[]}
+            onAnswer={(result) => {
+              if (result.type === "answered") {
+                onAskUserAnswer(result.answers);
+              } else {
+                // Cancelled — send empty answers to unblock
+                onAskUserAnswer([]);
+              }
+            }}
+          />
+        )}
+
         {/* HITL approval menu */}
         {pendingApproval && (
           <ApprovalMenu

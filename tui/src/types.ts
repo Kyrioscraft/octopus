@@ -286,6 +286,10 @@ export interface BlockStreamCallbacks {
 
   // ── tool_call ──
   onToolStart: (id: BlockId, tool: string, input: Record<string, unknown>) => void;
+  /** Queue a tool as pending (shown dimmed, no spinner). Promoted to running when result arrives for previous tool. */
+  onToolPending: (id: BlockId, tool: string, input: Record<string, unknown>) => void;
+  /** Promote a pending tool to running (sequential execution). */
+  onToolPromote: (id: BlockId) => void;
   onToolEnd: (id: BlockId, output: string, error?: string) => void;
 
   // ── confirm ──
@@ -294,4 +298,15 @@ export interface BlockStreamCallbacks {
   // ── turn lifecycle ──
   onTurnStart: () => void;
   onTurnEnd: () => void;
+
+  // ── todos (write_todos tool) ──
+  /** Called when the agent updates its todo list via write_todos. */
+  onTodosUpdate: (items: TodoItem[]) => void;
+}
+
+/** A single task item from the agent's todo list. */
+export interface TodoItem {
+  content: string;
+  status: "pending" | "in_progress" | "completed";
+  priority?: "high" | "medium" | "low";
 }

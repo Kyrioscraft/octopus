@@ -25,6 +25,14 @@ import { DiffMessageView } from "./message-views/diff-view.js";
 import { BlockView } from "./blocks/index.js";
 
 // =============================================================================
+// Static item wrapper for block rendering with turn context
+// =============================================================================
+
+type StaticItem =
+  | { _type: "block"; block: AgentBlock; turnRole: "user" | "assistant" }
+  | { _type: "separator" };
+
+// =============================================================================
 // Props
 // =============================================================================
 
@@ -185,32 +193,35 @@ export const ChatRenderer: React.FC<ChatRendererProps> = React.memo(({
   session,
   onConfirmAnswer,
 }) => {
-  // Collect frozen and active blocks
-  const frozen: AgentBlock[] = [];
-  const active: AgentBlock[] = [];
+  // Collect frozen and active blocks with turn context
+  const frozenItems: StaticItem[] = [];
+  const active: Array<{ block: AgentBlock; turnRole: "user" | "assistant" }> = [];
 
   for (let ti = 0; ti < session.turns.length; ti++) {
     const turn = session.turns[ti]!;
     const isLastTurn = ti === session.turns.length - 1;
 
+    // Add separator between turns (except before the first)
+    if (ti > 0 && turn.role === "user") {
+      frozenItems.push({ _type: "separator" });
+    }
+
     if (!isLastTurn || turn.finished) {
-      // Completed turn → all blocks frozen
       for (const block of turn.blocks) {
-        frozen.push(block);
+        frozenItems.push({ _type: "block", block, turnRole: turn.role });
       }
     } else {
-      // Active turn → split by block status
       for (const block of turn.blocks) {
         if (isBlockFrozen(block)) {
-          frozen.push(block);
+          frozenItems.push({ _type: "block", block, turnRole: turn.role });
         } else {
-          active.push(block);
+          active.push({ block, turnRole: turn.role });
         }
       }
     }
   }
 
-  // Force Static to re-render when turns are cleared (same pattern as MessageList)
+  // Force Static to re-render when turns are cleared
   const prevLenRef = React.useRef(session.turns.length);
   const genRef = React.useRef(0);
   if (session.turns.length < prevLenRef.current && session.turns.length <= 1) {
@@ -222,24 +233,30 @@ export const ChatRenderer: React.FC<ChatRendererProps> = React.memo(({
   return (
     <>
       {/* Frozen zone: never re-renders, stays in terminal scrollback */}
-      <Static key={staticKey} items={frozen}>
-        {(block) => (
-          <BlockView
-            key={block.id}
-            block={block}
-            // Frozen blocks never need interactive confirm (already answered)
-          />
-        )}
+      <Static key={staticKey} items={frozenItems}>
+        {(item) => {
+          if (item._type === "separator") {
+            return <Text dimColor>{"─".repeat(40)}</Text>;
+          }
+          return (
+            <BlockView
+              key={item.block.id}
+              block={item.block}
+              showUserPrefix={item.turnRole === "user"}
+            />
+          );
+        }}
       </Static>
 
       {/* Active zone: at most 1 block per turn — minimal diff */}
       {active.length > 0 && (
         <Box flexDirection="column">
-          {active.map((block) => (
+          {active.map(({ block, turnRole }) => (
             <BlockView
               key={block.id}
               block={block}
               onConfirmAnswer={onConfirmAnswer}
+              showUserPrefix={turnRole === "user"}
             />
           ))}
         </Box>

@@ -19,12 +19,14 @@ import { cwd as processCwd } from "node:process";
 import type {
   ChatMessageData, SpinnerStatus, AppPhase, InputMode,
   SessionState, AgentBlock, BlockId, BlockStreamCallbacks,
+  AskUserAnswerEntry, TodoItem,
 } from "../types.js";
 import { TuiClient } from "../client/client.js";
 import type { ResumeRequestBody } from "../client/client.js";
 import { executeAgentTask, resumeAgentTask } from "../core/tui-adapter.js";
 import type { TuiAdapterCallbacks, ExecutionContext } from "../core/tui-adapter.js";
 import { mapStreamToBlocks } from "../core/block-stream.js";
+import type { InterruptContext } from "../core/block-stream.js";
 import { useTextBuffer } from "./use-text-buffer.js";
 import type { ApprovalRequest, ApprovalResult } from "../components/approval.js";
 import { getLogger } from "../utils/logging.js";
@@ -93,6 +95,12 @@ export interface UseChatSessionReturn {
   executeMessageAsBlocks: (text: string, mode: InputMode) => Promise<void>;
   /** Resolve a pending confirm block (called when user presses y/n). */
   handleConfirmAnswer: (approved: boolean) => void;
+  /** Current ask_user questions (non-null triggers AskUserMenu). */
+  askUserQuestions: Array<Record<string, unknown>> | null;
+  /** Handle ask_user answer submission. */
+  handleAskUserAnswer: (answers: AskUserAnswerEntry[]) => void;
+  /** Todo list from write_todos (persistent widget). */
+  todos: TodoItem[];
 }
 
 // =============================================================================
@@ -125,6 +133,16 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
   });
   // Resolver for the confirm Promise — set when a confirm block is pending.
   const confirmResolveRef = useRef<((approved: boolean) => void) | null>(null);
+
+  // Ask_user panel state — non-null triggers AskUserMenu in MainScreen.
+  const [askUserQuestions, setAskUserQuestions] = useState<Array<Record<string, unknown>> | null>(null);
+  // Resolver for the ask_user answer Promise.
+  const askUserResolveRef = useRef<((answers: AskUserAnswerEntry[]) => void) | null>(null);
+  // Track the thread ID resolved during streaming (for resume calls).
+  const blockThreadIdRef = useRef<string | null>(null);
+
+  // Todo list from write_todos tool (persistent widget, not tool blocks)
+  const [todos, setTodos] = useState<TodoItem[]>([]);
 
   // --- Refs ---
   const threadRef = useRef(currentThreadId);
@@ -286,29 +304,73 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
   });
 
   // --- BlockStreamCallbacks ---
+
+  /**
+   * Finalize all active blocks of a given type in the last turn.
+   * Ensures at most one block type is active at a time — when a new type
+   * starts (e.g. text after thinking), the previous one is auto-frozen so
+   * the active zone always has the latest activity at the bottom.
+   */
+  const finalizeActiveOfType = useCallback((blockType: AgentBlock["type"]) => {
+    setSessionState((prev) => {
+      const turns = [...prev.turns];
+      if (turns.length === 0) return prev;
+      const lastTurn = { ...turns[turns.length - 1]! };
+      let changed = false;
+      lastTurn.blocks = lastTurn.blocks.map((b) => {
+        if (b.type === blockType && !(b.type === "confirm"
+          ? b.status === "approved" || b.status === "rejected"
+          : b.status === "done")) {
+          changed = true;
+          return { ...b, status: "done" } as AgentBlock;
+        }
+        return b;
+      });
+      if (!changed) return prev;
+      turns[turns.length - 1] = lastTurn;
+      return { ...prev, turns };
+    });
+  }, []);
+
   const blockCallbacks = useRef<BlockStreamCallbacks>({
     onThinkingStart: (id) => {
+      // Thinking starts a new reasoning cycle — finalize any active text
+      finalizeActiveOfType("text");
       addBlock({ id, type: "thinking", status: "running" });
     },
     onThinkingEnd: (id, content) => {
       updateBlock(id, { status: "done", content } as Partial<AgentBlock>);
     },
     onTextStart: (id) => {
+      // Text follows thinking — finalize active thinking
+      finalizeActiveOfType("thinking");
       addBlock({ id, type: "text", status: "streaming", content: "" });
     },
     onTextDelta: (id, token) => {
       textBuffer.push(id, token);
     },
     onTextEnd: (id) => {
-      // Flush any remaining buffered tokens before finalizing
-      // (the buffer flush is async via rAF, so we just mark done)
+      textBuffer.flush();
       updateBlock(id, { status: "done" } as Partial<AgentBlock>);
     },
     onToolStart: (id, tool, input) => {
+      finalizeActiveOfType("text");
+      finalizeActiveOfType("thinking");
       addBlock({ id, type: "tool_call", status: "running", tool, input });
+    },
+    onToolPending: (id, tool, input) => {
+      // Pending tool — shown dimmed without spinner, waiting its turn
+      addBlock({ id, type: "tool_call", status: "pending", tool, input });
+    },
+    onToolPromote: (id) => {
+      // Promote pending → running when it's this tool's turn
+      updateBlock(id, { status: "running" } as Partial<AgentBlock>);
     },
     onToolEnd: (id, output, error) => {
       updateBlock(id, { status: "done", output, error } as Partial<AgentBlock>);
+    },
+    onTodosUpdate: (items) => {
+      setTodos(items);
     },
     onConfirm: async (id, message, action) => {
       addBlock({ id, type: "confirm", status: "pending", message, action });
@@ -331,6 +393,7 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
       });
     },
     onTurnStart: () => {
+      setTodos([]); // Clear previous turn's todos
       setSessionState((prev) => ({
         ...prev,
         turns: [
@@ -354,9 +417,6 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
       });
     },
   });
-
-  // Keep the ref current (for any closures that reference it)
-  blockCallbacks.current = blockCallbacks.current;
 
   // --- Thread history ---
 
@@ -490,6 +550,18 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
 
   // --- Block-level agent execution ---
 
+  /**
+   * Process a stream and handle interrupts.
+   * Returns the next interrupt or null if the stream completed.
+   */
+  const processStream = useCallback(async (
+    client: TuiClient,
+    stream: AsyncGenerator<import("@octopus/tentacle").StreamEvent>,
+    signal: AbortSignal,
+  ): Promise<InterruptContext | null> => {
+    return await mapStreamToBlocks(stream, blockCallbacks.current, signal);
+  }, []);
+
   const executeMessageAsBlocks = useCallback(async (text: string, _mode: InputMode) => {
     const client = clientRef.current;
     if (!client) {
@@ -535,6 +607,7 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
     const abortController = new AbortController();
 
     try {
+      // Start the initial stream
       const stream = await client.streamChat(
         {
           messages: [{ role: "user", content: text }],
@@ -546,13 +619,67 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
         { signal: abortController.signal },
       );
 
-      await mapStreamToBlocks(stream, blockCallbacks.current, abortController.signal);
+      let interrupt = await processStream(client, stream, abortController.signal);
+
+      // ── Interrupt loop: handle confirm / ask_user, then resume ──
+      while (interrupt) {
+        if (interrupt.kind === "confirm") {
+          // Wait for user to press y/n (handleConfirmAnswer resolves the Promise)
+          const approved = await interrupt.confirmPromise;
+
+          if (!approved) {
+            // User rejected — don't resume, end the turn
+            setPhase("ready");
+            setSpinnerStatus(null);
+            break;
+          }
+
+          // Resume with approval
+          setPhase("running");
+          setSpinnerStatus("Thinking");
+
+          const resumeStream = await client.streamResume(
+            interrupt.threadId ?? threadRef.current ?? "",
+            {
+              kind: "tool_approval",
+              decisions: interrupt.actionRequests.map(() => ({
+                type: "approve" as const,
+              })),
+            },
+            { signal: abortController.signal },
+          );
+
+          interrupt = await processStream(client, resumeStream, abortController.signal);
+
+        } else if (interrupt.kind === "ask_user") {
+          // Show ask_user panel, wait for answers
+          setAskUserQuestions(interrupt.questions);
+          setPhase("blocked");
+
+          // Create a Promise that resolves when the user submits answers
+          const answers = await new Promise<AskUserAnswerEntry[]>((resolve) => {
+            askUserResolveRef.current = resolve;
+          });
+
+          setAskUserQuestions(null);
+          setPhase("running");
+          setSpinnerStatus("Thinking");
+
+          // Resume with answers
+          const resumeStream = await client.streamResume(
+            interrupt.threadId ?? threadRef.current ?? "",
+            { answers },
+            { signal: abortController.signal },
+          );
+
+          interrupt = await processStream(client, resumeStream, abortController.signal);
+        }
+      }
     } catch (err) {
       if ((err as Error).name === "AbortError") {
         // User cancelled
       } else {
         logger.exception("executeMessageAsBlocks failed", err);
-        // Add an error block
         setSessionState((prev) => {
           const turns = [...prev.turns];
           if (turns.length > 0) {
@@ -573,25 +700,28 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
       }
     }
 
-    // Check if we're blocked on confirmation
+    // Final state check — done outside setSessionState to avoid side-effects in updater
+    // We need to read the current session state to check pendingConfirm
+    let isBlocked = false;
     setSessionState((prev) => {
       if (prev.pendingConfirm) {
-        setPhase("blocked");
-      } else {
-        setPhase("ready");
-        setSpinnerStatus(null);
-        // Drain queue
-        const queued = queueRef.current;
-        if (queued.length > 0) {
-          const next = queued[0]!;
-          setMessageQueue((p) => p.slice(1));
-          // Use setTimeout to avoid setState during render
-          setTimeout(() => executeMessageAsBlocks(next.text, next.mode), 0);
-        }
+        isBlocked = true;
       }
       return prev;
     });
-  }, [agentName, addAppMessage, setPhase, phaseRef]);
+
+    if (!isBlocked) {
+      setPhase("ready");
+      setSpinnerStatus(null);
+      // Drain queue
+      const queued = queueRef.current;
+      if (queued.length > 0) {
+        const next = queued[0]!;
+        setMessageQueue((p) => p.slice(1));
+        setTimeout(() => executeMessageAsBlocks(next.text, next.mode), 0);
+      }
+    }
+  }, [agentName, addAppMessage, setPhase, phaseRef, processStream]);
 
   /** Resolve a pending confirm block (called when user presses y/n). */
   const handleConfirmAnswer = useCallback((approved: boolean) => {
@@ -599,9 +729,18 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
       const resolve = confirmResolveRef.current;
       confirmResolveRef.current = null;
       resolve(approved);
-      setPhase("running");
+      // Don't set phase here — the executeMessageAsBlocks loop handles it
     }
-  }, [setPhase]);
+  }, []);
+
+  /** Handle ask_user answer submission. */
+  const handleAskUserAnswer = useCallback((answers: AskUserAnswerEntry[]) => {
+    if (askUserResolveRef.current) {
+      const resolve = askUserResolveRef.current;
+      askUserResolveRef.current = null;
+      resolve(answers);
+    }
+  }, []);
 
   // --- Drain queue ---
 
@@ -698,5 +837,8 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
     sessionState,
     executeMessageAsBlocks,
     handleConfirmAnswer,
+    askUserQuestions,
+    handleAskUserAnswer,
+    todos,
   };
 }

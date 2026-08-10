@@ -53,9 +53,12 @@ export const AskUserMenu: React.FC<AskUserMenuProps> = ({ questions, onAnswer })
   if (!question) return null;
 
   const state = states[currentQuestion];
-  const isMultipleChoice = question.type === "multiple_choice";
+  // Read `options` first (primary field), fall back to `choices` (legacy alias)
+  const rawChoices = (question.options ?? question.choices ?? []) as Array<{ value: string; label?: string; description?: string }>;
+  // Infer multiple_choice if type is explicitly set OR if options/choices are present
+  const isMultipleChoice = question.type === "multiple_choice" || rawChoices.length > 0;
   const choices = isMultipleChoice
-    ? [...(question.choices ?? []).map((c) => c.value), "Other (free-form)"]
+    ? [...rawChoices.map((c) => c.label ?? c.value), "Other (free-form)"]
     : [];
 
   // ---------------------------------------------------------------------------
@@ -89,8 +92,11 @@ export const AskUserMenu: React.FC<AskUserMenuProps> = ({ questions, onAnswer })
         const answer: import("../types.js").AskUserAnswerEntry = {
           question_id: q?.question_id ?? String(i),
         };
-        if (isMultipleChoice && i === currentQuestion) {
-          answer.selection = choices[state.choiceIdx];
+        if (q?.type === "multiple_choice") {
+          // For multiple choice, use selection (the selected value or "Other" text)
+          answer.selection = s.choiceIdx < rawChoices.length
+            ? (rawChoices[s.choiceIdx]?.value ?? s.answer)
+            : s.answer;
         } else {
           answer.text = s.answer;
         }
@@ -131,10 +137,12 @@ export const AskUserMenu: React.FC<AskUserMenuProps> = ({ questions, onAnswer })
             const entry: import("../types.js").AskUserAnswerEntry = {
               question_id: q?.question_id ?? String(i),
             };
-            if (i === currentQuestion) {
-              entry.text = currentAnswer;
+            if (q?.type === "multiple_choice") {
+              entry.selection = s.choiceIdx < rawChoices.length
+                ? (rawChoices[s.choiceIdx]?.value ?? s.answer)
+                : s.answer;
             } else {
-              entry.text = s.answer;
+              entry.text = i === currentQuestion ? currentAnswer : s.answer;
             }
             return entry;
           });

@@ -5,7 +5,6 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import type { ReactNode } from "react";
 import type { AgentBlock } from "../../types.js";
 import { Spinner } from "../../terminal/use-frame.js";
 
@@ -13,24 +12,18 @@ export interface ToolCallBlockProps {
   block: AgentBlock & { type: "tool_call" };
 }
 
-/** Maximum characters of tool output to display. */
 const MAX_TOOL_OUTPUT = 500;
-/** Maximum lines of tool output to display. */
 const MAX_TOOL_LINES = 10;
 
-/** Format tool input arguments for display (first 2 entries). */
 function formatInput(input: Record<string, unknown>): string {
   const entries = Object.entries(input).slice(0, 2);
   return entries.map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(", ");
 }
 
-/** Truncate tool output text to MAX_TOOL_OUTPUT chars / MAX_TOOL_LINES lines. */
 function truncateOutput(s: string): string {
   if (!s) return "";
   const lines = s.split("\n");
-  if (lines.length <= MAX_TOOL_LINES && s.length <= MAX_TOOL_OUTPUT) {
-    return s;
-  }
+  if (lines.length <= MAX_TOOL_LINES && s.length <= MAX_TOOL_OUTPUT) return s;
   const truncated = lines.slice(0, MAX_TOOL_LINES).join("\n");
   if (truncated.length > MAX_TOOL_OUTPUT) {
     return truncated.slice(0, MAX_TOOL_OUTPUT) + "\n... (truncated)";
@@ -42,67 +35,57 @@ function truncateOutput(s: string): string {
  * Tool call block.
  *
  * - running:  spinner + tool name + formatted input args
- * - done:     success/error glyph + output preview (truncated)
+ * - done:     success/error glyph + truncated output
  */
 export const ToolCallBlock: React.FC<ToolCallBlockProps> = React.memo(({ block }) => {
+  if (block.status === "pending") {
+    // Pending — waiting its turn, shown dimmed without spinner
+    return (
+      <Box flexDirection="column">
+        <Box gap={1}>
+          <Text dimColor>🔧 {block.tool}</Text>
+          <Text dimColor>{formatInput(block.input)}</Text>
+        </Box>
+      </Box>
+    );
+  }
+
   if (block.status === "running") {
-    return React.createElement(
-      Box,
-      { flexDirection: "column" },
-      React.createElement(
-        Box,
-        { gap: 1 },
-        React.createElement(Spinner, { key: "spin" }),
-        React.createElement(Text, { key: "tool", color: "yellow" }, `\uD83D\uDD27 ${block.tool}`),
-        React.createElement(Text, { key: "args", dimColor: true }, formatInput(block.input)),
-      ),
+    return (
+      <Box flexDirection="column">
+        <Box gap={1}>
+          <Spinner />
+          <Text color="yellow">🔧 {block.tool}</Text>
+          <Text dimColor>{formatInput(block.input)}</Text>
+        </Box>
+      </Box>
     );
   }
 
-  // status === "done"
-  const headerItems: ReactNode[] = [];
-
-  if (block.error) {
-    headerItems.push(
-      React.createElement(Text, { key: "err", color: "red" }, `\uD83D\uDD27 ${block.tool} [\u2717 error]`),
-    );
-  } else {
-    headerItems.push(
-      React.createElement(Text, { key: "ok", color: "green" }, `\uD83D\uDD27 ${block.tool} [\u2713 done]`),
-    );
-  }
-
-  headerItems.push(
-    React.createElement(Text, { key: "args", dimColor: true }, `  ${formatInput(block.input)}`),
+  return (
+    <Box flexDirection="column">
+      <Box gap={1}>
+        {block.error ? (
+          <Text color="red">🔧 {block.tool} [✗ error]</Text>
+        ) : (
+          <Text color="green">🔧 {block.tool} [✓ done]</Text>
+        )}
+        <Text dimColor>{formatInput(block.input)}</Text>
+      </Box>
+      {block.output ? (
+        <Box paddingLeft={2} flexDirection="column">
+          <Text dimColor>┌─ output ─</Text>
+          <Text dimColor>{truncateOutput(block.output)}</Text>
+          <Text dimColor>└──────────</Text>
+        </Box>
+      ) : null}
+      {block.error ? (
+        <Box paddingLeft={2}>
+          <Text color="red">{block.error}</Text>
+        </Box>
+      ) : null}
+    </Box>
   );
-
-  const children: ReactNode[] = [
-    React.createElement(Box, { key: "header", gap: 0 }, ...headerItems),
-  ];
-
-  if (block.output) {
-    children.push(
-      React.createElement(
-        Box,
-        { key: "output-container", paddingLeft: 2, flexDirection: "column" },
-        React.createElement(Text, { dimColor: true, key: "pre" }, "\u250C\u2500 output \u2500"),
-        React.createElement(Text, { dimColor: true, key: "out" }, truncateOutput(block.output)),
-        React.createElement(Text, { dimColor: true, key: "post" }, "\u2514\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500"),
-      ),
-    );
-  }
-
-  if (block.error) {
-    children.push(
-      React.createElement(
-        Box,
-        { key: "error-container", paddingLeft: 2 },
-        React.createElement(Text, { color: "red" }, block.error),
-      ),
-    );
-  }
-
-  return React.createElement(Box, { flexDirection: "column" }, ...children);
 });
 
 ToolCallBlock.displayName = "ToolCallBlock";

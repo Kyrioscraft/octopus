@@ -5,7 +5,6 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import type { ReactNode } from "react";
 import type { AgentBlock } from "../../types.js";
 import { Spinner } from "../../terminal/use-frame.js";
 
@@ -21,29 +20,28 @@ export interface ThinkingBlockProps {
  */
 export const ThinkingBlock: React.FC<ThinkingBlockProps> = React.memo(({ block }) => {
   if (block.status === "running") {
-    const snippet: ReactNode[] = [];
-    snippet.push(
-      React.createElement(Text, { dimColor: true, key: "label" }, "  Thinking  "),
-      React.createElement(Spinner, { key: "spin" }),
+    return (
+      <Box gap={0}>
+        <Spinner />
+        <Text dimColor>  Thinking</Text>
+      </Box>
     );
-    if (block.content) {
-      snippet.push(
-        React.createElement(Text, { dimColor: true, key: "tail" }, `  ${block.content.slice(-60)}`),
-      );
-    }
-    return React.createElement(Box, { gap: 0 }, ...snippet);
   }
 
   // status === "done" → final frame before entering <Static>
-  const parts: ReactNode[] = [
-    React.createElement(Text, { color: "green", key: "done" }, "  Thinking complete"),
-  ];
   if (block.content) {
-    parts.push(
-      React.createElement(Text, { dimColor: true, key: "count" }, `  (${block.content.length} chars)`),
+    return (
+      <Box gap={0}>
+        <Text color="gray">  Thought for</Text>
+        <Text dimColor> {block.content.length} chars</Text>
+      </Box>
     );
   }
-  return React.createElement(Box, { gap: 0 }, ...parts);
+  return (
+    <Box gap={0}>
+      <Text color="gray">  Thought complete</Text>
+    </Box>
+  );
 });
 
 ThinkingBlock.displayName = "ThinkingBlock";

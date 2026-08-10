@@ -99,5 +99,5 @@ export function useTextBuffer(
     };
   }, []);
 
-  return { push };
+  return { push, flush };
 }

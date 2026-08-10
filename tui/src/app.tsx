@@ -343,6 +343,9 @@ export const App: React.FC<AppProps> = (props) => {
       sessionState={chat.sessionState}
       useBlockRendering={useBlockRendering}
       onConfirmAnswer={chat.handleConfirmAnswer}
+      askUserQuestions={chat.askUserQuestions}
+      onAskUserAnswer={chat.handleAskUserAnswer}
+      todos={chat.todos}
     />
   );
 };
