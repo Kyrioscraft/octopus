@@ -24,6 +24,18 @@ export interface Settings {
   googleCloudProject?: string;
   langsmithProject?: string;
 
+  /**
+   * LangSmith tracing 配置(独立于 sandbox,避免命名冲突)。
+   *
+   * 注意:`LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` 已被 deepagents
+   * Sandbox(托管代码执行 VM)复用。这里通过 `OCTOPUS_LANGSMITH_TRACING_*`
+   * 提供独立命名空间,落回通用 `LANGSMITH_*` 仅作为零代码路径的兼容。
+   */
+  langsmithTracingEnabled?: boolean;
+  langsmithTracingApiKey?: string;
+  langsmithTracingEndpoint?: string;
+  langsmithTracingProject?: string;
+
   /** The resolved model name (provider:model). */
   modelName?: string;
   /** The resolved provider portion of modelName. */
@@ -130,6 +142,24 @@ export function fromEnvironment(): Settings {
     ?? process.env["LANGSMITH_PROJECT"]
     ?? undefined;
 
+  // LangSmith tracing —— 独立命名空间,避免与 sandbox 复用的 LANGSMITH_* 冲突。
+  // 优先用 OCTOPUS_LANGSMITH_TRACING_*,落回通用 LANGSMITH_* 兼容零代码路径。
+  const langsmithTracingRaw = resolveEnvVar("OCTOPUS_LANGSMITH_TRACING");
+  const langsmithTracingEnabled =
+    langsmithTracingRaw === "true" || langsmithTracingRaw === "1";
+  const langsmithTracingApiKey =
+    resolveEnvVar("OCTOPUS_LANGSMITH_TRACING_API_KEY")
+    ?? resolveEnvVar("LANGSMITH_API_KEY")
+    ?? undefined;
+  const langsmithTracingEndpoint =
+    resolveEnvVar("OCTOPUS_LANGSMITH_TRACING_ENDPOINT")
+    ?? resolveEnvVar("LANGSMITH_ENDPOINT")
+    ?? undefined;
+  const langsmithTracingProject =
+    resolveEnvVar("OCTOPUS_LANGSMITH_TRACING_PROJECT")
+    ?? resolveEnvVar("LANGSMITH_PROJECT")
+    ?? "octopus";
+
   const projectRoot = process.env["DEEPAGENTS_CODE_SERVER_CWD"]
     ?? process.env["DEEPAGENTS_CODE_PROJECT_ROOT"]
     ?? process.cwd();
@@ -185,6 +215,10 @@ export function fromEnvironment(): Settings {
     tavilyApiKey,
     googleCloudProject,
     langsmithProject,
+    langsmithTracingEnabled,
+    langsmithTracingApiKey,
+    langsmithTracingEndpoint,
+    langsmithTracingProject,
     projectRoot,
     shellAllowList,
     extraSkillsDirs,
@@ -219,6 +253,8 @@ export function reloadFromEnvironment(prev: Settings): { settings: Settings; cha
   const reloadableKeys: (keyof Settings)[] = [
     "openaiApiKey", "anthropicApiKey", "googleApiKey", "nvidiaApiKey",
     "tavilyApiKey", "googleCloudProject", "langsmithProject",
+    "langsmithTracingEnabled", "langsmithTracingApiKey",
+    "langsmithTracingEndpoint", "langsmithTracingProject",
     "projectRoot", "shellAllowList", "extraSkillsDirs",
   ];
 

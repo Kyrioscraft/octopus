@@ -1,6 +1,7 @@
 import { serve } from "@hono/node-server";
 import { loadDotEnv, configure, getLogger } from "@octopus/core";
 import { createApp } from "./app.js";
+import { configureLangSmithTracing } from "./langsmith-tracing.js";
 
 // =============================================================================
 // Entry point — loads .env, configures logging, starts the HTTP server.
@@ -12,6 +13,11 @@ loadDotEnv();
 
 // 2. Configure logging — reads OCTOPUS_LOG_LEVEL from env (default: INFO).
 configure();
+
+// 3. Configure LangSmith tracing — syncs OCTOPUS_LANGSMITH_TRACING_* into the
+//    standard LANGSMITH_* vars that @langchain/core's callback manager reads,
+//    and logs the resulting status. Must run after loadDotEnv + configure.
+configureLangSmithTracing();
 
 const logger = getLogger("server.main");
 
