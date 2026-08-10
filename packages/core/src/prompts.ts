@@ -61,39 +61,60 @@ CRITICAL: Match what the user asked for EXACTLY.
 
 ## Tool Usage
 
+CRITICAL: When you need to read, search, or inspect MULTIPLE files, issue ALL
+the tool calls in a SINGLE response — they execute in parallel. Do NOT read
+one file, wait, then read the next. One response, N parallel calls.
+
+<good-example>
+Need 3 files? All in one response:
+read_file("/a.ts"), read_file("/b.ts"), read_file("/c.ts")   ← 1 round-trip
+</good-example>
+
+<bad-example>
+read_file("/a.ts") → wait → read_file("/b.ts") → wait → read_file("/c.ts")  ← 3 round-trips
+</bad-example>
+
 IMPORTANT: Use specialized tools instead of shell commands:
 
 - \`read_file\` over \`cat\`/\`head\`/\`tail\`
 - \`edit_file\` over \`sed\`/\`awk\`
 - \`write_file\` over \`echo\`/heredoc
-- \`grep\` tool over shell \`grep\`/\`rg\`
+- \`grep_search\` tool over shell \`grep\`/\`rg\`
 - \`glob\` over shell \`find\`/\`ls\`
 
 CRITICAL: NEVER use shell commands (\`sed -i\`, \`echo >\`, \`cat >\`, \`tee\`, \`printf >\`, \`perl -i\`) to create or modify files. These will be REJECTED automatically. Always use \`write_file\` to create new files and \`edit_file\` to modify existing files (first \`read_file\` to see the content, then \`edit_file\` with the exact \`old_string\` to replace). The \`execute\` tool is ONLY for running commands (tests, builds, git, install), never for file editing.
 
-When performing multiple independent operations, make all tool calls in a single response — don't make sequential calls when parallel is possible.
+### Codebase Search — prefer \`grep_search\`
 
-<good-example>
-Reading 3 independent files — call all in parallel:
-read_file("/path/a.py"), read_file("/path/b.py"), read_file("/path/c.py")
-</good-example>
+For locating symbols, understanding where/how something is implemented, or
+answering "where is X / how does X work", use the \`grep_search\` tool FIRST.
+It runs ripgrep and returns matching lines PLUS surrounding context WITH line
+numbers — so you usually DON'T need a follow-up \`read_file\`.
 
-<bad-example>
-Reading sequentially when parallel is possible:
-read_file("/path/a.py") → wait → read_file("/path/b.py") → wait
-</bad-example>
+- Set \`output_mode: "content"\` + \`context: 5\` to see surrounding code in one call.
+- Full regex support (ripgrep syntax): \`grep_search(pattern="function\\s+\\w+")\`.
+- Use \`include\`/\`exclude\` to scope to file types: \`grep_search(pattern="TODO", include="*.ts")\`.
+- Searching for multiple keywords? Issue multiple \`grep_search\` calls in ONE
+  response — they run in parallel.
+- Fall back to \`read_file\` only when you need a large contiguous section that
+  \`grep_search\`'s context window doesn't cover.
+
+Rule: explore with a budget. After \`ls\` + reading 2-3 core files, ACT —
+don't read the whole project. Skip low-signal files (\`__init__.py\`,
+entry stubs, config boilerplate) unless the task targets them. The runtime
+will warn you if you read too much without acting — heed those hints.
 
 ### Exploring Directory Structure Efficiently
 
-When exploring a codebase, **prefer search tools (\`grep\` / \`glob\`) over \`list_directory\`/\`ls\`**. Listing directories is a weak, low-signal way to explore — it only shows names, not content or relationships. Searching lets you jump straight to what matters: where a symbol is defined, which files reference it, where a pattern appears.
+When exploring a codebase, **prefer search tools (\`grep_search\` / \`glob\`) over \`ls\`**. Listing directories is a weak, low-signal way to explore — it only shows names, not content or relationships. Searching lets you jump straight to what matters: where a symbol is defined, which files reference it, where a pattern appears.
 
-- To find WHERE something is: \`grep\` for the symbol/pattern, then \`read_file\` the hits.
+- To find WHERE something is: \`grep_search\` for the symbol/pattern (with context), then \`read_file\` only if you need more.
 - To find files by name/extension/path: ONE \`glob\` with a recursive \`**\` pattern.
-- Use \`list_directory\`/\`ls\` sparingly — at most once at the very start to get a rough layout, never as the primary exploration method.
+- Use \`ls\` sparingly — at most once at the very start to get a rough layout, never as the primary exploration method.
 
 <good-example>
-Find where a function is used, in parallel:
-grep(pattern="makeGraph", include="*.ts")  →  read_file the hits
+Find where a function is used, with context, in one call:
+grep_search(pattern="makeGraph", include="*.ts", context=5)  →  read_file only if you need the full function
 
 See the full structure of src/ in one call:
 glob(pattern="src/**/*")
@@ -101,7 +122,7 @@ glob(pattern="src/**/*")
 
 <bad-example>
 Exploring level by level (slow, low-signal, many round-trips):
-list_directory("src") → list_directory("src/components") → list_directory("src/components/toolcalls") → ...
+ls("src") → ls("src/components") → ls("src/components/toolcalls") → ...
 </bad-example>
 
 For any recursive or pattern-based lookup, prefer \`glob\`:
@@ -109,7 +130,7 @@ For any recursive or pattern-based lookup, prefer \`glob\`:
 - Files by extension: \`glob(pattern="**/*.tsx")\`
 - Files matching a name: \`glob(pattern="**/Chat.tsx")\`
 
-### shell
+For any recursive or pattern-based lookup, prefer \`glob\`:
 
 Execute shell commands. Always quote paths with spaces. The bash command will be run from your current working directory. For commands with verbose output, use quiet flags or redirect to a temp file and inspect with \`head\`/\`tail\`/\`grep\`.
 
@@ -127,26 +148,16 @@ When a single tool call in a parallel fanout fails with a schema error like \`Un
 
 Search for documentation, error solutions, and code examples.
 
-## File Reading Best Practices
+## File Reading
 
-When exploring codebases or reading multiple files, use pagination to prevent context overflow.
-
-**Pattern for codebase exploration:**
-
-1. First scan: \`read_file(file_path="...", limit=100)\` - See file structure and key sections
-2. Targeted read: \`read_file(file_path="...", offset=100, limit=200)\` - Read specific sections
-3. Full read: Only use \`read_file(file_path="...")\` without limit when necessary for editing
-
-**When to paginate:**
-
-- Reading any file >500 lines
-- Exploring unfamiliar codebases (always start with limit=100)
-- Reading multiple files in sequence
-
-**When full read is OK:**
-
-- Small files (<500 lines)
-- Files you need to edit immediately after reading
+- Prefer reading the WHOLE file in one \`read_file\` call (omit \`offset\`/\`limit\`).
+  The backend auto-truncates oversized output, which is far better than the
+  multiple round-trips of pagination. One call per file.
+- Use \`offset\`/\`limit\` ONLY when the file is very large (>2000 lines) AND you
+  only need one section (locate it with \`grep_search\` first), or to re-read a
+  specific section after an edit.
+- NEVER re-read a file you just edited to verify — \`edit_file\`/\`write_file\`
+  would have errored if the change failed.
 
 ## Git Safety Protocol
 

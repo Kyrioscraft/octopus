@@ -8,7 +8,26 @@ importers:
 
   .: {}
 
-  core:
+  extensions/ripgrep:
+    dependencies:
+      '@langchain/core':
+        specifier: ^1.2.0
+        version: 1.2.1(openai@6.45.0(ws@8.21.0)(zod@3.25.76))(ws@8.21.0)
+      '@octopus/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
+    devDependencies:
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.20.0
+      typescript:
+        specifier: ^5.7.0
+        version: 5.9.3
+
+  packages/core:
     dependencies:
       '@langchain/anthropic':
         specifier: ^1.2.0
@@ -48,7 +67,7 @@ importers:
         specifier: ^6.21.0
         version: 6.21.0
 
-  server:
+  packages/server:
     dependencies:
       '@hono/node-server':
         specifier: ^1.13.0
@@ -65,6 +84,9 @@ importers:
       '@octopus/core':
         specifier: workspace:*
         version: link:../core
+      '@octopus/extension-ripgrep':
+        specifier: workspace:*
+        version: link:../../extensions/ripgrep
       adm-zip:
         specifier: ^0.6.0
         version: 0.6.0
@@ -103,7 +125,7 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  tentacle:
+  packages/tentacle:
     dependencies:
       zod:
         specifier: ^3.24.0
@@ -113,7 +135,7 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  tui:
+  packages/tui:
     dependencies:
       '@octopus/core':
         specifier: workspace:*
@@ -156,7 +178,7 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  web:
+  packages/web:
     dependencies:
       '@octopus/tentacle':
         specifier: workspace:*

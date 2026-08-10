@@ -13,6 +13,7 @@ import { Hono } from "hono";
 import { v4 as uuid } from "uuid";
 import { getOptionalUser } from "../auth/middleware.js";
 import { makeGraph, loadConfig, getLogger, getLogContext } from "@octopus/core";
+import { createRipgrepTool } from "@octopus/extension-ripgrep";
 import { type AccessMode, type ExternalSubagentSpec, type SubagentEntry, interruptOnForMode } from "@octopus/core";
 import {
   listUserThreads,
@@ -252,6 +253,9 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       // Inject the user's file-source + user-defined subagents (merged). core
       // adds built-ins (Explore, general-purpose) itself. Part of cache key.
       userSubagents: resolveUserSubagents(userId),
+      // Inject the ripgrep extension tool (grep_search) — high-priority search
+      // that returns matches with line numbers and context in one call.
+      externalTools: [createRipgrepTool(agentCwd)],
     });
     agent = compiled.agent;
     subagentRegistry = compiled.subagentRegistry;
@@ -350,6 +354,8 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
     // Inject the same user subagents as the original turn so delegation works
     // consistently on resume.
     userSubagents: resolveUserSubagents(userId),
+    // Inject the same ripgrep extension tool as the original turn.
+    externalTools: [createRipgrepTool(agentCwd)],
   });
   const agent = compiled.agent;
   const subagentRegistry = compiled.subagentRegistry;

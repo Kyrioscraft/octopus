@@ -1,9 +1,6 @@
 packages:
-  - "core"
-  - "server"
-  - "web"
-  - "tentacle"
-  - "tui"
+  - "packages/*"
+  - "extensions/*"
 
 # pnpm 10 moved the allow-list for dependency build scripts here from
 # package.json's "pnpm" field (which is no longer read). Without this,

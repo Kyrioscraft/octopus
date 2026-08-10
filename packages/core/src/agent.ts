@@ -43,6 +43,7 @@ import { ShellAllowListMiddleware } from "./middleware/shell_allow_list.js";
 import { LocalContextMiddleware } from "./middleware/local_context.js";
 import { ConfigurableModelMiddleware } from "./middleware/configurable_model.js";
 import { FilesystemPolicyMiddleware } from "./middleware/filesystem_policy_middleware.js";
+import { ReadBudgetMiddleware } from "./middleware/read_budget_middleware.js";
 import { getBuiltinToolsAsStructuredTools } from "./tools.js";
 import { createAskUserQuestionTool } from "./tools/ask_user_question.js";
 import { listSkills } from "./skills.js";
@@ -385,6 +386,14 @@ export async function makeGraph(
      * them in this list. Part of the cache key.
      */
     userSubagents?: ExternalSubagentSpec[];
+    /**
+     * External tools injected by the server (e.g. the ripgrep extension's
+     * `grep_search`). core is a pure library and does not discover extensions
+     * itself — the server loads them and passes the constructed StructuredTool
+     * instances here. Injected after built-in + MCP tools, before plan-mode
+     * filtering. Part of the cache key.
+     */
+    externalTools?: any[];
   },
 ): Promise<CompiledAgent> {
   const mcpSignature = options?.mcpConfigPath ?? "";
@@ -402,7 +411,13 @@ export async function makeGraph(
     .map((s) => `${s.name}:${(s.tools ?? []).slice().sort().join(",")}:${s.model ?? ""}:${s.enabled ?? true}`)
     .sort()
     .join("|");
-  const key = _cacheKey(config, mcpSignature, subagentSignature) + wsSignature + ":" + modeSignature + ":cwd=" + (options?.cwd ?? "");
+  // External tool names affect the compiled graph (the model sees them as
+  // available tools), so they must be part of the cache key too.
+  const externalToolsSignature = (options?.externalTools ?? [])
+    .map((t: any) => t?.name ?? "")
+    .sort()
+    .join(",");
+  const key = _cacheKey(config, mcpSignature, subagentSignature) + wsSignature + ":" + modeSignature + ":ext=" + externalToolsSignature + ":cwd=" + (options?.cwd ?? "");
 
   // Return cached graph if available
   const cached = _graphCache.get(key);
@@ -434,6 +449,8 @@ async function _makeGraphUncached(
     accessMode?: AccessMode;
     /** External subagents (file + user-defined), injected by the server. */
     userSubagents?: ExternalSubagentSpec[];
+    /** External tools (e.g. ripgrep extension), injected by the server. */
+    externalTools?: any[];
   },
 ): Promise<CompiledAgent> {
   const cwd = options?.cwd ?? process.cwd();
@@ -479,6 +496,33 @@ async function _makeGraphUncached(
     } catch (err) {
       logger.warn(`Failed to load MCP tools: ${String(err)}`);
     }
+  }
+
+  // ---- 2b. Remove SDK grep — fully superseded by the ripgrep extension's
+  // `grep_search` tool (injected via externalTools below). Keeping both would
+  // let the model pick the weaker literal-only SDK grep. `ls` (directory
+  // metadata) and `read_file` (whole-file / image / pagination reads) are kept
+  // — their responsibilities are not covered by grep_search.
+  if (options?.externalTools?.some((t: any) => t?.name === "grep_search")) {
+    for (let i = tools.length - 1; i >= 0; i--) {
+      if (tools[i]?.name === "grep") {
+        tools.splice(i, 1);
+        logger.debug("Removed SDK grep tool (superseded by ripgrep grep_search)");
+        break;
+      }
+    }
+  }
+
+  // ---- 3a. Inject external tools (e.g. ripgrep extension) ----
+  // External tools are injected AFTER built-in + MCP tools so they appear
+  // alongside them, and BEFORE plan-mode filtering so any destructive
+  // external tools are also stripped in plan mode. The server loads
+  // extensions and constructs the StructuredTool instances; core just merges
+  // them here. Tool selection priority is driven by descriptions (the model
+  // picks based on guidance), not array index.
+  if (options?.externalTools && options.externalTools.length > 0) {
+    tools.push(...options.externalTools);
+    logger.info(`Injected ${options.externalTools.length} external tool(s): ${options.externalTools.map((t: any) => t?.name ?? "?").join(", ")}`);
   }
 
   // ---- 3b. plan mode — strip destructive tools (read-only enforcement) ----
@@ -595,6 +639,12 @@ async function _makeGraphUncached(
   // Rewrites the FS tool descriptions and strips the SDK prompt so that
   // Octopus's "prefer grep/glob" guidance is the last word the model sees.
   middleware.push(new FilesystemPolicyMiddleware());
+
+  // Read-budget middleware — runtime hints to curb over-exploration.
+  // Scans request.messages before each model call; if the agent has read
+  // too many files without acting (or is re-reading a file), appends a
+  // [hint] to the system message. Soft (non-blocking), stateless, idempotent.
+  middleware.push(new ReadBudgetMiddleware());
 
   // Local context middleware (project detection via bash script)
   // Added when the backend supports shell execution (LocalShellBackend)

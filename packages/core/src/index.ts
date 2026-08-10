@@ -23,6 +23,8 @@ export { ToolExceptionRecoveryMiddleware } from "./middleware/tool_exception_rec
 export { ResumeStateMiddleware } from "./middleware/resume_state.js";
 export { ShellAllowListMiddleware, isShellCommandAllowed, ShellAllowAll } from "./middleware/shell_allow_list.js";
 export { LocalContextMiddleware, buildDetectScript, buildMcpContext } from "./middleware/local_context.js";
+export { FilesystemPolicyMiddleware } from "./middleware/filesystem_policy_middleware.js";
+export { ReadBudgetMiddleware } from "./middleware/read_budget_middleware.js";
 
 // ServerConfig
 export { loadConfig, fromDict, toDict, ServerConfigSchema, interruptOnForMode, DESTRUCTIVE_TOOLS } from "./config.js";

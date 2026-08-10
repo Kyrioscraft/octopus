@@ -10,7 +10,7 @@ build/
 *.tsbuildinfo
 
 # Vite
-web/.vite/
+packages/web/.vite/
 
 # Environment & secrets
 .env
@@ -32,3 +32,7 @@ pnpm-debug.log*
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Bundled ripgrep binaries (fetched at build time by extensions/ripgrep)
+extensions/ripgrep/dist/binaries/
+extensions/ripgrep/binaries/

@@ -80,15 +80,15 @@ export interface StartResult {
 
 /**
 	 * resolveServerScript — this module now runs as
-	 * `tui/dist/client/server-manager.js`; the repo root is three
-	 * levels up (`tui/dist/client` → `tui/dist` → `tui` → repo root),
-	 * and the server entry is `server/dist/main.js` under that root.
+	 * `packages/tui/dist/client/server-manager.js`; the repo root is four
+	 * levels up (`tui/dist/client` → `tui/dist` → `tui` → `packages` → repo root),
+	 * and the server entry is `packages/server/dist/main.js` under that root.
 	 */
 	function resolveServerScript(): string {
 	  // `import.meta.url` is the canonical ESM way to get the current module URL.
 	  const here = dirname(fileURLToPath(import.meta.url));
-	  const repoRoot = join(here, "..", "..", "..");
-  return join(repoRoot, "server", "dist", "main.js");
+	  const repoRoot = join(here, "..", "..", "..", "..");
+  return join(repoRoot, "packages", "server", "dist", "main.js");
 }
 
 /** Extract the TCP port from a server URL string (falls back to 9876). */
