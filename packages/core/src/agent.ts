@@ -44,6 +44,7 @@ import { LocalContextMiddleware } from "./middleware/local_context.js";
 import { ConfigurableModelMiddleware } from "./middleware/configurable_model.js";
 import { FilesystemPolicyMiddleware } from "./middleware/filesystem_policy_middleware.js";
 import { ReadBudgetMiddleware } from "./middleware/read_budget_middleware.js";
+import { SubagentOrchestrationMiddleware } from "./middleware/subagent_orchestration_middleware.js";
 import { getBuiltinToolsAsStructuredTools } from "./tools.js";
 import { createAskUserQuestionTool } from "./tools/ask_user_question.js";
 import { listSkills } from "./skills.js";
@@ -645,6 +646,14 @@ async function _makeGraphUncached(
   // too many files without acting (or is re-reading a file), appends a
   // [hint] to the system message. Soft (non-blocking), stateless, idempotent.
   middleware.push(new ReadBudgetMiddleware());
+
+  // Subagent-orchestration middleware — makes the agent act as an orchestrator.
+  // Appends an "orchestrator mindset" declaration (every call) and a dynamic
+  // delegation hint (when over-searching without delegating is detected) to
+  // the system message. Placed AFTER ReadBudgetMiddleware so it has the final
+  // word — recency bias makes the last-appended text the strongest signal.
+  // See middleware/subagent_orchestration_middleware.ts for rationale.
+  middleware.push(new SubagentOrchestrationMiddleware());
 
   // Local context middleware (project detection via bash script)
   // Added when the backend supports shell execution (LocalShellBackend)

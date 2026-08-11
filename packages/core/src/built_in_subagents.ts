@@ -109,7 +109,8 @@ export const EXPLORE_SUBAGENT: BuiltInSubagent = {
     "只读探索子智能体（首选用于代码/文件的搜索、定位、调研）。当任务涉及搜索关键词、定位文件、" +
     "理解代码结构、回答\"X 在哪里/怎么实现的\"这类问题时，优先使用 Explore，而不是 general-purpose。" +
     "它只读不改，并行扇出多条搜索路径，读取摘要而非转储整个文件，最终给出结论与 file_path:line 引用。" +
-    "Reach for this when you are searching for a keyword or file and are not confident that you will find the right match in the first few tries; specify search breadth (medium/very thorough).",
+    "Reach for this when you are searching for a keyword or file and are not confident that you will find the right match in the first few tries; specify search breadth (medium/very thorough). " +
+    "每次调用应是一个聚焦、自包含的子任务——尤其当你作为并行 fan-out 的一部分被启动时，专注于你被分配的范围，不要试图覆盖其他子智能体可能正在探索的区域。",
   systemPrompt: `你是 Explore，一个只读探索子智能体。你的职责是在代码库或给定上下文中进行广度搜索、快速定位信息，并把结论汇报给主智能体。
 
 工作原则：

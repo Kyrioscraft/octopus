@@ -35,6 +35,10 @@
 
 import type { BaseMessage } from "@langchain/core/messages";
 import { getLogger } from "../logging.js";
+import {
+  readSystemMessageText,
+  withSystemMessageText,
+} from "./system_message_utils.js";
 
 const logger = getLogger("middleware.read_budget");
 
@@ -207,8 +211,8 @@ const HINT_MARKER = "[hint]";
 // =============================================================================
 
 /**
- * Appends the hint to the system message content (string form only — the SDK's
- * `systemMessage.content` is a string in all Octopus configs).
+ * Appends the hint to the system message content (handles both string and
+ * content-block-array forms — see system_message_utils.ts).
  *
  * If the content already contains a `[hint]` line, the existing hint is
  * replaced (not duplicated) so the text stays stable across turns — important
@@ -245,25 +249,18 @@ class ReadBudgetMiddleware {
     if (!hint) return handler(request);
 
     const systemMessage = request.systemMessage;
-    const content = systemMessage?.content;
-    if (typeof content !== "string") {
-      // Non-string content (content-block arrays) — skip hint injection
-      // rather than risk malforming the blocks.
-      logger.debug("System message content is not a string; skipping hint");
+    const text = readSystemMessageText(systemMessage);
+    if (!text) {
       return handler(request);
     }
 
     // Idempotent: if the exact hint is already present, don't re-append.
-    if (content.includes(hint)) {
+    if (text.includes(hint)) {
       return handler(request);
     }
 
-    const newContent = _appendHint(content, hint);
-    const newSystemMessage = Object.assign(
-      Object.create(Object.getPrototypeOf(systemMessage)),
-      systemMessage,
-      { content: newContent },
-    );
+    const newContent = _appendHint(text, hint);
+    const newSystemMessage = withSystemMessageText(systemMessage, newContent);
 
     logger.debug(
       `Injecting read-budget hint (uniqueFiles=${analysis.uniquePaths.length}, ` +
