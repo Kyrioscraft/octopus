@@ -4,7 +4,8 @@
  * Equivalent to Python `cortex.mcp_disabled`.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync } from "node:fs";
+import { dirname, basename, join } from "node:path";
 import { getLogger } from "./logging.js";
 import { DEFAULT_CONFIG_PATH } from "./constants.js";
 
@@ -24,8 +25,6 @@ function _readConfig(configPath: string): Record<string, unknown> {
 
 /** Atomic JSON write with temp-file + rename. */
 function _writeConfig(data: Record<string, unknown>, configPath: string): boolean {
-  const { mkdirSync, writeFileSync, renameSync } = require("node:fs");
-  const { dirname, basename, join } = require("node:path");
   try {
     mkdirSync(dirname(configPath), { recursive: true });
     const tmpPath = join(dirname(configPath), `.${basename(configPath)}.tmp.${Date.now()}`);

@@ -11,7 +11,7 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { getOptionalUser } from "../auth/middleware.js";
-import { BUILTIN_SUBAGENTS } from "@octopus/core";
+import { clearGraphCache } from "@octopus/core";
 import type { SubagentEntry } from "@octopus/core";
 import {
   listAllSkills,
@@ -35,6 +35,7 @@ import {
 } from "../services/mcp.service.js";
 import {
   listAllSubagents,
+  listBuiltinSubagents,
   getSubagentDetail,
   createSubagent,
   updateSubagent,
@@ -243,14 +244,11 @@ configRouter.put("/mcp/:name/enabled", getOptionalUser, async (c) => {
  * Map a built-in subagent descriptor (from core's BUILTIN_SUBAGENTS) to the
  * read-only SubagentEntry shape used by the API. Built-ins are always enabled
  * and never editable; a user/file entry of the same name shadows them.
+ * `model` reflects the user's per-user override (if any).
  */
-function builtInSubagentEntry(b: (typeof BUILTIN_SUBAGENTS)[number]): SubagentEntry {
+function builtInSubagentEntry(b: SubagentEntry): SubagentEntry {
   return {
-    name: b.name,
-    description: b.description,
-    systemPrompt: b.systemPrompt,
-    model: b.model ?? null,
-    tools: b.tools ?? [],
+    ...b,
     origin: "builtin",
     editable: false,
     enabled: true,
@@ -263,11 +261,12 @@ configRouter.get("/subagents", getOptionalUser, (c) => {
   const userEntries = listAllSubagents(userId);
   const userNames = new Set(userEntries.map((s) => s.name));
   // Prepend built-in subagents (Explore, general-purpose) as read-only
-  // entries. A user/file entry with the same name takes precedence (shadowing
-  // the built-in) — matching core's registry behavior.
-  const builtinEntries = BUILTIN_SUBAGENTS.filter(
-    (b) => !userNames.has(b.name),
-  ).map(builtInSubagentEntry);
+  // entries (with the user's model overrides applied). A user/file entry
+  // with the same name takes precedence (shadowing the built-in) — matching
+  // core's registry behavior.
+  const builtinEntries = listBuiltinSubagents(userId)
+    .filter((b) => !userNames.has(b.name))
+    .map(builtInSubagentEntry);
   return c.json({ subagents: [...builtinEntries, ...userEntries] });
 });
 
@@ -278,9 +277,6 @@ configRouter.get("/subagents/:name", getOptionalUser, (c) => {
   // and core's registry), so check them first.
   const subagent = getSubagentDetail(userId, name);
   if (subagent) return c.json(subagent);
-  // Built-in fallback (Explore, general-purpose): read-only, always enabled.
-  const builtin = BUILTIN_SUBAGENTS.find((b) => b.name === name);
-  if (builtin) return c.json(builtInSubagentEntry(builtin));
   return c.json({ detail: "子智能体不存在" }, 404);
 });
 
@@ -295,6 +291,7 @@ configRouter.post("/subagents", getOptionalUser, async (c) => {
   }>();
   try {
     const subagent = createSubagent(userId, body);
+    clearGraphCache();
     return c.json({ subagent }, 201);
   } catch (err) {
     return handleError(c, err);
@@ -311,6 +308,8 @@ configRouter.put("/subagents/:name", getOptionalUser, async (c) => {
   }>();
   try {
     const subagent = updateSubagent(userId, c.req.param("name"), body);
+    // Model/shape changes affect graph compilation — drop stale graphs.
+    clearGraphCache();
     return c.json({ subagent });
   } catch (err) {
     return handleError(c, err);
@@ -321,6 +320,7 @@ configRouter.delete("/subagents/:name", getOptionalUser, (c) => {
   const userId = c.var.user.sub;
   try {
     deleteSubagent(userId, c.req.param("name"));
+    clearGraphCache();
     return c.json({ success: true });
   } catch (err) {
     return handleError(c, err);
@@ -332,6 +332,7 @@ configRouter.put("/subagents/:name/enabled", getOptionalUser, async (c) => {
   const { enabled } = await c.req.json<{ enabled: boolean }>();
   try {
     const result = setSubagentEnabled(userId, c.req.param("name"), enabled === true);
+    clearGraphCache();
     return c.json({ success: true, enabled: result });
   } catch (err) {
     return handleError(c, err);

@@ -36,7 +36,7 @@ import {
   ensureThreadOutputs,
   resolveAgentCwd,
 } from "../services/workspace.service.js";
-import { listAllSubagents } from "../services/subagent.service.js";
+import { listAllSubagents, resolveBuiltinOverrides } from "../services/subagent.service.js";
 
 export const chatRouter = new Hono();
 
@@ -259,6 +259,9 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       // Inject the user's file-source + user-defined subagents (merged). core
       // adds built-ins (Explore, general-purpose) itself. Part of cache key.
       userSubagents: resolveUserSubagents(userId),
+      // Built-in subagent model overrides (name → model, null = default).
+      // Part of the cache key, so changing a built-in's model recompiles.
+      builtinSubagentOverrides: resolveBuiltinOverrides(userId),
       // Inject the ripgrep extension tool (grep_search) — high-priority search
       // that returns matches with line numbers and context in one call.
       externalTools: [createRipgrepTool(agentCwd)],
@@ -368,6 +371,7 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
     // Inject the same user subagents as the original turn so delegation works
     // consistently on resume.
     userSubagents: resolveUserSubagents(userId),
+    builtinSubagentOverrides: resolveBuiltinOverrides(userId),
     // Inject the same ripgrep extension tool as the original turn.
     externalTools: [createRipgrepTool(agentCwd)],
   });

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { OctopusClient, GeneralSettingsResponse, User } from "@octopus/tentacle";
 import { SandboxSettingsSection } from "./SandboxSettingsSection.js";
+import { SettingsCard as Card } from "../shared/SettingsCard.js";
 import { useThemeStore } from "../../stores/theme.js";
 import type { ThemeMode } from "../../stores/theme.js";
 
@@ -211,32 +212,6 @@ export function GeneralSettingsSection({ sdk }: Props) {
           <InfoRow label="运行平台" value={data.system_info.platform} />
         </div>
       </Card>
-    </div>
-  );
-}
-
-function Card({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        background: "var(--gray-0)",
-        border: "1px solid var(--gray-150)",
-        borderRadius: 12,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          padding: "12px 16px",
-          borderBottom: "1px solid var(--gray-100)",
-          fontSize: 14,
-          fontWeight: 600,
-          color: "var(--gray-1000)",
-        }}
-      >
-        {title}
-      </div>
-      <div style={{ padding: 16 }}>{children}</div>
     </div>
   );
 }

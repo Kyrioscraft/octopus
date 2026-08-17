@@ -15,6 +15,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import {
+  BUILTIN_SUBAGENTS,
   listSubagents,
   tagFileSubagents,
   mergeSubagentEntries,
@@ -27,6 +28,9 @@ import {
   getUserSubagent,
   upsertUserSubagent,
   deleteUserSubagent,
+  listBuiltinSubagentOverrides,
+  getBuiltinSubagentOverride,
+  upsertBuiltinSubagentOverride,
 } from "../db/index.js";
 
 /**
@@ -86,6 +90,66 @@ export function listAllSubagents(userId: string): SubagentEntry[] {
   return mergeSubagentEntries(fileSubagents, userSubagents);
 }
 
+// =============================================================================
+// Built-in subagent model overrides
+//
+// Built-ins (Explore, general-purpose) have no enable/disable or delete — they
+// are always enabled. The only user-tunable knob is a per-user model override
+// (null = inherit the default model), persisted in builtin_subagent_overrides.
+// =============================================================================
+
+/** All built-in subagent entries for a user, with their model overrides applied. */
+export function listBuiltinSubagents(userId: string): SubagentEntry[] {
+  const overrides = new Map(
+    listBuiltinSubagentOverrides(userId).map((r) => [r.name, r.model]),
+  );
+  return BUILTIN_SUBAGENTS.map((b) => ({
+    name: b.name,
+    description: b.description,
+    systemPrompt: b.systemPrompt,
+    model: overrides.get(b.name) ?? b.model ?? null,
+    tools: b.tools ?? [],
+    origin: "builtin" as const,
+    editable: false,
+    enabled: true,
+    source: "builtin",
+  }));
+}
+
+/**
+ * Override a built-in subagent's model. @throws when the name is not built-in.
+ */
+export function setBuiltinSubagentModel(
+  userId: string,
+  name: string,
+  model: string | null,
+): SubagentEntry {
+  const builtin = BUILTIN_SUBAGENTS.find((b) => b.name === name);
+  if (!builtin) throw new Error(`子智能体 "${name}" 不是内置子智能体`);
+  const model_ = model?.trim() ? model.trim() : null;
+  upsertBuiltinSubagentOverride(userId, name, model_);
+  return {
+    name: builtin.name,
+    description: builtin.description,
+    systemPrompt: builtin.systemPrompt,
+    model: model_,
+    tools: builtin.tools ?? [],
+    origin: "builtin",
+    editable: false,
+    enabled: true,
+    source: "builtin",
+  };
+}
+
+/** Resolve a user's built-in overrides into the shape makeGraph expects. */
+export function resolveBuiltinOverrides(userId: string): Record<string, string | null> {
+  const overrides: Record<string, string | null> = {};
+  for (const r of listBuiltinSubagentOverrides(userId)) {
+    overrides[r.name] = r.model;
+  }
+  return overrides;
+}
+
 /** Get a single subagent's detail. */
 export function getSubagentDetail(userId: string, name: string): SubagentEntry | null {
   // user-defined first (highest precedence)
@@ -110,7 +174,10 @@ export function getSubagentDetail(userId: string, name: string): SubagentEntry |
       path: found.path,
     };
   }
-  return null;
+  // Built-in fallback (Explore, general-purpose) with the user's model
+  // override applied.
+  const builtin = listBuiltinSubagents(userId).find((s) => s.name === name);
+  return builtin ?? null;
 }
 
 /** Create a user-defined subagent. @throws on invalid name or conflict. */
@@ -167,6 +234,18 @@ export function updateSubagent(
 ): SubagentEntry {
   const existing = getUserSubagent(userId, name);
   if (!existing) {
+    // Built-in entries (Explore, general-purpose): only the model may be
+    // overridden — any other field is rejected.
+    if (BUILTIN_SUBAGENTS.some((b) => b.name === name)) {
+      const hasOther =
+        patch.description !== undefined ||
+        patch.systemPrompt !== undefined ||
+        patch.tools !== undefined;
+      if (hasOther) {
+        throw new Error("内置子智能体仅支持修改模型");
+      }
+      return setBuiltinSubagentModel(userId, name, patch.model ?? null);
+    }
     const fileSubagents = discoverFileSubagents();
     if (fileSubagents.some((s) => s.name === name)) {
       throw new NotEditableError(name, "file");

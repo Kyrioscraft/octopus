@@ -102,6 +102,16 @@ export interface UserSubagentRow {
   updatedAt: string;
 }
 
+/** A built-in subagent model override row (model null = default model). */
+export interface BuiltinSubagentOverrideRow {
+  id: string;
+  userId: string;
+  name: string;
+  model: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 /** A user-defined slash command row (origin="user-defined"). */
 export interface UserSlashCommandRow {
   id: string;
@@ -210,6 +220,16 @@ function getDb(): BetterSQLite3Database<typeof schema> {
       enabled       TEXT NOT NULL,
       created_at    TEXT NOT NULL,
       updated_at    TEXT NOT NULL,
+      UNIQUE(user_id, name)
+    );
+    -- Per-user model overrides for built-in subagents (model NULL = default).
+    CREATE TABLE IF NOT EXISTS builtin_subagent_overrides (
+      id          TEXT PRIMARY KEY,
+      user_id     TEXT NOT NULL,
+      name        TEXT NOT NULL,
+      model       TEXT,
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL,
       UNIQUE(user_id, name)
     );
     CREATE TABLE IF NOT EXISTS user_slash_commands (
@@ -794,6 +814,80 @@ export function deleteUserSubagent(userId: string, name: string): void {
     .where(
       and(eq(schema.userSubagents.userId, userId), eq(schema.userSubagents.name, name)),
     )
+    .run();
+}
+
+// =============================================================================
+// Built-in subagent model overrides
+// =============================================================================
+
+export function listBuiltinSubagentOverrides(userId: string): BuiltinSubagentOverrideRow[] {
+  return getDb()
+    .select()
+    .from(schema.builtinSubagentOverrides)
+    .where(eq(schema.builtinSubagentOverrides.userId, userId))
+    .all()
+    .map((r) => ({
+      id: r.id,
+      userId: r.userId,
+      name: r.name,
+      model: r.model,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
+}
+
+export function getBuiltinSubagentOverride(
+  userId: string,
+  name: string,
+): BuiltinSubagentOverrideRow | undefined {
+  const r = getDb()
+    .select()
+    .from(schema.builtinSubagentOverrides)
+    .where(
+      and(
+        eq(schema.builtinSubagentOverrides.userId, userId),
+        eq(schema.builtinSubagentOverrides.name, name),
+      ),
+    )
+    .get();
+  return r
+    ? {
+        id: r.id,
+        userId: r.userId,
+        name: r.name,
+        model: r.model,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }
+    : undefined;
+}
+
+/** Upsert a built-in subagent's model override (model null = default model). */
+export function upsertBuiltinSubagentOverride(
+  userId: string,
+  name: string,
+  model: string | null,
+): void {
+  const now = new Date().toISOString();
+  const existing = getBuiltinSubagentOverride(userId, name);
+  getDb()
+    .insert(schema.builtinSubagentOverrides)
+    .values({
+      id: existing?.id ?? `bso_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      userId,
+      name,
+      model,
+      createdAt: existing?.createdAt ?? now,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        schema.builtinSubagentOverrides.userId,
+        schema.builtinSubagentOverrides.name,
+      ],
+      set: { model, updatedAt: now },
+    })
     .run();
 }
 

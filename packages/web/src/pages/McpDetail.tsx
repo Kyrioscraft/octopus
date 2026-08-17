@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Button, Tooltip, Switch, Spin, Modal, Tabs, message as antdMessage } from "antd";
+import { Button, Tooltip, Switch, Spin, Modal, message as antdMessage } from "antd";
 import {
   ArrowLeft,
   Pencil,
@@ -8,14 +8,14 @@ import {
   Trash2,
 } from "lucide-react";
 import { OctopusClient, type McpServerEntry } from "@octopus/tentacle";
-import { McpFormModal } from "../components/extensions/McpFormModal.js";
+import { SettingsCard, InfoRow } from "../components/shared/SettingsCard.js";
 
 const sdk = new OctopusClient();
 
 /**
  * MCP server detail page. Top bar with back + enable/disable switch +
- * edit/delete (user-defined only). Body tabs: 信息 (config) + 工具
- * (config JSON, since the backend has no separate tool-list endpoint).
+ * edit/delete (user-defined only). Body: settings-style stacked cards —
+ * 信息 + 配置 (JSON) (the backend has no separate tool-list endpoint).
  */
 export function McpDetailPage() {
   const { name } = useParams<{ name: string }>();
@@ -23,7 +23,6 @@ export function McpDetailPage() {
   const [server, setServer] = useState<McpServerEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!name) return;
@@ -116,7 +115,7 @@ export function McpDetailPage() {
                   type="text"
                   size="small"
                   icon={<Pencil />}
-                  onClick={() => setEditOpen(true)}
+                  onClick={() => navigate(`/extensions/mcp/${encodeURIComponent(name!)}/edit`)}
                   style={iconBtnStyle}
                 />
               </Tooltip>
@@ -142,22 +141,13 @@ export function McpDetailPage() {
             <Spin />
           </div>
         ) : server ? (
-          <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
-            <Tabs
-              defaultActiveKey="info"
-              items={[
-                {
-                  key: "info",
-                  label: "信息",
-                  children: <InfoTab server={server} />,
-                },
-                {
-                  key: "tools",
-                  label: "配置 (JSON)",
-                  children: <JsonTab config={server.config} />,
-                },
-              ]}
-            />
+          <div style={{ maxWidth: 900, margin: "0 auto", padding: 20, display: "flex", flexDirection: "column", gap: 20 }}>
+            <SettingsCard title="信息">
+              <InfoTab server={server} />
+            </SettingsCard>
+            <SettingsCard title="配置 (JSON)">
+              <JsonTab config={server.config} />
+            </SettingsCard>
           </div>
         ) : (
           <div style={{ padding: 80, textAlign: "center", color: "var(--gray-500)" }}>
@@ -165,15 +155,6 @@ export function McpDetailPage() {
           </div>
         )}
       </div>
-
-      {server && (
-        <McpFormModal
-          open={editOpen}
-          initial={server}
-          onClose={() => setEditOpen(false)}
-          onSaved={load}
-        />
-      )}
     </div>
   );
 }
@@ -205,33 +186,9 @@ function InfoTab({ server }: { server: McpServerEntry }) {
   }
 
   return (
-    <div style={panelStyle}>
+    <div>
       {rows.map((r, i) => (
-        <div
-          key={i}
-          style={{
-            display: "flex",
-            gap: 16,
-            padding: "10px 16px",
-            borderBottom: i < rows.length - 1 ? "1px solid var(--gray-100)" : "none",
-          }}
-        >
-          <div style={{ width: 100, flexShrink: 0, fontSize: 13, color: "var(--gray-500)" }}>
-            {r.label}
-          </div>
-          <div
-            style={{
-              flex: 1,
-              fontSize: 13,
-              color: "var(--gray-900)",
-              whiteSpace: r.mono ? "pre-wrap" : "normal",
-              wordBreak: "break-all",
-              fontFamily: r.mono ? "'SFMono-Regular', Consolas, Menlo, monospace" : "inherit",
-            }}
-          >
-            {r.value}
-          </div>
-        </div>
+        <InfoRow key={i} label={r.label} value={r.value} mono={r.mono} />
       ))}
     </div>
   );
@@ -240,22 +197,19 @@ function InfoTab({ server }: { server: McpServerEntry }) {
 /** Raw JSON view of the config object. */
 function JsonTab({ config }: { config: Record<string, unknown> }) {
   return (
-    <div style={panelStyle}>
-      <pre
-        style={{
-          margin: 0,
-          padding: 16,
-          fontSize: 12.5,
-          lineHeight: 1.6,
-          color: "var(--gray-900)",
-          fontFamily: "'SFMono-Regular', Consolas, Menlo, monospace",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-all",
-        }}
-      >
-        {JSON.stringify(config, null, 2)}
-      </pre>
-    </div>
+    <pre
+      style={{
+        margin: 0,
+        fontSize: 12.5,
+        lineHeight: 1.6,
+        color: "var(--gray-900)",
+        fontFamily: "'SFMono-Regular', Consolas, Menlo, monospace",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-all",
+      }}
+    >
+      {JSON.stringify(config, null, 2)}
+    </pre>
   );
 }
 
@@ -304,11 +258,4 @@ const iconBtnStyle: React.CSSProperties = {
   height: 28,
   borderRadius: 6,
   color: "var(--gray-600)",
-};
-
-const panelStyle: React.CSSProperties = {
-  background: "var(--gray-0)",
-  borderRadius: 10,
-  border: "1px solid var(--gray-150)",
-  overflow: "hidden",
 };

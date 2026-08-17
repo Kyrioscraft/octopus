@@ -389,6 +389,14 @@ export async function makeGraph(
      */
     userSubagents?: ExternalSubagentSpec[];
     /**
+     * Per-user model overrides for built-in subagents (name → 'provider:model',
+     * null = inherit the default model). Built-ins cannot be edited/deleted,
+     * but the UI allows overriding their model. Only applies to
+     * injectedBy === "explicit" built-ins (Explore); SDK-injected ones
+     * (general-purpose) cannot be overridden yet. Part of the cache key.
+     */
+    builtinSubagentOverrides?: Record<string, string | null>;
+    /**
      * External tools injected by the server (e.g. the ripgrep extension's
      * `grep_search`). core is a pure library and does not discover extensions
      * itself — the server loads them and passes the constructed StructuredTool
@@ -413,13 +421,19 @@ export async function makeGraph(
     .map((s) => `${s.name}:${(s.tools ?? []).slice().sort().join(",")}:${s.model ?? ""}:${s.enabled ?? true}`)
     .sort()
     .join("|");
+  // Built-in subagent model overrides affect the compiled graph (model choice
+  // on the explicit built-in spec), so they must be part of the cache key.
+  const builtinOverridesSignature = Object.entries(options?.builtinSubagentOverrides ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([n, m]) => `${n}=${m ?? ""}`)
+    .join("|");
   // External tool names affect the compiled graph (the model sees them as
   // available tools), so they must be part of the cache key too.
   const externalToolsSignature = (options?.externalTools ?? [])
     .map((t: any) => t?.name ?? "")
     .sort()
     .join(",");
-  const key = _cacheKey(config, mcpSignature, subagentSignature) + wsSignature + ":" + modeSignature + ":ext=" + externalToolsSignature + ":cwd=" + (options?.cwd ?? "");
+  const key = _cacheKey(config, mcpSignature, subagentSignature) + wsSignature + ":" + modeSignature + ":ext=" + externalToolsSignature + ":bso=" + builtinOverridesSignature + ":cwd=" + (options?.cwd ?? "");
 
   // Return cached graph if available
   const cached = _graphCache.get(key);
@@ -451,6 +465,8 @@ async function _makeGraphUncached(
     accessMode?: AccessMode;
     /** External subagents (file + user-defined), injected by the server. */
     userSubagents?: ExternalSubagentSpec[];
+    /** Built-in subagent model overrides (name → model, null = default). */
+    builtinSubagentOverrides?: Record<string, string | null>;
     /** External tools (e.g. ripgrep extension), injected by the server. */
     externalTools?: any[];
   },
@@ -736,7 +752,13 @@ async function _makeGraphUncached(
     // read-only by construction) — the value on the BuiltInSubagent wins.
     const whitelist = resolveToolWhitelist(sa.tools);
     if (whitelist) spec.tools = whitelist;
-    if (sa.model) spec.model = sa.model;
+    // Per-user model override (from the server's builtin override store)
+    // wins over the BuiltInSubagent's default. Note: SDK-injected built-ins
+    // (general-purpose) skip this loop entirely, so their overrides are
+    // recorded but not applied yet.
+    const override = options?.builtinSubagentOverrides?.[sa.name];
+    const model = override !== undefined ? override : sa.model;
+    if (model) spec.model = model;
     subagentSpecs.push(spec);
   }
 

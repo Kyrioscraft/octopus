@@ -1,25 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Tooltip, Spin, Empty, message as antdMessage } from "antd";
-import {
-  Bot,
-  Plus,
-  RotateCw,
-} from "lucide-react";
+import { Button, Spin, Empty, Switch, Select, Tag, Tooltip, message as antdMessage } from "antd";
+import { Bot, Plus } from "lucide-react";
 import { OctopusClient, type SubagentEntry } from "@octopus/tentacle";
-import { ExtensionCard } from "./ExtensionCard.js";
-import { SubagentFormModal } from "./SubagentFormModal.js";
+import { SettingsCard, SettingsRow, SettingsRows, ListToolbar } from "../shared/SettingsCard.js";
 
 const sdk = new OctopusClient();
-
-const ORIGIN_LABEL: Record<SubagentEntry["origin"], string> = {
-  builtin: "内置",
-  file: "文件",
-  "user-defined": "自定义",
-};
-
-/** Built-in subagents (Explore, general-purpose) are read-only — no toggle/edit. */
-const isReadonly = (s: SubagentEntry) => s.origin === "builtin" || s.origin === "file";
 
 interface SubagentCardListProps {
   subagents: SubagentEntry[];
@@ -29,20 +15,48 @@ interface SubagentCardListProps {
 }
 
 /**
- * Subagents tab: a card grid split into "已启用" and "已禁用". Disabled cards
- * show an inline "启用" action; enabled cards navigate to detail on click.
+ * Subagents tab: settings-style grouped row lists split into "内置 / 文件"
+ * (read-only) and "自定义" (user-defined). Custom rows carry an inline enable
+ * Switch; builtin rows carry an inline model Select (same source/format as
+ * the chat input's model picker) so the model can be changed without opening
+ * the detail page.
  */
 export function SubagentCardList({ subagents, loading, search, onReload }: SubagentCardListProps) {
   const navigate = useNavigate();
-  const [createOpen, setCreateOpen] = useState(false);
+  // Grouped model options (same shape/format as the chat input's model Select).
+  const [modelOptions, setModelOptions] = useState<
+    Array<{ label: string; options: Array<{ label: string; value: string }> }>
+  >([]);
+
+  useEffect(() => {
+    // Lazy-load once (same source as the chat input).
+    sdk
+      .listModelSettings()
+      .then((res) => {
+        setModelOptions(
+          res.providers
+            .filter((p) => p.enabled && p.models.length > 0)
+            .map((p) => ({
+              label: p.displayName || p.name,
+              options: p.models.map((m: string) => ({
+                label: `${p.name}:${m}`,
+                value: `${p.name}:${m}`,
+              })),
+            })),
+        );
+      })
+      .catch(() => {
+        // Non-fatal — the Select falls back to "默认模型" only.
+      });
+  }, []);
 
   const q = search.trim().toLowerCase();
   const filtered = subagents.filter(
     (s) => !q || s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q),
   );
 
-  const enabled = filtered.filter((s) => s.enabled);
-  const disabled = filtered.filter((s) => !s.enabled);
+  const builtin = filtered.filter((s) => s.origin !== "user-defined");
+  const custom = filtered.filter((s) => s.origin === "user-defined");
 
   const toggle = async (s: SubagentEntry, value: boolean) => {
     try {
@@ -54,29 +68,94 @@ export function SubagentCardList({ subagents, loading, search, onReload }: Subag
     }
   };
 
+  const changeModel = async (s: SubagentEntry, value: string) => {
+    const model = value === "__default__" ? null : value;
+    try {
+      await sdk.updateSubagent(s.name, { model });
+      antdMessage.success(model ? "模型已更新" : "已恢复默认模型");
+      onReload();
+    } catch (err: any) {
+      antdMessage.error(err?.message ?? "操作失败");
+    }
+  };
+
+  const row = (s: SubagentEntry) => (
+    <SettingsRow
+      key={s.name}
+      icon={<Bot />}
+      title={s.name}
+      meta={
+        s.origin === "builtin" ? (
+          <Tag style={{ margin: 0, borderRadius: 4, fontSize: 11, lineHeight: "18px", padding: "0 5px" }}>
+            内置 · 始终启用
+          </Tag>
+        ) : s.origin === "file" ? (
+          <Tag style={{ margin: 0, borderRadius: 4, fontSize: 11, lineHeight: "18px", padding: "0 5px" }}>
+            文件 · 只读
+          </Tag>
+        ) : undefined
+      }
+      description={
+        <span
+          title={s.description}
+          style={{
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+            lineHeight: 1.5,
+          }}
+        >
+          {s.description || "（无描述）"}
+        </span>
+      }
+      onClick={() => navigate(`/extensions/subagent/${encodeURIComponent(s.name)}`)}
+    >
+      {s.origin === "user-defined" ? (
+        <Switch
+          size="small"
+          checked={s.enabled}
+          onClick={(_, e) => e.stopPropagation()}
+          onChange={(v) => toggle(s, v)}
+        />
+      ) : s.origin === "builtin" ? (
+        // Built-ins are always enabled (no toggle) — the model is picked
+        // inline, without entering the detail page.
+        <div
+          onClick={(e) => e.stopPropagation()}
+          style={{ flexShrink: 0, fontSize: 12, color: "var(--gray-600)" }}
+        >
+          <Select
+            size="small"
+            variant="borderless"
+            value={s.model ?? "__default__"}
+            onChange={(v) => changeModel(s, v)}
+            style={{ width: "auto", minWidth: 0, fontSize: 12, color: "var(--gray-600)" }}
+            popupMatchSelectWidth={false}
+            options={[
+              { label: "默认模型", value: "__default__" },
+              ...modelOptions,
+            ]}
+          />
+        </div>
+      ) : null}
+    </SettingsRow>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
-        <Tooltip title="刷新">
+      <ListToolbar loading={loading} onReload={onReload}>
+        <Tooltip title="添加子智能体">
           <Button
             type="text"
             size="small"
-            icon={<RotateCw className={loading ? "lucide-spin" : undefined} />}
-            onClick={onReload}
+            icon={<Plus />}
+            onClick={() => navigate("/extensions/subagent/new")}
             style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
           />
         </Tooltip>
-        <Button
-          type="primary"
-          size="small"
-          icon={<Plus />}
-          onClick={() => setCreateOpen(true)}
-          style={{ borderRadius: 6 }}
-        >
-          添加子智能体
-        </Button>
-      </div>
+      </ListToolbar>
 
       {loading ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
@@ -86,85 +165,18 @@ export function SubagentCardList({ subagents, loading, search, onReload }: Subag
         <Empty description={q ? "无匹配子智能体" : "暂无子智能体"} style={{ marginTop: 60 }} />
       ) : (
         <>
-          {enabled.length > 0 && (
-            <Section title={`已启用 (${enabled.length})`}>
-              <Grid>
-                {enabled.map((s) => (
-                  <ExtensionCard
-                    key={s.name}
-                    icon={<Bot />}
-                    title={s.name}
-                    subtitle={s.model ?? undefined}
-                    description={s.description}
-                    tags={[
-                      {
-                        label: ORIGIN_LABEL[s.origin],
-                        ...(s.origin === "builtin" ? { color: "var(--main-color)" } : {}),
-                      },
-                    ]}
-                    statusLabel="已启用"
-                    statusLevel="success"
-                    onClick={() => navigate(`/extensions/subagent/${encodeURIComponent(s.name)}`)}
-                  />
-                ))}
-              </Grid>
-            </Section>
+          {builtin.length > 0 && (
+            <SettingsCard title="内置 / 文件">
+              <SettingsRows>{builtin.map(row)}</SettingsRows>
+            </SettingsCard>
           )}
-          {disabled.length > 0 && (
-            <Section title={`已禁用 (${disabled.length})`}>
-              <Grid>
-                {disabled.map((s) => (
-                  <ExtensionCard
-                    key={s.name}
-                    icon={<Bot />}
-                    title={s.name}
-                    subtitle={s.model ?? undefined}
-                    description={s.description}
-                    tags={[{ label: ORIGIN_LABEL[s.origin] }]}
-                    disabled
-                    actionLabel="启用"
-                    onAction={() => toggle(s, true)}
-                    onClick={() => navigate(`/extensions/subagent/${encodeURIComponent(s.name)}`)}
-                  />
-                ))}
-              </Grid>
-            </Section>
+          {custom.length > 0 && (
+            <SettingsCard title="自定义">
+              <SettingsRows>{custom.map(row)}</SettingsRows>
+            </SettingsCard>
           )}
         </>
       )}
-
-      <SubagentFormModal open={createOpen} onClose={() => setCreateOpen(false)} onSaved={onReload} />
     </div>
   );
 }
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div style={sectionHeaderStyle}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Grid({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-        gap: 16,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-const sectionHeaderStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: "var(--gray-700)",
-  marginBottom: 10,
-  letterSpacing: "0.02em",
-};

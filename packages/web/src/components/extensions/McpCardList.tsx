@@ -1,14 +1,8 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Tooltip, Spin, Empty, message as antdMessage } from "antd";
-import {
-  Plug,
-  Plus,
-  RotateCw,
-} from "lucide-react";
+import { Button, Spin, Empty, Switch, Tag, Tooltip, message as antdMessage } from "antd";
+import { Plug, Plus } from "lucide-react";
 import { OctopusClient, type McpServerEntry } from "@octopus/tentacle";
-import { ExtensionCard } from "./ExtensionCard.js";
-import { McpFormModal } from "./McpFormModal.js";
+import { SettingsCard, SettingsRow, SettingsRows, ListToolbar } from "../shared/SettingsCard.js";
 
 const sdk = new OctopusClient();
 
@@ -19,11 +13,6 @@ const TRANSPORT_COLORS: Record<string, string> = {
   "streamable-http": "#1677ff",
 };
 
-const ORIGIN_LABEL: Record<McpServerEntry["origin"], string> = {
-  file: "文件",
-  "user-defined": "自定义",
-};
-
 interface McpCardListProps {
   servers: McpServerEntry[];
   loading: boolean;
@@ -32,20 +21,20 @@ interface McpCardListProps {
 }
 
 /**
- * MCP tab: a card grid split into "已启用" and "已禁用". Disabled cards show
- * an inline "启用" action; enabled cards navigate to detail on click.
+ * MCP tab: settings-style grouped row lists split into "内置 / 文件"
+ * (read-only) and "自定义" (user-defined). Each row has an inline enable
+ * Switch and navigates to detail on click.
  */
 export function McpCardList({ servers, loading, search, onReload }: McpCardListProps) {
   const navigate = useNavigate();
-  const [createOpen, setCreateOpen] = useState(false);
 
   const q = search.trim().toLowerCase();
   const filtered = servers.filter(
     (s) => !q || s.name.toLowerCase().includes(q) || s.transport.toLowerCase().includes(q),
   );
 
-  const enabled = filtered.filter((s) => s.enabled);
-  const disabled = filtered.filter((s) => !s.enabled);
+  const builtin = filtered.filter((s) => s.origin !== "user-defined");
+  const custom = filtered.filter((s) => s.origin === "user-defined");
 
   const toggle = async (s: McpServerEntry, value: boolean) => {
     try {
@@ -57,29 +46,60 @@ export function McpCardList({ servers, loading, search, onReload }: McpCardListP
     }
   };
 
+  const row = (s: McpServerEntry) => (
+    <SettingsRow
+      key={s.name}
+      icon={<Plug />}
+      title={s.name}
+      description={describe(s)}
+      meta={
+        <>
+          <Tag
+            style={{
+              margin: 0,
+              borderRadius: 999,
+              fontSize: 11,
+              padding: "0 8px",
+              lineHeight: "20px",
+              ...(TRANSPORT_COLORS[s.transport]
+                ? { color: TRANSPORT_COLORS[s.transport], borderColor: TRANSPORT_COLORS[s.transport], background: "transparent" }
+                : {}),
+            }}
+          >
+            {s.transport}
+          </Tag>
+          {s.status && s.status !== "ok" && (
+            <Tag color="error" style={{ margin: 0, borderRadius: 999, fontSize: 11, padding: "0 8px", lineHeight: "20px" }}>
+              连接异常
+            </Tag>
+          )}
+        </>
+      }
+      onClick={() => navigate(`/extensions/mcp/${encodeURIComponent(s.name)}`)}
+    >
+      <Switch
+        size="small"
+        checked={s.enabled}
+        onClick={(_, e) => e.stopPropagation()}
+        onChange={(v) => toggle(s, v)}
+      />
+    </SettingsRow>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
-        <Tooltip title="刷新">
+      <ListToolbar loading={loading} onReload={onReload}>
+        <Tooltip title="添加 MCP">
           <Button
             type="text"
             size="small"
-            icon={<RotateCw className={loading ? "lucide-spin" : undefined} />}
-            onClick={onReload}
+            icon={<Plus />}
+            onClick={() => navigate("/extensions/mcp/new")}
             style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
           />
         </Tooltip>
-        <Button
-          type="primary"
-          size="small"
-          icon={<Plus />}
-          onClick={() => setCreateOpen(true)}
-          style={{ borderRadius: 6 }}
-        >
-          添加 MCP
-        </Button>
-      </div>
+      </ListToolbar>
 
       {loading ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
@@ -89,52 +109,18 @@ export function McpCardList({ servers, loading, search, onReload }: McpCardListP
         <Empty description={q ? "无匹配 MCP" : "暂无 MCP"} style={{ marginTop: 60 }} />
       ) : (
         <>
-          {enabled.length > 0 && (
-            <Section title={`已启用 (${enabled.length})`}>
-              <Grid>
-                {enabled.map((s) => (
-                  <ExtensionCard
-                    key={s.name}
-                    icon={<Plug />}
-                    title={s.name}
-                    subtitle={s.transport}
-                    description={describe(s)}
-                    tags={[
-                      { label: s.transport, color: TRANSPORT_COLORS[s.transport] },
-                      ...(s.origin === "file" ? [{ label: ORIGIN_LABEL[s.origin] }] : []),
-                    ]}
-                    statusLabel={statusLabel(s)}
-                    statusLevel={statusLevel(s)}
-                    onClick={() => navigate(`/extensions/mcp/${encodeURIComponent(s.name)}`)}
-                  />
-                ))}
-              </Grid>
-            </Section>
+          {builtin.length > 0 && (
+            <SettingsCard title="内置 / 文件">
+              <SettingsRows>{builtin.map(row)}</SettingsRows>
+            </SettingsCard>
           )}
-          {disabled.length > 0 && (
-            <Section title={`已禁用 (${disabled.length})`}>
-              <Grid>
-                {disabled.map((s) => (
-                  <ExtensionCard
-                    key={s.name}
-                    icon={<Plug />}
-                    title={s.name}
-                    subtitle={s.transport}
-                    description={describe(s)}
-                    tags={[{ label: s.transport, color: TRANSPORT_COLORS[s.transport] }]}
-                    disabled
-                    actionLabel="启用"
-                    onAction={() => toggle(s, true)}
-                    onClick={() => navigate(`/extensions/mcp/${encodeURIComponent(s.name)}`)}
-                  />
-                ))}
-              </Grid>
-            </Section>
+          {custom.length > 0 && (
+            <SettingsCard title="自定义">
+              <SettingsRows>{custom.map(row)}</SettingsRows>
+            </SettingsCard>
           )}
         </>
       )}
-
-      <McpFormModal open={createOpen} onClose={() => setCreateOpen(false)} onSaved={onReload} />
     </div>
   );
 }
@@ -148,46 +134,3 @@ function describe(s: McpServerEntry): string {
   }
   return (cfg.url as string) ?? "";
 }
-
-function statusLabel(s: McpServerEntry): string {
-  if (s.status === "ok") return "已连接";
-  if (s.status && s.status !== "ok") return "连接异常";
-  return "已启用";
-}
-
-function statusLevel(s: McpServerEntry): "success" | "warning" | "error" | "info" {
-  if (s.status === "ok") return "success";
-  if (s.status && s.status !== "ok") return "error";
-  return "success";
-}
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div style={sectionHeaderStyle}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Grid({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-        gap: 16,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-const sectionHeaderStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: "var(--gray-700)",
-  marginBottom: 10,
-  letterSpacing: "0.02em",
-};

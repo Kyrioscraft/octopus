@@ -1,24 +1,11 @@
-import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Button, Tooltip, Spin, Empty, Upload, message as antdMessage } from "antd";
+import { Button, Spin, Empty, Upload, Tooltip, message as antdMessage } from "antd";
 import type { UploadProps } from "antd";
-import {
-  BookOpen,
-  Plus,
-  RotateCw,
-  Upload as UploadIcon,
-} from "lucide-react";
+import { BookOpen, Plus, Upload as UploadIcon } from "lucide-react";
 import { OctopusClient, type SkillEntry, type BuiltinSkillSpec } from "@octopus/tentacle";
-import { ExtensionCard } from "./ExtensionCard.js";
-import { SkillFormModal } from "./SkillFormModal.js";
+import { SettingsCard, SettingsRow, SettingsRows, ListToolbar } from "../shared/SettingsCard.js";
 
 const sdk = new OctopusClient();
-
-const ORIGIN_LABEL: Record<SkillEntry["origin"], string> = {
-  builtin: "内置",
-  file: "文件",
-  "user-defined": "自定义",
-};
 
 interface SkillCardListProps {
   skills: SkillEntry[];
@@ -30,9 +17,9 @@ interface SkillCardListProps {
 }
 
 /**
- * Skills tab: a card grid split into "已添加", "内置/文件 (read-only)", and
- * "可安装" sections. Supports create, upload (.zip/.md), and one-click
- * install of builtin skills.
+ * Skills tab: settings-style grouped row lists split into "已添加",
+ * "内置 / 文件 (read-only)", and "可安装". Supports create, upload
+ * (.zip/.md), and one-click install of builtin skills.
  */
 export function SkillCardList({
   skills,
@@ -42,8 +29,6 @@ export function SkillCardList({
   onReload,
 }: SkillCardListProps) {
   const navigate = useNavigate();
-  const [createOpen, setCreateOpen] = useState(false);
-  const [importing, setImporting] = useState(false);
 
   const q = search.trim().toLowerCase();
   const filtered = skills.filter(
@@ -80,7 +65,6 @@ export function SkillCardList({
     },
     customRequest: async (options) => {
       const { file, onSuccess, onError } = options;
-      setImporting(true);
       try {
         await sdk.importSkill(file as File);
         antdMessage.success("导入完成");
@@ -89,45 +73,34 @@ export function SkillCardList({
       } catch (err: any) {
         antdMessage.error(err?.message ?? "导入失败");
         onError?.(err as Error);
-      } finally {
-        setImporting(false);
       }
     },
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
-        <Tooltip title="刷新">
+      <ListToolbar loading={loading} onReload={onReload}>
+        <Tooltip title="创建 Skill">
           <Button
             type="text"
             size="small"
-            icon={<RotateCw className={loading ? "lucide-spin" : undefined} />}
-            onClick={onReload}
+            icon={<Plus />}
+            onClick={() => navigate("/extensions/skill/new")}
             style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
           />
         </Tooltip>
-        <Upload {...uploadProps}>
-          <Button
-            size="small"
-            icon={<UploadIcon />}
-            loading={importing}
-            style={{ borderRadius: 6 }}
-          >
-            上传 Skill
-          </Button>
-        </Upload>
-        <Button
-          type="primary"
-          size="small"
-          icon={<Plus />}
-          onClick={() => setCreateOpen(true)}
-          style={{ borderRadius: 6 }}
-        >
-          创建 Skill
-        </Button>
-      </div>
+        <Tooltip title="上传 Skill">
+          <Upload {...uploadProps}>
+            <Button
+              type="text"
+              size="small"
+              icon={<UploadIcon />}
+              style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
+            />
+          </Upload>
+        </Tooltip>
+      </ListToolbar>
 
       {loading ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
@@ -138,97 +111,55 @@ export function SkillCardList({
       ) : (
         <>
           {owned.length > 0 && (
-            <Section title={`已添加 (${owned.length})`}>
-              <Grid>
+            <SettingsCard title="已添加">
+              <SettingsRows>
                 {owned.map((s) => (
-                  <ExtensionCard
+                  <SettingsRow
                     key={s.name}
                     icon={<BookOpen />}
                     title={s.name}
-                    subtitle={s.path}
                     description={s.description}
-                    tags={[{ label: ORIGIN_LABEL[s.origin] }]}
-                    statusLabel="已启用"
-                    statusLevel="success"
                     onClick={() => navigate(`/extensions/skill/${encodeURIComponent(s.name)}`)}
                   />
                 ))}
-              </Grid>
-            </Section>
+              </SettingsRows>
+            </SettingsCard>
           )}
           {catalog.length > 0 && (
-            <Section title={`内置 / 文件 (${catalog.length})`}>
-              <Grid>
+            <SettingsCard title="内置 / 文件">
+              <SettingsRows>
                 {catalog.map((s) => (
-                  <ExtensionCard
+                  <SettingsRow
                     key={s.name}
                     icon={<BookOpen />}
                     title={s.name}
-                    subtitle={s.path}
                     description={s.description}
-                    tags={[{ label: ORIGIN_LABEL[s.origin] }]}
-                    statusLabel="只读"
-                    statusLevel="info"
-                    disabled
                     onClick={() => navigate(`/extensions/skill/${encodeURIComponent(s.name)}`)}
                   />
                 ))}
-              </Grid>
-            </Section>
+              </SettingsRows>
+            </SettingsCard>
           )}
           {filteredBuiltin.length > 0 && (
-            <Section title={`可安装 (${filteredBuiltin.length})`}>
-              <Grid>
+            <SettingsCard title="可安装">
+              <SettingsRows>
                 {filteredBuiltin.map((b) => (
-                  <ExtensionCard
+                  <SettingsRow
                     key={b.slug}
                     icon={<BookOpen />}
                     title={b.name}
                     description={b.description}
-                    tags={[{ label: "内置" }]}
-                    disabled
-                    actionLabel="安装"
-                    onAction={() => installBuiltin(b.slug)}
-                  />
+                  >
+                    <Button size="small" onClick={() => installBuiltin(b.slug)} style={{ borderRadius: 6 }}>
+                      安装
+                    </Button>
+                  </SettingsRow>
                 ))}
-              </Grid>
-            </Section>
+              </SettingsRows>
+            </SettingsCard>
           )}
         </>
       )}
-
-      <SkillFormModal open={createOpen} onClose={() => setCreateOpen(false)} onSaved={onReload} />
     </div>
   );
 }
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div style={sectionHeaderStyle}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Grid({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-        gap: 16,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-const sectionHeaderStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: "var(--gray-700)",
-  marginBottom: 10,
-  letterSpacing: "0.02em",
-};

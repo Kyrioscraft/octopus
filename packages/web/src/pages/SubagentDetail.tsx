@@ -1,14 +1,15 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { Button, Tooltip, Switch, Spin, Modal, Tag, message as antdMessage } from "antd";
+import { Button, Tooltip, Switch, Spin, Modal, Tag, Select, message as antdMessage } from "antd";
 import {
   ArrowLeft,
   Bot,
   Pencil,
   Trash2,
+  Cpu,
 } from "lucide-react";
 import { OctopusClient, type SubagentEntry } from "@octopus/tentacle";
-import { SubagentFormModal } from "../components/extensions/SubagentFormModal.js";
+import { SettingsCard, InfoRow } from "../components/shared/SettingsCard.js";
 
 const sdk = new OctopusClient();
 
@@ -30,7 +31,6 @@ export function SubagentDetailPage() {
   const [subagent, setSubagent] = useState<SubagentEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [toggling, setToggling] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!name) return;
@@ -47,6 +47,60 @@ export function SubagentDetailPage() {
   useEffect(() => { load(); }, [load]);
 
   const editable = subagent?.editable ?? false;
+  const isBuiltin = subagent?.origin === "builtin";
+
+  // Built-in model override modal state.
+  const [modelModalOpen, setModelModalOpen] = useState(false);
+  const [modelInput, setModelInput] = useState<string | null>(null);
+  const [savingModel, setSavingModel] = useState(false);
+  // Grouped model options (same shape/format as the chat input's model Select).
+  const [modelOptions, setModelOptions] = useState<
+    Array<{ label: string; options: Array<{ label: string; value: string }> }>
+  >([]);
+
+  useEffect(() => {
+    // Lazy-load once, when the page mounts (same source as the chat input).
+    sdk
+      .listModelSettings()
+      .then((res) => {
+        setModelOptions(
+          res.providers
+            .filter((p) => p.enabled && p.models.length > 0)
+            .map((p) => ({
+              label: p.displayName || p.name,
+              options: p.models.map((m: string) => ({
+                label: `${p.name}:${m}`,
+                value: `${p.name}:${m}`,
+              })),
+            })),
+        );
+      })
+      .catch(() => {
+        // Non-fatal — the modal falls back to "默认模型" only.
+      });
+  }, []);
+
+  const openModelModal = () => {
+    setModelInput(subagent?.model ?? null);
+    setModelModalOpen(true);
+  };
+
+  const saveModel = async () => {
+    if (!name) return;
+    setSavingModel(true);
+    try {
+      // null clears the override → back to the default model.
+      const model = modelInput?.trim() ? modelInput.trim() : null;
+      const updated = await sdk.updateSubagent(name, { model });
+      setSubagent(updated);
+      antdMessage.success(model ? "模型已更新" : "已恢复默认模型");
+      setModelModalOpen(false);
+    } catch (err: any) {
+      antdMessage.error(err?.message ?? "操作失败");
+    } finally {
+      setSavingModel(false);
+    }
+  };
 
   const toggle = async (enabled: boolean) => {
     if (!name) return;
@@ -109,7 +163,8 @@ export function SubagentDetailPage() {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          {/* Only user-defined subagents can be toggled; builtin/file are read-only. */}
+          {/* Only user-defined subagents can be toggled; builtin are always
+              enabled (no switch), file sources are read-only. */}
           {editable && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--gray-700)" }}>
               启用
@@ -121,6 +176,17 @@ export function SubagentDetailPage() {
               />
             </div>
           )}
+          {isBuiltin && (
+            <Tooltip title="修改模型">
+              <Button
+                type="text"
+                size="small"
+                icon={<Cpu />}
+                onClick={openModelModal}
+                style={iconBtnStyle}
+              />
+            </Tooltip>
+          )}
           {editable && (
             <>
               <Tooltip title="编辑">
@@ -128,7 +194,7 @@ export function SubagentDetailPage() {
                   type="text"
                   size="small"
                   icon={<Pencil />}
-                  onClick={() => setEditOpen(true)}
+                  onClick={() => navigate(`/extensions/subagent/${encodeURIComponent(name!)}/edit`)}
                   style={iconBtnStyle}
                 />
               </Tooltip>
@@ -154,47 +220,56 @@ export function SubagentDetailPage() {
             <Spin />
           </div>
         ) : subagent ? (
-          <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px", display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px", display: "flex", flexDirection: "column", gap: 20 }}>
             {/* System prompt */}
-            <div style={panelStyle}>
-              <div style={panelHeaderStyle}>系统提示词</div>
+            <SettingsCard title="系统提示词">
               <pre style={codeBlockStyle}>
                 {subagent.systemPrompt || "（无）"}
               </pre>
-            </div>
+            </SettingsCard>
 
             {/* Description */}
             {subagent.description && (
-              <div style={descStyle}>{subagent.description}</div>
+              <SettingsCard title="描述">
+                <div style={{ fontSize: 14, color: "var(--gray-700)", lineHeight: 1.6 }}>
+                  {subagent.description}
+                </div>
+              </SettingsCard>
             )}
 
-            {/* Model override */}
-            {subagent.model && (
-              <DetailRow label="模型覆盖" value={subagent.model} mono />
-            )}
+            {/* Model override + tools */}
+            <SettingsCard title="模型">
+              <InfoRow
+                label="model"
+                value={subagent.model ?? "默认模型"}
+                mono
+                action={
+                  isBuiltin ? (
+                    <Button type="link" size="small" onClick={openModelModal}>
+                      修改
+                    </Button>
+                  ) : undefined
+                }
+              />
+            </SettingsCard>
 
-            {/* Tools */}
             {subagent.tools.length > 0 && (
-              <div style={panelStyle}>
-                <div style={panelHeaderStyle}>工具 ({subagent.tools.length})</div>
-                <div style={{ padding: 14, display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <SettingsCard title={`工具 (${subagent.tools.length})`}>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {subagent.tools.map((t) => (
                     <Tag key={t} style={{ margin: 0, borderRadius: 4, fontFamily: "'SFMono-Regular', Consolas, Menlo, monospace" }}>
                       {t}
                     </Tag>
                   ))}
                 </div>
-              </div>
+              </SettingsCard>
             )}
 
             {/* Meta */}
-            <div style={panelStyle}>
-              <div style={panelHeaderStyle}>元信息</div>
-              <div style={{ padding: "4px 0" }}>
-                <DetailRow label="类型" value={ORIGIN_LABEL[subagent.origin]} />
-                <DetailRow label="来源" value={subagent.source ?? "—"} />
-              </div>
-            </div>
+            <SettingsCard title="元信息">
+              <InfoRow label="类型" value={ORIGIN_LABEL[subagent.origin]} />
+              <InfoRow label="来源" value={subagent.source ?? "—"} />
+            </SettingsCard>
           </div>
         ) : (
           <div style={{ padding: 80, textAlign: "center", color: "var(--gray-500)" }}>
@@ -203,42 +278,29 @@ export function SubagentDetailPage() {
         )}
       </div>
 
-      {subagent && (
-        <SubagentFormModal
-          open={editOpen}
-          initial={subagent}
-          onClose={() => setEditOpen(false)}
-          onSaved={load}
-        />
-      )}
-    </div>
-  );
-}
-
-function DetailRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: 16,
-        padding: "10px 16px",
-      }}
-    >
-      <div style={{ width: 100, flexShrink: 0, fontSize: 13, color: "var(--gray-500)" }}>
-        {label}
-      </div>
-      <div
-        style={{
-          flex: 1,
-          fontSize: 13,
-          color: "var(--gray-900)",
-          whiteSpace: mono ? "pre-wrap" : "normal",
-          wordBreak: "break-all",
-          fontFamily: mono ? "'SFMono-Regular', Consolas, Menlo, monospace" : "inherit",
-        }}
+      {/* Built-in model override modal */}
+      <Modal
+        title="修改模型"
+        open={modelModalOpen}
+        onOk={saveModel}
+        onCancel={() => setModelModalOpen(false)}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={savingModel}
+        destroyOnClose
       >
-        {value}
-      </div>
+        <Select
+          style={{ width: "100%" }}
+          placeholder="选择模型"
+          value={modelInput ?? "__default__"}
+          onChange={(v) => setModelInput(v === "__default__" ? null : v)}
+          popupMatchSelectWidth={false}
+          options={[
+            { label: "默认模型", value: "__default__" },
+            ...modelOptions,
+          ]}
+        />
+      </Modal>
     </div>
   );
 }
@@ -287,32 +349,6 @@ const iconBtnStyle: React.CSSProperties = {
   height: 28,
   borderRadius: 6,
   color: "var(--gray-600)",
-};
-
-const descStyle: React.CSSProperties = {
-  fontSize: 14,
-  color: "var(--gray-700)",
-  lineHeight: 1.6,
-  padding: "12px 16px",
-  background: "var(--gray-0)",
-  borderRadius: 10,
-  border: "1px solid var(--gray-150)",
-};
-
-const panelStyle: React.CSSProperties = {
-  background: "var(--gray-0)",
-  borderRadius: 10,
-  border: "1px solid var(--gray-150)",
-  overflow: "hidden",
-};
-
-const panelHeaderStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: "var(--gray-700)",
-  padding: "12px 16px",
-  borderBottom: "1px solid var(--gray-100)",
-  background: "var(--gray-25)",
 };
 
 const codeBlockStyle: React.CSSProperties = {

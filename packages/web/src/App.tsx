@@ -8,6 +8,12 @@ import { SettingsPage } from "./pages/Settings.js";
 import { SkillDetailPage } from "./pages/SkillDetail.js";
 import { McpDetailPage } from "./pages/McpDetail.js";
 import { SubagentDetailPage } from "./pages/SubagentDetail.js";
+import {
+  McpFormPage,
+  SkillFormPage,
+  SubagentFormPage,
+  SlashCommandFormPage,
+} from "./pages/ExtensionForms.js";
 import { useThemeStore } from "./stores/theme.js";
 
 export function App() {
@@ -57,6 +63,17 @@ export function App() {
             <Route path="/extensions/mcp" element={<ExtensionsPage tab="mcp" />} />
             <Route path="/extensions/subagents" element={<ExtensionsPage tab="subagents" />} />
             <Route path="/extensions/commands" element={<ExtensionsPage tab="commands" />} />
+            {/* Extension create/edit forms (settings-style pages). "new" must
+                come before the ":name" detail routes to avoid the literal
+                "new" being captured as a name. */}
+            <Route path="/extensions/skill/new" element={<SkillFormPage />} />
+            <Route path="/extensions/skill/:name/edit" element={<SkillFormPage />} />
+            <Route path="/extensions/mcp/new" element={<McpFormPage />} />
+            <Route path="/extensions/mcp/:name/edit" element={<McpFormPage />} />
+            <Route path="/extensions/subagent/new" element={<SubagentFormPage />} />
+            <Route path="/extensions/subagent/:name/edit" element={<SubagentFormPage />} />
+            <Route path="/extensions/command/new" element={<SlashCommandFormPage />} />
+            <Route path="/extensions/command/:id/edit" element={<SlashCommandFormPage />} />
             <Route path="/extensions/skill/:name" element={<SkillDetailPage />} />
             <Route path="/extensions/mcp/:name" element={<McpDetailPage />} />
             <Route path="/extensions/subagent/:name" element={<SubagentDetailPage />} />

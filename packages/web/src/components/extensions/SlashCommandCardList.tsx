@@ -1,22 +1,10 @@
-import { useState } from "react";
-import { Button, Tooltip, Spin, Empty, Popconfirm, message as antdMessage } from "antd";
-import {
-  Terminal,
-  Plus,
-  RotateCw,
-  Pencil,
-  Trash2,
-} from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { Button, Spin, Empty, Popconfirm, Tag, Tooltip, message as antdMessage } from "antd";
+import { Terminal, Pencil, Trash2, Plus } from "lucide-react";
 import { OctopusClient, type SlashCommandEntry } from "@octopus/tentacle";
-import { ExtensionCard } from "./ExtensionCard.js";
-import { SlashCommandFormModal } from "./SlashCommandFormModal.js";
+import { SettingsCard, SettingsRow, SettingsRows, ListToolbar } from "../shared/SettingsCard.js";
 
 const sdk = new OctopusClient();
-
-const ORIGIN_LABEL: Record<string, string> = {
-  builtin: "内置",
-  "user-defined": "自定义",
-};
 
 const ACTION_LABEL: Record<string, string> = {
   insert: "插入",
@@ -36,8 +24,8 @@ interface SlashCommandCardListProps {
 }
 
 /**
- * Slash commands tab: a card grid split into "已添加" (user-defined, editable)
- * and "内置命令" (built-in, read-only) sections.
+ * Slash commands tab: settings-style grouped row lists split into "已添加"
+ * (user-defined, editable) and "内置命令" (built-in, read-only).
  */
 export function SlashCommandCardList({
   commands,
@@ -45,8 +33,7 @@ export function SlashCommandCardList({
   search,
   onReload,
 }: SlashCommandCardListProps) {
-  const [createOpen, setCreateOpen] = useState(false);
-  const [editing, setEditing] = useState<SlashCommandEntry | null>(null);
+  const navigate = useNavigate();
 
   const q = search.trim().toLowerCase();
   const filtered = commands.filter(
@@ -70,65 +57,28 @@ export function SlashCommandCardList({
     }
   };
 
-  const cardActions = (cmd: SlashCommandEntry) => {
-    if (cmd.origin !== "user-defined") return null;
-    return (
-      <div style={{ display: "flex", gap: 4, marginTop: "auto" }}>
-        <Button
-          type="text"
-          size="small"
-          icon={<Pencil />}
-          onClick={(e) => {
-            e.stopPropagation();
-            setEditing(cmd);
-          }}
-          style={{ color: "var(--gray-500)", borderRadius: 6 }}
-        />
-        <Popconfirm
-          title="确定删除此命令？"
-          onConfirm={(e) => {
-            e?.stopPropagation();
-            handleDelete(cmd);
-          }}
-          onCancel={(e) => e?.stopPropagation()}
-          okText="删除"
-          cancelText="取消"
-        >
-          <Button
-            type="text"
-            size="small"
-            icon={<Trash2 />}
-            onClick={(e) => e.stopPropagation()}
-            style={{ color: "var(--gray-500)", borderRadius: 6 }}
-          />
-        </Popconfirm>
-      </div>
-    );
+  const tagStyle: React.CSSProperties = {
+    margin: 0,
+    borderRadius: 999,
+    fontSize: 11,
+    padding: "0 8px",
+    lineHeight: "20px",
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       {/* Toolbar */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
-        <Tooltip title="刷新">
+      <ListToolbar loading={loading} onReload={onReload}>
+        <Tooltip title="创建命令">
           <Button
             type="text"
             size="small"
-            icon={<RotateCw className={loading ? "lucide-spin" : undefined} />}
-            onClick={onReload}
+            icon={<Plus />}
+            onClick={() => navigate("/extensions/command/new")}
             style={{ width: 28, height: 28, borderRadius: 6, color: "var(--gray-600)" }}
           />
         </Tooltip>
-        <Button
-          type="primary"
-          size="small"
-          icon={<Plus />}
-          onClick={() => setCreateOpen(true)}
-          style={{ borderRadius: 6 }}
-        >
-          创建命令
-        </Button>
-      </div>
+      </ListToolbar>
 
       {loading ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
@@ -139,99 +89,78 @@ export function SlashCommandCardList({
       ) : (
         <>
           {owned.length > 0 && (
-            <Section title={`已添加 (${owned.length})`}>
-              <Grid>
+            <SettingsCard title="已添加">
+              <SettingsRows>
                 {owned.map((c) => (
-                  <div key={c.id} style={{ position: "relative" }}>
-                    <ExtensionCard
-                      icon={<Terminal />}
-                      title={c.displayName}
-                      subtitle={`/${c.name}`}
-                      description={c.description}
-                      tags={[
-                        { label: ORIGIN_LABEL[c.origin] ?? c.origin },
-                        { label: actionLabel(c), color: c.action === "send" ? "var(--main-color)" : undefined },
-                      ]}
-                      statusLabel="已启用"
-                      statusLevel="success"
-                      onClick={() => setEditing(c)}
-                    />
-                    {/* Edit/delete buttons overlay */}
-                    <div style={{ position: "absolute", bottom: 6, right: 6 }}>
-                      {cardActions(c)}
-                    </div>
-                  </div>
-                ))}
-              </Grid>
-            </Section>
-          )}
-          {builtins.length > 0 && (
-            <Section title={`内置命令 (${builtins.length})`}>
-              <Grid>
-                {builtins.map((c) => (
-                  <ExtensionCard
+                  <SettingsRow
                     key={c.id}
                     icon={<Terminal />}
                     title={c.displayName}
-                    subtitle={`/${c.name}`}
                     description={c.description}
-                    tags={[
-                      { label: ORIGIN_LABEL[c.origin] ?? c.origin },
-                      { label: actionLabel(c) },
-                    ]}
-                    statusLabel="只读"
-                    statusLevel="info"
-                    disabled
+                    meta={
+                      <Tag
+                        style={{
+                          ...tagStyle,
+                          ...(c.action === "send"
+                            ? { color: "var(--main-color)", borderColor: "var(--main-color)", background: "transparent" }
+                            : {}),
+                        }}
+                      >
+                        {actionLabel(c)}
+                      </Tag>
+                    }
+                    onClick={() => navigate(`/extensions/command/${encodeURIComponent(c.id)}/edit`)}
+                  >
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<Pencil />}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/extensions/command/${encodeURIComponent(c.id)}/edit`);
+                      }}
+                      style={{ color: "var(--gray-500)", borderRadius: 6 }}
+                    />
+                    <Popconfirm
+                      title="确定删除此命令？"
+                      onConfirm={(e) => {
+                        e?.stopPropagation();
+                        handleDelete(c);
+                      }}
+                      onCancel={(e) => e?.stopPropagation()}
+                      okText="删除"
+                      cancelText="取消"
+                    >
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<Trash2 />}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ color: "var(--gray-500)", borderRadius: 6 }}
+                      />
+                    </Popconfirm>
+                  </SettingsRow>
+                ))}
+              </SettingsRows>
+            </SettingsCard>
+          )}
+          {builtins.length > 0 && (
+            <SettingsCard title="内置命令">
+              <SettingsRows>
+                {builtins.map((c) => (
+                  <SettingsRow
+                    key={c.id}
+                    icon={<Terminal />}
+                    title={c.displayName}
+                    description={c.description}
+                    meta={<Tag style={tagStyle}>{actionLabel(c)}</Tag>}
                   />
                 ))}
-              </Grid>
-            </Section>
+              </SettingsRows>
+            </SettingsCard>
           )}
         </>
       )}
-
-      <SlashCommandFormModal
-        open={createOpen}
-        onClose={() => setCreateOpen(false)}
-        onSaved={onReload}
-      />
-      <SlashCommandFormModal
-        open={!!editing}
-        initial={editing}
-        onClose={() => setEditing(null)}
-        onSaved={onReload}
-      />
     </div>
   );
 }
-
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div style={sectionHeaderStyle}>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Grid({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-        gap: 16,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-const sectionHeaderStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: "var(--gray-700)",
-  marginBottom: 10,
-  letterSpacing: "0.02em",
-};

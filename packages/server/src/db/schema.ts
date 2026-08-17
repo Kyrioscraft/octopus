@@ -149,6 +149,26 @@ export const userSubagents = sqliteTable(
 // User-defined slash commands — input shortcuts with prompt templates
 // =============================================================================
 
+// Per-user model overrides for built-in subagents (Explore, general-purpose).
+// Built-ins are not editable/deletable; the UI only allows overriding their
+// model (null = inherit the default model). Stored separately from
+// user_subagents so built-ins stay non-editable.
+export const builtinSubagentOverrides = sqliteTable(
+  "builtin_subagent_overrides",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    // 'provider:model' override. NULL = use the default model.
+    model: text("model"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (t) => ({
+    uniq: uniqueIndex("bso_user_name").on(t.userId, t.name),
+  }),
+);
+
 export const userSlashCommands = sqliteTable(
   "user_slash_commands",
   {

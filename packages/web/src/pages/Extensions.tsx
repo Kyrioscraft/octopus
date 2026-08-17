@@ -113,38 +113,27 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Header: section title + search */}
-      <div
-        style={{
-          height: 45,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "0 20px",
-          borderBottom: "1px solid var(--gray-150)",
-          flexShrink: 0,
-        }}
-      >
-        <span style={{ fontWeight: 600, fontSize: 15, color: "var(--gray-1000)" }}>
-          {TAB_TITLES[tab]}
-        </span>
-        <Input
-          allowClear
-          prefix={<Search style={{ color: "var(--gray-400)" }} />}
-          placeholder={
-            tab === "skills" ? "搜索 Skill..." :
-            tab === "mcp" ? "搜索 MCP..." :
-            tab === "subagents" ? "搜索子智能体..." : "搜索命令..."
-          }
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          style={{ width: 260, borderRadius: 8 }}
-        />
-      </div>
-
-      {/* Scrollable content */}
-      <div style={{ flex: 1, overflow: "auto", padding: 20 }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+      {/* Scrollable content: title + search live inside the content area
+          (no separate top nav bar on sub-feature pages). */}
+      <div style={{ flex: 1, overflow: "auto", padding: "20px 20px 40px" }}>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          {/* Title */}
+          <div style={{ fontWeight: 600, fontSize: 20, color: "var(--gray-1000)", marginBottom: 16 }}>
+            {TAB_TITLES[tab]}
+          </div>
+          {/* Search */}
+          <Input
+            allowClear
+            prefix={<Search style={{ color: "var(--gray-400)" }} />}
+            placeholder={
+              tab === "skills" ? "搜索 Skill..." :
+              tab === "mcp" ? "搜索 MCP..." :
+              tab === "subagents" ? "搜索子智能体..." : "搜索命令..."
+            }
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: "100%", borderRadius: 8, marginBottom: 16, height: 40 }}
+          />
           {tab === "skills" ? (
             <SkillCardList
               skills={skills}

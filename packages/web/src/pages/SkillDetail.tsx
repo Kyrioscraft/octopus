@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { OctopusClient, type SkillDetail } from "@octopus/tentacle";
 import { Markdown } from "../components/widgets/Markdown.js";
-import { SkillFormModal } from "../components/extensions/SkillFormModal.js";
+import { SettingsCard } from "../components/shared/SettingsCard.js";
 
 const sdk = new OctopusClient();
 
@@ -22,7 +22,6 @@ export function SkillDetailPage() {
   const navigate = useNavigate();
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [loading, setLoading] = useState(true);
-  const [editOpen, setEditOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!name) return;
@@ -94,7 +93,7 @@ export function SkillDetailPage() {
                   type="text"
                   size="small"
                   icon={<Pencil />}
-                  onClick={() => setEditOpen(true)}
+                  onClick={() => navigate(`/extensions/skill/${encodeURIComponent(name!)}/edit`)}
                   style={iconBtnStyle}
                 />
               </Tooltip>
@@ -120,16 +119,19 @@ export function SkillDetailPage() {
             <Spin />
           </div>
         ) : detail ? (
-          <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px" }}>
+          <div style={{ maxWidth: 900, margin: "0 auto", padding: "24px 20px", display: "flex", flexDirection: "column", gap: 20 }}>
             {detail.description && (
-              <div style={descStyle}>{detail.description}</div>
+              <SettingsCard title="描述">
+                <div style={{ fontSize: 14, color: "var(--gray-700)", lineHeight: 1.6 }}>
+                  {detail.description}
+                </div>
+              </SettingsCard>
             )}
-            <div style={panelStyle}>
-              <div style={panelHeaderStyle}>SKILL.md</div>
+            <SettingsCard title="SKILL.md">
               <div style={{ padding: "0 4px" }}>
                 <Markdown content={detail.content || "（无内容）"} />
               </div>
-            </div>
+            </SettingsCard>
           </div>
         ) : (
           <div style={{ padding: 80, textAlign: "center", color: "var(--gray-500)" }}>
@@ -137,15 +139,6 @@ export function SkillDetailPage() {
           </div>
         )}
       </div>
-
-      {detail && (
-        <SkillFormModal
-          open={editOpen}
-          initial={{ name: name!, description: detail.description, origin: detail.origin, editable: detail.editable }}
-          onClose={() => setEditOpen(false)}
-          onSaved={load}
-        />
-      )}
     </div>
   );
 }
@@ -194,32 +187,4 @@ const iconBtnStyle: React.CSSProperties = {
   height: 28,
   borderRadius: 6,
   color: "var(--gray-600)",
-};
-
-const descStyle: React.CSSProperties = {
-  fontSize: 14,
-  color: "var(--gray-700)",
-  lineHeight: 1.6,
-  marginBottom: 16,
-  padding: "12px 16px",
-  background: "var(--gray-0)",
-  borderRadius: 10,
-  border: "1px solid var(--gray-150)",
-};
-
-const panelStyle: React.CSSProperties = {
-  background: "var(--gray-0)",
-  borderRadius: 10,
-  border: "1px solid var(--gray-150)",
-  overflow: "hidden",
-};
-
-const panelHeaderStyle: React.CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
-  color: "var(--gray-700)",
-  padding: "12px 16px",
-  borderBottom: "1px solid var(--gray-100)",
-  background: "var(--gray-25)",
-  fontFamily: "'SFMono-Regular', Consolas, Menlo, monospace",
 };
