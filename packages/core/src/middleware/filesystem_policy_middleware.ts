@@ -2,25 +2,25 @@
  * Filesystem policy middleware.
  *
  * The deepagents SDK's `FilesystemMiddleware` appends its own
- * `FILESYSTEM_SYSTEM_PROMPT` and tool descriptions to every model call,
- * *after* Octopus's system prompt. Two of those injected texts directly
- * contradict Octopus's guidance:
+ * `FILESYSTEM_SYSTEM_PROMPT` and injects 6 filesystem tools (`ls`, `read_file`,
+ * `write_file`, `edit_file`, `glob`, `grep`) on every model call. Combined with
+ * Octopus's ripgrep `grep_search` extension, this creates 4+ overlapping search
+ * tools — the model defaults to the most familiar (`ls`) and never delegates.
  *
- * - `LS_TOOL_DESCRIPTION` says "almost ALWAYS use this tool before
- *   read_file" — conflicts with Octopus's "prefer grep/glob, ls at most once".
- * - `FILESYSTEM_SYSTEM_PROMPT` lists the FS tools with naive descriptions.
+ * This middleware (runs after the SDK's FS middleware — confirmed in SDK source
+ * line ~5832) does three things to enforce ZCode's lean single-search-tool
+ * architecture (where ALL search goes through Bash/execute):
  *
- * Because the SDK's text appears last in the system message (recency bias),
- * the model follows it — causing repeated `ls` calls during exploration.
- *
- * `createDeepAgent` does not expose `customToolDescriptions` / filesystem
- * options, so we cannot suppress the injection at the source. Instead, this
- * middleware runs *after* the FS middleware (SDK places `customMiddleware`
- * after `fsMiddleware` in the chain — confirmed in SDK source line ~5832)
- * and rewrites the conflicting content right before it reaches the model.
- *
- * Mechanism mirrors what the FS middleware itself does
- * (`request.tools` read-filter-replace, `systemMessage.concat`).
+ * 1. **Removes `ls`/`glob`/`grep`/`grep_search`** from the toolset. Search is
+ *    unified through `execute` (Bash: `rg`/`find`/`dir`). The model knows
+ *    `rg`/`grep` from training data — no dedicated tool needed.
+ * 2. **Rewrites `read_file`/`execute` descriptions** so the surviving tools
+ *    carry the right guidance (e.g. `execute`'s SDK description says "avoid
+ *    find/grep" — directly contradicting the unified-search model).
+ * 3. **Strips SDK-injected prompts** (`BASE_AGENT_PROMPT`,
+ *    `FILESYSTEM_SYSTEM_PROMPT`) from the system message. The SDK has no option
+ *    to suppress these; they bloat the system message with duplicate sections
+ *    and reference tools we just removed.
  */
 
 import { getLogger } from "../logging.js";
@@ -32,40 +32,52 @@ import {
 const logger = getLogger("middleware.filesystem_policy");
 
 // =============================================================================
-// Tool description overrides — aligned with prompts.ts "prefer grep/glob".
+// Tool description overrides.
+//
+// The SDK's ls/glob/grep tools are REMOVED from the toolset at runtime (see
+// SDK_SEARCH_TOOLS below) to avoid overlap with `execute` — matching ZCode's
+// single-search-entry architecture (all search via Bash). So we only need
+// description overrides for tools that SURVIVE: read_file and execute.
 // =============================================================================
 
 const TOOL_DESCRIPTION_OVERRIDES: Record<string, string> = {
-  ls:
-    "List files in a directory. Use SPARINGLY: prefer `grep_search`/`glob` " +
-    "for codebase exploration. At most once at the very start to get a rough " +
-    "layout; never use it to explore level-by-level. For BROAD exploration " +
-    "(understanding a codebase, multi-file research), delegate to the Explore " +
-    "subagent via the `task` tool instead of calling this yourself. " +
-    "Requires an absolute path.",
   read_file:
-    "Read a file from the filesystem. Prefer `grep_search` to locate symbols " +
-    "first (it returns matches with context), then read targeted sections " +
-    "with `offset`/`limit` for files >500 lines. Avoid reading entire large " +
-    "files when you only need a specific section.",
-  glob:
-    "Find files matching a pattern (e.g. \"**/*.py\"). Preferred over `ls` " +
-    "for any pattern-based or recursive lookup — one `glob` with a `**` " +
-    "pattern replaces multiple `ls` calls. For BROAD multi-area codebase " +
-    "exploration, delegate to the Explore subagent via `task` instead of " +
-    "chaining multiple glob calls yourself.",
-  grep:
-    "Raw literal-only search (SDK; no regex, no context). Prefer the " +
-    "`grep_search` tool, which supports full regex AND returns matching " +
-    "lines with line numbers + context in one call — usually no follow-up " +
-    "read_file needed. Use this only when `grep_search` is unavailable.",
-  grep_search:
-    "基于 ripgrep 的内容搜索（首选搜索工具）。一次调用返回匹配行+行号+上下文，" +
-    "支持完整正则，通常无需再调 read_file。用 include/exclude 限定文件类型；" +
-    "用 context 读取匹配处周围代码。对于跨多区域的大型代码库调研（如\"X 是怎么" +
-    "实现的\"\"找到所有相关文件\"），应委派给 Explore 子智能体（task 工具）并行" +
-    "搜索，而不是自己串行调用本工具多次。",
+    "Read a file from the filesystem. Use offset/limit for files >500 lines.",
+  execute:
+    "Executes a bash command and returns its output. Use this for codebase " +
+    "search (rg for content search, find/dir for file lookup), running tests, " +
+    "builds, git operations, and any shell task.\n" +
+    "- For codebase content search: `rg PATTERN` with -n (line numbers), " +
+    "-C (context), -i (case-insensitive), --glob (file filter). Example: " +
+    "`rg -n -C 3 \"function\\s+\\w+\" --glob \"*.ts\"`\n" +
+    "- For finding files: `find . -name \"*.py\"` or `dir /s /b *.py` on Windows\n" +
+    "- Prefer absolute paths; shell state (env vars, functions) does not persist.\n" +
+    "- For reading files, prefer `read_file` over cat/head/tail. For editing, " +
+    "prefer `edit_file` over sed/awk. For writing new files, prefer " +
+    "`write_file` over echo/heredoc.\n" +
+    "- timeout is in milliseconds (default 120000, max 600000).",
 };
+
+/**
+ * SDK-injected search tools that are REMOVED from the toolset to enforce a
+ * single search architecture (matching ZCode, where ALL search goes through
+ * Bash/execute):
+ *   - `ls`          → superseded by `execute` (run `ls`/`find`/`dir` via Bash)
+ *   - `glob`        → superseded by `execute` (`find`/`dir` via Bash)
+ *   - `grep`        → superseded by `execute` (`rg`/`grep` via Bash)
+ *   - `grep_search` → superseded by `execute` (`rg` via Bash)
+ *
+ * ZCode has NO dedicated search tool — all codebase search is done via the
+ * Bash tool running `rg`/`find`/`grep`. This eliminates tool overlap and
+ * forces the model to use `execute` (which it knows well from training data)
+ * or delegate to Explore subagents, rather than defaulting to the most
+ * familiar SDK tool (`ls`).
+ *
+ * NOTE: `grep_search` is still injected by the server (ripgrep extension) and
+ * is available to the Explore SUBAGENT (which has its own isolated toolset via
+ * READONLY_TOOL_NAMES). Only the MAIN agent's toolset has it filtered out.
+ */
+const SDK_SEARCH_TOOLS = new Set(["ls", "glob", "grep", "grep_search"]);
 
 // =============================================================================
 // FILESYSTEM_SYSTEM_PROMPT stripping.
@@ -116,6 +128,39 @@ function stripFilesystemSystemPrompt(content: string): string {
 }
 
 // =============================================================================
+// SDK BASE_AGENT_PROMPT stripping.
+// =============================================================================
+
+/**
+ * Marker for the SDK's `BASE_AGENT_PROMPT`, which `createDeepAgent`
+ * UNCONDITIONALLY appends to the caller's systemPrompt as a second text block
+ * (langsmith-wdF8zG42.js ~line 5878). This creates duplicate sections —
+ * `## Core Behavior`, `## Doing Tasks`, etc. — that already exist in Octopus's
+ * own prompt, bloating the system message and confusing the model.
+ *
+ * The marker `You are a Deep Agent` is the opening line of BASE_AGENT_PROMPT
+ * and is unique (Octopus's own prompt uses lowercase `deep agent`). It appears
+ * AFTER Octopus's prompt but BEFORE the runtime SDK prompts
+ * (FILESYSTEM_SYSTEM_PROMPT, TASK_SYSTEM_PROMPT), which are stripped by their
+ * own functions.
+ *
+ * All three SDK prompt injections are stripped here in a single pass, leaving
+ * only Octopus's own system prompt + the orchestrator-mindset declaration
+ * appended by SubagentOrchestrationMiddleware.
+ */
+const BASE_AGENT_PROMPT_MARKER = "You are a Deep Agent";
+
+/**
+ * Remove the SDK's BASE_AGENT_PROMPT from a system message content string.
+ * Returns the content unchanged if the marker is not found.
+ */
+function stripBaseAgentPrompt(content: string): string {
+  const idx = content.indexOf(BASE_AGENT_PROMPT_MARKER);
+  if (idx === -1) return content;
+  return content.slice(0, idx).replace(/\s+$/, "");
+}
+
+// =============================================================================
 // Middleware
 // =============================================================================
 
@@ -139,8 +184,21 @@ export class FilesystemPolicyMiddleware {
     },
     handler: (req: any) => any,
   ): any => {
-    // ---- 1. Rewrite tool descriptions ----
+    // ---- 1. Remove SDK search tools (ls/glob/grep/grep_search) — unified
+    //         search via execute (Bash: rg/find/dir). See SDK_SEARCH_TOOLS.
     let tools = request.tools;
+    if (tools && tools.length > 0) {
+      const before = tools.length;
+      tools = tools.filter((t: any) => !SDK_SEARCH_TOOLS.has(t?.name));
+      if (tools.length !== before) {
+        logger.debug(
+          `Removed ${before - tools.length} search tool(s) ` +
+            "(ls/glob/grep/grep_search) — unified search via execute",
+        );
+      }
+    }
+
+    // ---- 2. Rewrite surviving tool descriptions ----
     if (tools) {
       let changed = false;
       for (const t of tools) {
@@ -156,18 +214,27 @@ export class FilesystemPolicyMiddleware {
       }
     }
 
-    // ---- 2. Strip SDK's FILESYSTEM_SYSTEM_PROMPT from system message ----
-    // The SDK's FILESYSTEM_SYSTEM_PROMPT lists only 6 FS tools (ls, read_file,
-    // write_file, edit_file, glob, grep) and omits grep_search entirely. If it
-    // leaks through, the model believes it has no grep_search tool. Stripping
-    // it here is what makes grep_search actually get used.
+    // ---- 3. Strip SDK-injected prompts from system message ----
+    // The SDK appends THREE prompt blocks that bloat/confuse the system message:
+    //   a) BASE_AGENT_PROMPT (build-time) — duplicates Octopus's ## Core Behavior /
+    //      ## Doing Tasks sections (SDK has no option to suppress it).
+    //   b) FILESYSTEM_SYSTEM_PROMPT (runtime, by fsMiddleware) — lists removed
+    //      tools (ls/glob/grep) and omits execute entirely.
+    //   c) EXECUTION_SYSTEM_PROMPT (runtime, by fsMiddleware) — appended right
+    //      after (b), stripped by the same marker cut.
+    // TASK_SYSTEM_PROMPT (runtime, by subagentMiddleware) is stripped separately
+    // by SubagentOrchestrationMiddleware.
     let systemMessage = request.systemMessage;
     const text = readSystemMessageText(systemMessage);
     if (text) {
-      const cleaned = stripFilesystemSystemPrompt(text);
+      let cleaned = stripBaseAgentPrompt(text);
+      cleaned = stripFilesystemSystemPrompt(cleaned);
       if (cleaned !== text) {
         systemMessage = withSystemMessageText(systemMessage, cleaned);
-        logger.debug("Stripped SDK FILESYSTEM_SYSTEM_PROMPT from system message");
+        logger.debug(
+          "Stripped SDK BASE_AGENT_PROMPT + FILESYSTEM_SYSTEM_PROMPT " +
+            `(${text.length} → ${cleaned.length} chars)`,
+        );
       }
     }
 

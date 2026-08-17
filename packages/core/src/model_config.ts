@@ -306,6 +306,8 @@ export interface ProviderOverview {
   apiKeyEnv: string | undefined;
   baseUrl: string | undefined;
   models: string[];
+  /** Whether this provider is in the built-in registry (vs user-defined). */
+  builtIn: boolean;
 }
 
 /**
@@ -322,18 +324,18 @@ export function listProvidersOverview(configPath?: string): ProviderOverview[] {
   // Known-provider universe first (stable ordering by registry key order)
   for (const name of Object.keys(PROVIDER_API_KEY_ENV)) {
     seen.add(name);
-    rows.push(_providerOverviewRow(name, config));
+    rows.push(_providerOverviewRow(name, config, true));
   }
   // Any extra user-defined providers not in the registry
   for (const name of Object.keys(config.providers)) {
     if (!seen.has(name)) {
-      rows.push(_providerOverviewRow(name, config));
+      rows.push(_providerOverviewRow(name, config, false));
     }
   }
   return rows;
 }
 
-function _providerOverviewRow(name: string, config: ModelConfigData): ProviderOverview {
+function _providerOverviewRow(name: string, config: ModelConfigData, builtIn: boolean): ProviderOverview {
   const provider = config.providers[name];
   return {
     name,
@@ -344,6 +346,7 @@ function _providerOverviewRow(name: string, config: ModelConfigData): ProviderOv
     apiKeyEnv: ModelConfig.getApiKeyEnv(name),
     baseUrl: ModelConfig.getBaseUrl(name),
     models: provider?.models ?? [],
+    builtIn,
   };
 }
 

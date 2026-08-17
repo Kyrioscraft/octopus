@@ -76,8 +76,10 @@ export interface BuiltInSubagent {
  * The read-only tool set. Used to enforce Explore's read-only guarantee, and
  * offered as a safe default reference for user-defined subagents.
  *
- * Deliberately excludes all destructive tools (write_file, edit_file, execute,
- * task, compact_conversation, async task tools) — anything in DESTRUCTIVE_TOOLS.
+ * Excludes all destructive tools (write_file, edit_file, task,
+ * compact_conversation, async task tools) — anything in DESTRUCTIVE_TOOLS.
+ * Also excludes `execute` (shell) — subagents are sandboxed for read-only
+ * research and must not run arbitrary commands.
  */
 export const READONLY_TOOL_NAMES = [
   "read_file",

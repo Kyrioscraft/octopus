@@ -46,6 +46,8 @@ export interface ModelProviderEntry {
   apiKeyEnv: string | null;
   baseUrl: string | null;
   models: string[];
+  /** Whether this provider is in the built-in registry (vs user-defined). */
+  builtIn: boolean;
 }
 
 export interface ModelSettingsResponse {
@@ -112,6 +114,7 @@ function overviewToEntry(row: ProviderOverview): ModelProviderEntry {
     apiKeyEnv: row.apiKeyEnv ?? null,
     baseUrl: row.baseUrl ?? null,
     models: row.models,
+    builtIn: row.builtIn,
   };
 }
 

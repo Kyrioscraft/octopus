@@ -33,17 +33,23 @@ import { clearCaches } from "./model_config.js";
 export type AccessMode = "plan" | "confirm" | "auto" | "full";
 
 /**
- * Tool names with side effects — file writes, shell execution, subagent/task
- * delegation, and conversation compaction. In `plan` mode these are stripped
- * from the toolset so the agent can only read/search, not modify anything.
+ * Tool names with side effects — file writes, subagent/task delegation, and
+ * conversation compaction. In `plan` mode these are stripped from the toolset
+ * so the agent can only research/plan, not modify anything.
  *
- * Read-only tools (read_file, ls, glob, grep, web_search, fetch_url) are
- * intentionally excluded — they are safe in every mode.
+ * NOTE: `execute` (shell) is deliberately NOT in this set. Plan mode needs Bash
+ * for codebase search (`rg`/`find`/`ls`), since the dedicated search tools
+ * (`ls`/`glob`/`grep`) are removed by FilesystemPolicyMiddleware to avoid tool
+ * overlap (ZCode-style architecture). Shell file writes are still blocked by
+ * `FileEditGuardMiddleware` in plan/confirm/auto modes (only `full` bypasses),
+ * and `execute` remains HITL-gated via `_addInterruptOn()`.
+ *
+ * Read-only tools (read_file, grep_search, web_search, fetch_url) are safe in
+ * every mode and need no gating.
  */
 export const DESTRUCTIVE_TOOLS = new Set<string>([
   "write_file",
   "edit_file",
-  "execute",
   "task",
   "start_async_task",
   "update_async_task",
@@ -65,15 +71,20 @@ export function interruptOnForMode(
   mode: AccessMode,
 ): Record<string, boolean> | null {
   if (mode === "auto" || mode === "full") {
-    // Suppress every gated tool (destructive + the read-only-but-gated
-    // web_search/fetch_url) so the run is fully autonomous. `auto` and
-    // `full` share the same HITL override; they differ only in that `full`
-    // additionally bypasses FileEditGuard at build time (see agent.ts).
-    const all = [...DESTRUCTIVE_TOOLS, "web_search", "fetch_url"];
+    // Suppress every gated tool (destructive + execute + the
+    // read-only-but-gated web_search/fetch_url) so the run is fully
+    // autonomous. `execute` is no longer in DESTRUCTIVE_TOOLS (it survives
+    // plan mode for search), but it is still HITL-gated in confirm mode via
+    // `_addInterruptOn()`, so it must be listed here to auto-approve in
+    // auto/full. `auto` and `full` share the same HITL override; they differ
+    // only in that `full` additionally bypasses FileEditGuard at build time.
+    const all = [...DESTRUCTIVE_TOOLS, "execute", "web_search", "fetch_url"];
     return Object.fromEntries(all.map((n) => [n, false]));
   }
-  // plan: destructive tools are already absent from the toolset, so there is
-  //   nothing to interrupt — no override needed.
+  // plan: `execute` is now present (needed for search) and HITL-gated by the
+  //   compiled `_addInterruptOn()` default — the user approves each Bash call,
+  //   which is the intended plan-mode safety boundary. write_file/edit_file/
+  //   task are absent from the toolset. No override needed.
   // confirm: the compiled `_addInterruptOn()` already gates every destructive
   //   tool — keep the default.
   return null;

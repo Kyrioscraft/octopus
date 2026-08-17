@@ -33,7 +33,7 @@ import {
 } from "./model_config.js";
 import type { ProviderConfig } from "./model_config.js";
 import { getLogger } from "./logging.js";
-import { getSystemPrompt, buildModelIdentitySection } from "./prompts.js";
+import { getSystemPrompt } from "./prompts.js";
 import { FilesystemEmptyResultMiddleware } from "./middleware/filesystem_empty_result.js";
 import { BinaryContentSanitizerMiddleware } from "./middleware/binary_content_sanitizer.js";
 import { FileEditGuardMiddleware } from "./middleware/file_edit_guard.js";
@@ -45,6 +45,7 @@ import { ConfigurableModelMiddleware } from "./middleware/configurable_model.js"
 import { FilesystemPolicyMiddleware } from "./middleware/filesystem_policy_middleware.js";
 import { ReadBudgetMiddleware } from "./middleware/read_budget_middleware.js";
 import { SubagentOrchestrationMiddleware } from "./middleware/subagent_orchestration_middleware.js";
+import { DynamicContextMiddleware } from "./middleware/dynamic_context_middleware.js";
 import { getBuiltinToolsAsStructuredTools } from "./tools.js";
 import { createAskUserQuestionTool } from "./tools/ask_user_question.js";
 import { listSkills } from "./skills.js";
@@ -499,21 +500,6 @@ async function _makeGraphUncached(
     }
   }
 
-  // ---- 2b. Remove SDK grep — fully superseded by the ripgrep extension's
-  // `grep_search` tool (injected via externalTools below). Keeping both would
-  // let the model pick the weaker literal-only SDK grep. `ls` (directory
-  // metadata) and `read_file` (whole-file / image / pagination reads) are kept
-  // — their responsibilities are not covered by grep_search.
-  if (options?.externalTools?.some((t: any) => t?.name === "grep_search")) {
-    for (let i = tools.length - 1; i >= 0; i--) {
-      if (tools[i]?.name === "grep") {
-        tools.splice(i, 1);
-        logger.debug("Removed SDK grep tool (superseded by ripgrep grep_search)");
-        break;
-      }
-    }
-  }
-
   // ---- 3a. Inject external tools (e.g. ripgrep extension) ----
   // External tools are injected AFTER built-in + MCP tools so they appear
   // alongside them, and BEFORE plan-mode filtering so any destructive
@@ -521,6 +507,13 @@ async function _makeGraphUncached(
   // extensions and constructs the StructuredTool instances; core just merges
   // them here. Tool selection priority is driven by descriptions (the model
   // picks based on guidance), not array index.
+  //
+  // NOTE: The SDK's ls/glob/grep tools are NOT removed here — they are
+  // injected later by `createFilesystemMiddleware` (inside createDeepAgent)
+  // at runtime. They are removed at runtime by `FilesystemPolicyMiddleware`
+  // (see middleware/filesystem_policy_middleware.ts), which runs after the
+  // SDK middleware in the chain. Search is unified through `grep_search`
+  // (ripgrep, injected here) + `execute` (Bash, from the SDK).
   if (options?.externalTools && options.externalTools.length > 0) {
     tools.push(...options.externalTools);
     logger.info(`Injected ${options.externalTools.length} external tool(s): ${options.externalTools.map((t: any) => t?.name ?? "?").join(", ")}`);
@@ -654,6 +647,11 @@ async function _makeGraphUncached(
   // word — recency bias makes the last-appended text the strongest signal.
   // See middleware/subagent_orchestration_middleware.ts for rationale.
   middleware.push(new SubagentOrchestrationMiddleware());
+
+  // DynamicContextMiddleware is pushed later (after `skillSourcePaths` is
+  // populated, ~L790) because it needs the resolved skills paths at construct
+  // time. It is still pushed AFTER SubagentOrchestrationMiddleware, preserving
+  // the intended stack order. See the push site for details.
 
   // Local context middleware (project detection via bash script)
   // Added when the backend supports shell execution (LocalShellBackend)
@@ -790,20 +788,39 @@ async function _makeGraphUncached(
   }
 
   // ---- 8. Generate system prompt ----
+  // The system prompt is now static (behavior conventions only). Dynamic
+  // environment context (cwd, model identity, date, access mode) is injected
+  // per-turn as <system-reminder> blocks by DynamicContextMiddleware.
   let systemPrompt = config.systemPrompt;
   if (!systemPrompt) {
-    const modelIdentitySection = buildModelIdentitySection(
-      modelName,
-      provider,
-      // Context limit and unsupported modalities from model profile (Phase 2)
-    );
     systemPrompt = getSystemPrompt({
       assistantId: config.assistantId ?? "agent",
-      cwd,
       interactive: config.interactive,
-      modelIdentitySection,
     });
   }
+
+  // Dynamic-context middleware — injects <system-reminder> blocks (current
+  // date, working directory, model identity, access mode, skills path, output-
+  // format constraints) into the latest user message. Mirrors ZCode's pattern:
+  // the system message stays static (maximizing prompt-cache hits), while all
+  // per-turn dynamic context rides on the user message. Pushed AFTER
+  // SubagentOrchestrationMiddleware (which only edits systemMessage) so the
+  // reminder is the last thing injected into the user message this turn.
+  // Declared here (not in the main middleware stack block above) because it
+  // needs `skillSourcePaths`, which is populated in the skills-discovery loop.
+  middleware.push(
+    new DynamicContextMiddleware({
+      cwd,
+      modelName,
+      provider,
+      interactive: config.interactive,
+      accessMode: options?.accessMode ?? "confirm",
+      skillsPath:
+        skillSourcePaths.length > 0
+          ? skillSourcePaths.map(([p]) => p).join(", ")
+          : undefined,
+    }),
+  );
 
   // ---- 9. Configure HITL interrupts ----
   let interruptOn: any = {};

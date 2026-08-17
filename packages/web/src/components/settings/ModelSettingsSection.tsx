@@ -44,6 +44,7 @@ export function ModelSettingsSection({ sdk }: Props) {
   // Which modal is open for a given provider, if any.
   const [modelsFor, setModelsFor] = useState<ModelProviderEntry | null>(null);
   const [configFor, setConfigFor] = useState<ModelProviderEntry | null>(null);
+  const [addingProvider, setAddingProvider] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -144,14 +145,23 @@ export function ModelSettingsSection({ sdk }: Props) {
       <Card
         title="模型供应商"
         extra={
-          <Input
-            allowClear
-            prefix={<Search style={{ color: "var(--gray-400)" }} />}
-            placeholder="搜索供应商..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ width: 220, borderRadius: 8 }}
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <Input
+              allowClear
+              prefix={<Search style={{ color: "var(--gray-400)" }} />}
+              placeholder="搜索供应商..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ width: 220, borderRadius: 8 }}
+            />
+            <Button
+              icon={<Plus />}
+              onClick={() => setAddingProvider(true)}
+              style={{ borderRadius: 8 }}
+            >
+              添加供应商
+            </Button>
+          </div>
         }
       >
         {providers.length === 0 ? (
@@ -187,6 +197,16 @@ export function ModelSettingsSection({ sdk }: Props) {
           provider={configFor}
           sdk={sdk}
           onClose={() => setConfigFor(null)}
+          onSaved={load}
+        />
+      )}
+
+      {/* Add new provider modal */}
+      {addingProvider && (
+        <AddProviderModal
+          sdk={sdk}
+          existingNames={data?.providers.map((p) => p.name) ?? []}
+          onClose={() => setAddingProvider(false)}
           onSaved={load}
         />
       )}
@@ -247,6 +267,19 @@ function ProviderRow({
               {provider.name}
             </span>
           )}
+          <Tag
+            style={{
+              marginInlineStart: 8,
+              borderRadius: 4,
+              fontSize: 11,
+              border: "none",
+              ...(provider.builtIn
+                ? { background: "var(--color-info-50)", color: "var(--color-info-700)" }
+                : { background: "var(--color-success-50)", color: "var(--color-success-700)" }),
+            }}
+          >
+            {provider.builtIn ? "内置" : "自定义"}
+          </Tag>
           <span style={{ marginInlineStart: 8, fontSize: 12, color: credColor, fontWeight: 400 }}>
             {credHint}
             {warning && " · 凭证缺失"}
@@ -774,7 +807,122 @@ function ConfigModal({
 }
 
 // =============================================================================
-// Shared card + form field (match General section styling)
+// Add provider modal — create a brand-new custom provider entry
+// =============================================================================
+
+const API_TYPE_OPTIONS = [
+  { value: "openai-compatible", label: "OpenAI 兼容" },
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "ollama", label: "Ollama" },
+];
+
+function AddProviderModal({
+  sdk, existingNames, onClose, onSaved,
+}: {
+  sdk: OctopusClient;
+  existingNames: string[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [apiType, setApiType] = useState("openai-compatible");
+  const [baseUrl, setBaseUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    const trimmedName = name.trim();
+    if (!trimmedName) {
+      antdMessage.warning("名称不能为空");
+      return;
+    }
+    if (existingNames.includes(trimmedName)) {
+      antdMessage.warning("供应商已存在");
+      return;
+    }
+    const trimmedBaseUrl = baseUrl.trim();
+    if (!trimmedBaseUrl) {
+      antdMessage.warning("Base URL 不能为空");
+      return;
+    }
+    setSaving(true);
+    try {
+      await sdk.updateModelProvider(trimmedName, {
+        displayName: trimmedName,
+        apiType: apiType.trim() || undefined,
+        baseUrl: trimmedBaseUrl,
+        ...(apiKey ? { apiKey } : {}),
+        models: [],
+      });
+      antdMessage.success("供应商已添加，请继续配置模型");
+      onSaved();
+      onClose();
+    } catch (err: any) {
+      antdMessage.error(err?.message ?? "添加失败");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      title="添加供应商"
+      width={520}
+      onCancel={onClose}
+      footer={
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <Button onClick={onClose} style={{ borderRadius: 8 }}>取消</Button>
+          <Button type="primary" loading={saving} onClick={save} style={{ borderRadius: 8 }}>
+            添加
+          </Button>
+        </div>
+      }
+    >
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <FormField label="名称" hint="供应商唯一标识（将作为 config.json 的 key）">
+          <Input
+            placeholder="例如 my-openai-proxy"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            style={{ borderRadius: 8 }}
+          />
+        </FormField>
+
+        <FormField label="API 类型" hint="协议/SDK 类型，决定如何调用该供应商">
+          <Select
+            value={apiType}
+            onChange={setApiType}
+            options={API_TYPE_OPTIONS}
+            style={{ width: "100%" }}
+          />
+        </FormField>
+
+        <FormField label="Base URL" hint="自定义 API 基础地址（必填）">
+          <Input
+            placeholder="https://api.example.com/v1"
+            value={baseUrl}
+            onChange={(e) => setBaseUrl(e.target.value)}
+            style={{ borderRadius: 8 }}
+          />
+        </FormField>
+
+        <FormField label="API Key" hint="可选；自建/本地服务可留空">
+          <Input.Password
+            placeholder="输入 API Key（可选）"
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            style={{ borderRadius: 8 }}
+          />
+        </FormField>
+      </div>
+    </Modal>
+  );
+}
+
+// =============================================================================
+// Shared card & form field (match General section styling)
 // =============================================================================
 
 function Card({

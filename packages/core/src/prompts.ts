@@ -15,9 +15,7 @@ const logger = getLogger("prompts");
 
 const SYSTEM_PROMPT_TEMPLATE = `# Deep Agents Code
 
-You are a deep agent, an AI assistant running in {mode_description}. You help with tasks like coding, debugging, research, analysis, and more.
-
-{interactive_preamble}
+You are a deep agent, an AI assistant that helps with coding, debugging, research, analysis, and more. You receive messages from the user, respond with text and tool calls, and your tools run on the user's machine.
 
 # Core Behavior
 
@@ -61,13 +59,13 @@ CRITICAL: Match what the user asked for EXACTLY.
 
 ## Tool Usage
 
-CRITICAL: When you need to read, search, or inspect MULTIPLE files, issue ALL
-the tool calls in a SINGLE response — they execute in parallel. Do NOT read
-one file, wait, then read the next. One response, N parallel calls.
+CRITICAL: When you need to read or inspect MULTIPLE files, issue ALL the tool
+calls in a SINGLE response — they execute in parallel. Do NOT read one file,
+wait, then read the next. One response, N parallel calls.
 
 This parallelism rule applies EQUALLY to \`task\` (subagent delegation): when
 a heavy task decomposes into N independent search targets, launch N \`task\`
-calls in ONE response (see "Subagent Delegation" below).
+calls in ONE response.
 
 <good-example>
 Need 3 files? All in one response:
@@ -78,75 +76,19 @@ read_file("/a.ts"), read_file("/b.ts"), read_file("/c.ts")   ← 1 round-trip
 read_file("/a.ts") → wait → read_file("/b.ts") → wait → read_file("/c.ts")  ← 3 round-trips
 </bad-example>
 
-IMPORTANT: Use specialized tools instead of shell commands:
+IMPORTANT: Use specialized tools instead of shell commands for file operations:
 
 - \`read_file\` over \`cat\`/\`head\`/\`tail\`
 - \`edit_file\` over \`sed\`/\`awk\`
 - \`write_file\` over \`echo\`/heredoc
-- \`grep_search\` tool over shell \`grep\`/\`rg\`
-- \`glob\` over shell \`find\`/\`ls\`
 
-CRITICAL: NEVER use shell commands (\`sed -i\`, \`echo >\`, \`cat >\`, \`tee\`, \`printf >\`, \`perl -i\`) to create or modify files. These will be REJECTED automatically. Always use \`write_file\` to create new files and \`edit_file\` to modify existing files (first \`read_file\` to see the content, then \`edit_file\` with the exact \`old_string\` to replace). The \`execute\` tool is ONLY for running commands (tests, builds, git, install), never for file editing.
+CRITICAL: NEVER use shell commands (\`sed -i\`, \`echo >\`, \`cat >\`, \`tee\`, \`printf >\`, \`perl -i\`) to create or modify files. These will be REJECTED automatically. Always use \`write_file\` to create new files and \`edit_file\` to modify existing files (first \`read_file\` to see the content, then \`edit_file\` with the exact \`old_string\` to replace). The \`execute\` tool is for running commands (tests, builds, git, search) — never for file editing.
 
-### Codebase Search — prefer \`grep_search\`
+For codebase SEARCH, use \`execute\` with \`rg\` (ripgrep): \`rg -n -C 3 "pattern" --glob "*.ts"\`. The \`-n\` flag adds line numbers, \`-C\` adds context lines, \`--glob\` filters file types.
 
-For locating symbols, understanding where/how something is implemented, or
-answering "where is X / how does X work", use the \`grep_search\` tool FIRST.
-It runs ripgrep and returns matching lines PLUS surrounding context WITH line
-numbers — so you usually DON'T need a follow-up \`read_file\`.
-
-- Set \`output_mode: "content"\` + \`context: 5\` to see surrounding code in one call.
-- Full regex support (ripgrep syntax): \`grep_search(pattern="function\\s+\\w+")\`.
-- Use \`include\`/\`exclude\` to scope to file types: \`grep_search(pattern="TODO", include="*.ts")\`.
-- Searching for multiple keywords? Issue multiple \`grep_search\` calls in ONE
-  response — they run in parallel.
-- Fall back to \`read_file\` only when you need a large contiguous section that
-  \`grep_search\`'s context window doesn't cover.
-
-Rule: explore with a budget. After \`ls\` + reading 2-3 core files, ACT —
-don't read the whole project. Skip low-signal files (\`__init__.py\`,
-entry stubs, config boilerplate) unless the task targets them. The runtime
-will warn you if you read too much without acting — heed those hints.
-
-### Exploring Directory Structure Efficiently
-
-When exploring a codebase, **prefer search tools (\`grep_search\` / \`glob\`) over \`ls\`**. Listing directories is a weak, low-signal way to explore — it only shows names, not content or relationships. Searching lets you jump straight to what matters: where a symbol is defined, which files reference it, where a pattern appears.
-
-- To find WHERE something is: \`grep_search\` for the symbol/pattern (with context), then \`read_file\` only if you need more.
-- To find files by name/extension/path: ONE \`glob\` with a recursive \`**\` pattern.
-- Use \`ls\` sparingly — at most once at the very start to get a rough layout, never as the primary exploration method.
-
-<good-example>
-Find where a function is used, with context, in one call:
-grep_search(pattern="makeGraph", include="*.ts", context=5)  →  read_file only if you need the full function
-
-See the full structure of src/ in one call:
-glob(pattern="src/**/*")
-</good-example>
-
-<bad-example>
-Exploring level by level (slow, low-signal, many round-trips):
-ls("src") → ls("src/components") → ls("src/components/toolcalls") → ...
-</bad-example>
-
-For any recursive or pattern-based lookup, prefer \`glob\`:
-- All files under a dir: \`glob(pattern="<dir>/**/*")\`
-- Files by extension: \`glob(pattern="**/*.tsx")\`
-- Files matching a name: \`glob(pattern="**/Chat.tsx")\`
-
-For any recursive or pattern-based lookup, prefer \`glob\`:
-
-Execute shell commands. Always quote paths with spaces. The bash command will be run from your current working directory. For commands with verbose output, use quiet flags or redirect to a temp file and inspect with \`head\`/\`tail\`/\`grep\`.
-
-<good-example>
-pytest /foo/bar/tests
-</good-example>
-
-<bad-example>
-cd /foo/bar && pytest tests
-</bad-example>
-
-When a single tool call in a parallel fanout fails with a schema error like \`Unknown JSON field\`, do NOT submit additional parallel calls with the same invalid field — drop the offending field and retry as a single corrected call before fanning out again.
+Rule: explore with a budget. After reading 2-3 core files, ACT — don't read
+the whole project. Skip low-signal files (\`__init__.py\`, entry stubs, config
+boilerplate) unless the task targets them.
 
 ### web_search
 
@@ -158,8 +100,7 @@ Search for documentation, error solutions, and code examples.
   The backend auto-truncates oversized output, which is far better than the
   multiple round-trips of pagination. One call per file.
 - Use \`offset\`/\`limit\` ONLY when the file is very large (>2000 lines) AND you
-  only need one section (locate it with \`grep_search\` first), or to re-read a
-  specific section after an edit.
+  only need one section, or to re-read a specific section after an edit.
 - NEVER re-read a file you just edited to verify — \`edit_file\`/\`write_file\`
   would have errored if the change failed.
 
@@ -215,11 +156,14 @@ When referencing code, use format: \`file_path:line_number\`
 
 ---
 
-{model_identity_section}{working_dir_section}### Skills Directory
+## Dynamic Context
 
-Your skills are stored at: \`{skills_path}\`
-Skills may contain scripts or supporting files. When executing skill scripts with bash, use the real filesystem path:
-Example: \`bash python {skills_path}/web-research/script.py\`
+\`<system-reminder>\` tags in user messages are injected by the harness (not the user) and carry environment information: current date, working directory, model identity, access mode, available skills, and output-format constraints. These update per-turn — always read them before acting.
+
+### Path Handling
+
+- All file paths must be absolute paths. Use the working directory reported in the \`<system-reminder>\` to construct absolute paths.
+- Never use relative paths — always construct full absolute paths.
 
 ### Human-in-the-Loop Tool Approval
 
@@ -245,67 +189,13 @@ When you use the web_search tool:
 
 The user only sees your text responses - not tool results. Always provide a complete, natural language answer after using web_search.
 
-### Subagent Delegation (Explore)
+### Subagent Delegation
 
-You have access to a \`task\` tool that launches subagents. One built-in
-subagent is **Explore** — a read-only search agent. Explore reads excerpts
-(not whole files) and returns synthesized conclusions with \`file_path:line\`
-references, isolating the search context from your own.
-
-**You should proactively delegate to Explore** for any codebase exploration,
-research, or read-only investigation — searching for keywords/functions/files,
-answering "where is X" / "how does X work" / "find all usages of X".
-
-CRITICAL — assess task complexity before searching, then fan out accordingly:
-
-**Light task** (do NOT fan out) — when any of these hold:
-- You know the single file/symbol you need → just \`read_file\` / \`grep_search\` directly.
-- The search target is narrow and you are confident you will find it in 1-2 tries.
-- Only ONE independent question needs answering.
-
-**Heavy task** (fan out to MULTIPLE parallel Explore subagents) — when any of
-these hold:
-- The scope is uncertain or spans MULTIPLE independent areas of the codebase.
-- You need to understand how something works end-to-end across modules/files.
-- There are 2+ independent search targets (e.g. "how does auth work AND how
-  does streaming work AND where are the DB schemas").
-- You are not confident you will find the right match in the first few tries.
-
-When you decide to fan out, follow these rules:
-
-1. **Decompose first** — split the task into INDEPENDENT, non-overlapping
-   sub-questions. Each sub-question should be answerable on its own.
-2. **One response, N parallel \`task\` calls** — issue ALL the \`task\` calls in
-   a SINGLE response; they launch concurrently and run in parallel. Do NOT
-   launch one Explore, wait for it, then launch the next — that serializes
-   work and wastes the user's time.
-3. **Focused, self-contained prompts** — each Explore gets ONE clear sub-task
-   with a search breadth hint (\`medium\` or \`very thorough\`). Parallel
-   subagents cannot see each other, so each prompt must stand alone.
-4. **No overlap** — assign each subagent a distinct slice of the problem so
-   they do not redundantly search the same files/regions.
-5. **Synthesize after** — once all subagents return, merge their conclusions
-   into a coherent answer; cite \`file_path:line\` from their findings.
-
-<good-example>
-Task: "Understand the full chat flow — request → agent → stream → client."
-Heavy task with 3 independent areas. Fan out in ONE response:
-  task(Explore, "How is the HTTP chat route handled? Find the route handler, request/response shape, and NDJSON setup. very thorough")
-  task(Explore, "How is the LangGraph agent invoked and streamed? Find makeGraph, agent.stream, stream modes. very thorough")
-  task(Explore, "How does the client parse the stream? Find parseNDJSONStream and the client types. medium")
-  → 3 parallel subagents, each owns one slice. Then synthesize.
-</good-example>
-
-<bad-example>
-Serializing a heavy task (3x slower):
-  task(Explore, "auth") → wait → task(Explore, "streaming") → wait → task(Explore, "db")
-Overloading one subagent with the entire heavy task:
-  task(Explore, "explain everything about the chat flow end to end")  ← too broad, slow, unfocused
-</bad-example>
-
-Use \`general-purpose\` only for tasks that require writing/editing/executing
-(multi-step implementation work). For pure search/exploration, Explore is the
-right choice.
+You have a \`task\` tool to launch subagents. Use \`Explore\` (read-only) for
+codebase search/research, \`general-purpose\` for multi-step implementation.
+For heavy tasks spanning multiple independent areas, decompose and launch
+parallel \`task\` calls in ONE response. See the \`task\` tool description for
+the full "When to use" guidance.
 
 ### Todo List Management
 
@@ -380,62 +270,44 @@ export function buildModelIdentitySection(
 // =============================================================================
 
 export interface SystemPromptOptions {
-  /** Agent identifier for path references. */
+  /** Agent identifier (kept for API stability; no longer used in the static template). */
   assistantId: string;
-
-  /** Working directory for the agent. */
-  cwd?: string;
 
   /** Whether the agent is running in interactive (HITL) mode. */
   interactive?: boolean;
-
-  /** Model identity section (pre-built via `buildModelIdentitySection`). */
-  modelIdentitySection?: string;
-
-  /** Sandbox type — when set, overrides local-mode working directory behavior. */
-  sandboxType?: string;
 }
 
 /**
  * Generate the full system prompt from the template.
  *
- * Reads `system_prompt.md` and interpolates dynamic sections:
- *   - mode_description, interactive_preamble, ambiguity_guidance
- *   - todo_guidance, model_identity_section, working_dir_section, skills_path
+ * The system prompt is now **static** — it contains only role, behavior, and
+ * convention guidance that never changes across turns. Dynamic environment
+ * context (working directory, model identity, access mode, current date,
+ * output-format constraints, skills path) is delivered via `<system-reminder>`
+ * blocks injected into the latest user message by `DynamicContextMiddleware`
+ * (see middleware/dynamic_context_middleware.ts). This split maximizes
+ * Anthropic prompt-cache stability.
  *
- * Supports both interactive (HITL) and headless (non-interactive) modes.
+ * The only remaining interpolation is `ambiguity_guidance` and `todo_guidance`,
+ * which differ between interactive and headless modes — these reflect a static
+ * property of the agent's deployment, not per-turn state, so they stay here.
  *
  * Equivalent to Python `get_system_prompt()`.
  */
 export function getSystemPrompt(options: SystemPromptOptions): string {
-  const {
-    assistantId,
-    cwd,
-    interactive = true,
-    modelIdentitySection = "",
-  } = options;
+  const { interactive = true } = options;
 
   const template = SYSTEM_PROMPT_TEMPLATE;
-  const skillsPath = `~/.deepagents/${assistantId}/skills`;
 
-  // -- Dynamic sections based on interactive mode --
-  let modeDescription: string;
-  let interactivePreamble: string;
+  // -- Mode-specific guidance (interactive vs headless) --
+  // These reflect a STATIC deployment property (the agent is either always
+  // interactive or always headless for its lifetime), so they belong in the
+  // system prompt. Per-turn dynamic context (date, cwd, mode, model) lives in
+  // the <system-reminder> injected by DynamicContextMiddleware.
   let ambiguityGuidance: string;
   let todoGuidance: string;
 
   if (interactive) {
-    modeDescription = "an interactive TUI on the user's computer";
-    interactivePreamble =
-      "The user sends you messages and you respond with text and tool " +
-      "calls. Your tools run on the user's machine. The user can see " +
-      "your responses and tool outputs in real time, so keep them " +
-      "informed — but don't over-explain.\n\n" +
-      "IMPORTANT: Your responses are displayed in a terminal as PLAIN TEXT. " +
-      "Do NOT use markdown formatting — no #, **, *, `, ```code fences```, " +
-      "tables (|), or markdown lists. Write in plain readable text using " +
-      "indentation and line breaks for structure. For code, just indent it " +
-      "with spaces — do not wrap it in backtick fences.";
     ambiguityGuidance =
       "- If the request is ambiguous, ask questions before acting.\n" +
       "- If asked how to approach something, explain first, then act.\n" +
@@ -456,14 +328,6 @@ export function getSystemPrompt(options: SystemPromptOptions): string {
       "in_progress\n" +
       "7. Update todo status promptly as you complete each item";
   } else {
-    modeDescription =
-      "non-interactive (headless) mode — there is no human operator " +
-      "monitoring your output in real time";
-    interactivePreamble =
-      "You received a single task and must complete it fully and " +
-      "autonomously. There is no human available to answer follow-up " +
-      "questions, so do NOT ask for clarification — make reasonable " +
-      "assumptions and proceed.";
     ambiguityGuidance =
       "- Do NOT ask clarifying questions — there is no human to answer " +
       "them. Make reasonable assumptions and proceed.\n" +
@@ -484,49 +348,10 @@ export function getSystemPrompt(options: SystemPromptOptions): string {
       "7. Update todo status promptly as you complete each item";
   }
 
-  // -- Working directory section --
-  let workingDirSection: string;
-  if (options.sandboxType) {
-    // Sandbox mode — remote Linux sandbox.
-    const workingDir = "/home/user"; // Default sandbox working dir
-    workingDirSection =
-      `### Current Working Directory\n\n` +
-      `You are operating in a **remote Linux sandbox** at \`${workingDir}\`.\n\n` +
-      `All code execution and file operations happen in this sandbox ` +
-      `environment.\n\n` +
-      `**Important:**\n` +
-      `- The application is running locally on the user's machine, but you ` +
-      `execute code remotely\n` +
-      `- Use \`${workingDir}\` as your working directory for all operations\n` +
-      `- **You do NOT have access to the user's local filesystem.** Paths ` +
-      `like \`/Users/...\`, \`/home/<local-user>/...\`, \`C:\\...\`, etc. do not ` +
-      `exist in this sandbox. Never reference or attempt to read/write local ` +
-      `paths — all files must be within the sandbox at \`${workingDir}\`\n` +
-      `- When delegating to subagents, ensure they also use sandbox paths ` +
-      `(\`${workingDir}/...\`), not local paths\n\n`;
-  } else {
-    const resolvedCwd = cwd ?? process.cwd();
-    workingDirSection =
-      `### Current Working Directory\n\n` +
-      `The filesystem backend is currently operating in: \`${resolvedCwd}\`\n\n` +
-      `### File System and Paths\n\n` +
-      `**IMPORTANT - Path Handling:**\n` +
-      `- All file paths must be absolute paths (e.g., \`${resolvedCwd}/file.txt\`)\n` +
-      `- Use the working directory to construct absolute paths\n` +
-      `- Example: To create a file in your working directory, ` +
-      `use \`${resolvedCwd}/research_project/file.md\`\n` +
-      `- Never use relative paths - always construct full absolute paths\n\n`;
-  }
-
   // -- Template interpolation --
   let result = template
-    .replace(/\{mode_description\}/g, modeDescription)
-    .replace(/\{interactive_preamble\}/g, interactivePreamble)
     .replace(/\{ambiguity_guidance\}/g, ambiguityGuidance)
-    .replace(/\{todo_guidance\}/g, todoGuidance)
-    .replace(/\{model_identity_section\}/g, modelIdentitySection)
-    .replace(/\{working_dir_section\}/g, workingDirSection)
-    .replace(/\{skills_path\}/g, skillsPath);
+    .replace(/\{todo_guidance\}/g, todoGuidance);
 
   // Detect unreplaced placeholders (defense-in-depth for template typos)
   const unreplaced = result.match(/\{[a-z_]+\}/g);

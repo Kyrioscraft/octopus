@@ -12,7 +12,7 @@
 import { Hono } from "hono";
 import { v4 as uuid } from "uuid";
 import { getOptionalUser } from "../auth/middleware.js";
-import { makeGraph, loadConfig, getLogger, getLogContext } from "@octopus/core";
+import { makeGraph, loadConfig, getLogger, getLogContext, clearGraphCache } from "@octopus/core";
 import { createRipgrepTool } from "@octopus/extension-ripgrep";
 import { type AccessMode, type ExternalSubagentSpec, type SubagentEntry, interruptOnForMode } from "@octopus/core";
 import {
@@ -226,6 +226,12 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
 
   const config = loadConfig();
   const modelOverride = body.model?.trim() || undefined;
+  // When the user picks a non-default model in the chat input, clear the graph
+  // cache so makeGraph rebuilds with fresh config.json values (latest
+  // baseURL/apiKey). Graphs compiled for the default model are reused as-is.
+  if (modelOverride) {
+    clearGraphCache();
+  }
   // `accessMode` was resolved above (before thread creation) so it could be
   // persisted on the thread row. It drives both graph build (plan strips
   // destructive tools, full bypasses FileEditGuard) and the runtime HITL
@@ -272,12 +278,20 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
   // every gated tool auto-approves. `plan`/`confirm` need no override here —
   // plan has no destructive tools to gate, confirm keeps the compiled default.
   const interruptOverride = interruptOnForMode(accessMode);
+  // `configurable` carries the LangGraph checkpointer key (thread_id).
+  // `context` carries per-invocation values surfaced to middleware via
+  // `runtime.context` (filtered through each middleware's contextSchema).
+  // The runtime model override lives on `context.model` so
+  // ConfigurableModelMiddleware can read it — putting it on `configurable`
+  // would NOT reach `runtime.context`.
   const langgraphConfig = {
     configurable: {
       thread_id: threadId,
-      ...(modelOverride ? { model: modelOverride } : {}),
     },
-    ...(interruptOverride ? { context: { interruptOn: interruptOverride } } : {}),
+    context: {
+      ...(modelOverride ? { model: modelOverride } : {}),
+      ...(interruptOverride ? { interruptOn: interruptOverride } : {}),
+    },
   };
 
   logger.info("Stream started", {
