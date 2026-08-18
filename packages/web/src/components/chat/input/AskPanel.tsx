@@ -38,6 +38,7 @@ import {
   ChevronRight,
   Check,
   CircleHelp,
+  ClipboardList,
   MessageSquare,
   TriangleAlert,
 } from "lucide-react";
@@ -110,6 +111,11 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
     if (payload.kind === "tool_approval") {
       return !!approvals[q.question_id];
     }
+    if (payload.kind === "plan_approval") {
+      const a = approvals[q.question_id];
+      // Approved → ready. Rejected → ready immediately (feedback optional).
+      return a?.type === "approve" || a?.type === "reject";
+    }
     if (q.options && q.options.length > 0) {
       const sel = selections[q.question_id];
       return Array.isArray(sel) ? sel.length > 0 : !!sel;
@@ -125,6 +131,16 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         return a ?? { type: "approve" as const };
       });
       return { kind: "tool_approval", decisions };
+    }
+    if (payload.kind === "plan_approval") {
+      // Single plan verdict: approved flag + optional rejection feedback.
+      const a = approvals[payload.questions[0]?.question_id ?? "plan"];
+      const fb = (texts[payload.questions[0]?.question_id ?? "plan"] ?? "").trim();
+      return {
+        kind: "plan_approval",
+        approved: a?.type === "reject" ? false : true,
+        ...(fb && a?.type === "reject" ? { feedback: fb } : {}),
+      };
     }
     const answers = payload.questions.map((q) => {
       const sel = selections[q.question_id];
@@ -246,6 +262,14 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
             onNext={() => setPage((p) => Math.min(total - 1, p + 1))}
             onSubmitAll={submitAll}
           />
+        ) : payload.kind === "plan_approval" ? (
+          <PlanApprovalActions
+            approval={approvals[current.question_id]}
+            isLast={isLast}
+            onSet={(a) => setApprovals((p) => ({ ...p, [current.question_id]: a }))}
+            onNext={() => setPage((p) => Math.min(total - 1, p + 1))}
+            onSubmitAll={submitAll}
+          />
         ) : isLast ? (
           <Button
             size="small"
@@ -295,6 +319,8 @@ function AskKindLabel({ kind }: { kind: AskKind }) {
     switch (kind) {
       case "tool_approval":
         return { icon: <TriangleAlert />, label: "需要批准", color: "var(--color-warning-500)" };
+      case "plan_approval":
+        return { icon: <ClipboardList />, label: "计划审批", color: "var(--color-info-500)" };
       case "discussion":
         return { icon: <MessageSquare />, label: "方案选择", color: "var(--color-info-500)" };
       case "clarify":
@@ -344,6 +370,9 @@ function QuestionBody(p: BodyProps) {
 
   if (p.kind === "tool_approval") {
     return <ToolApprovalBody {...p} header={QHeader} />;
+  }
+  if (p.kind === "plan_approval") {
+    return <PlanApprovalBody {...p} />;
   }
   if (p.q.options && p.q.options.length > 0) {
     return <DiscussionBody {...p} header={QHeader} />;
@@ -511,6 +540,116 @@ function ToolApprovalActions({
 }
 
 // -----------------------------------------------------------------------------
+// plan_approval body — the full plan text (markdown-as-plain, scrollable) as
+// submitted by the agent's submit_plan tool.
+// -----------------------------------------------------------------------------
+
+function PlanApprovalBody({ q, approval, text, onText }: BodyProps) {
+  return (
+    <div style={{ paddingLeft: 2, width: "100%" }}>
+      <pre
+        style={{
+          margin: 0,
+          fontSize: 13,
+          lineHeight: 1.55,
+          color: "var(--gray-800)",
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          fontFamily: "inherit",
+          maxHeight: 320,
+          overflow: "auto",
+          border: "1px solid var(--gray-150)",
+          borderRadius: 8,
+          padding: "10px 12px",
+          background: "var(--gray-0)",
+        }}
+      >
+        {q.question}
+      </pre>
+      {approval?.type === "reject" && (
+        <TextArea
+          value={text}
+          onChange={(e) => onText(e.target.value)}
+          placeholder="修改意见（可选）——告诉代理哪里需要调整…"
+          autoSize={{ minRows: 2, maxRows: 6 }}
+          autoFocus
+          style={{ fontSize: 13, marginTop: 8 }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * plan_approval action cluster — 批准 (switches the session to confirm mode
+ * and starts executing) / 拒绝 (agent revises; optional feedback via the
+ * clarify-style text area rendered above when a rejection is staged).
+ */
+function PlanApprovalActions({
+  approval,
+  isLast,
+  onSet,
+  onNext,
+  onSubmitAll,
+}: {
+  approval?: Approval;
+  isLast: boolean;
+  onSet: (a: Approval) => void;
+  onNext: () => void;
+  onSubmitAll: (meta?: { approveForSession?: boolean }) => void;
+}) {
+  const decide = (a: Approval) => {
+    onSet(a);
+    if (isLast && a.type === "approve") onSubmitAll();
+    // Rejection waits for the (optional) feedback + the 提交 button.
+  };
+
+  const [rejectState, setRejectState] = useState<"base" | "hover" | "press">("base");
+  const [approveState, setApproveState] = useState<"base" | "hover" | "press">("base");
+
+  return (
+    <>
+      {approval?.type === "reject" && (
+        <Button size="small" onClick={() => onSubmitAll()}>
+          提交修改意见
+        </Button>
+      )}
+      <Button
+        size="small"
+        onClick={() => decide({ type: "reject" })}
+        style={css(
+          S.rejectBase,
+          rejectState === "hover" && S.rejectHover,
+          rejectState === "press" && S.rejectPress,
+        )}
+        onMouseEnter={() => setRejectState("hover")}
+        onMouseLeave={() => setRejectState("base")}
+        onMouseDown={() => setRejectState("press")}
+        onMouseUp={() => setRejectState("hover")}
+      >
+        拒绝并修改
+      </Button>
+      <Button
+        size="small"
+        icon={<Check />}
+        onClick={() => decide({ type: "approve" })}
+        style={css(
+          S.mainBase,
+          approveState === "hover" && S.mainHover,
+          approveState === "press" && S.mainPress,
+        )}
+        onMouseEnter={() => setApproveState("hover")}
+        onMouseLeave={() => setApproveState("base")}
+        onMouseDown={() => setApproveState("press")}
+        onMouseUp={() => setApproveState("hover")}
+      >
+        批准并执行
+      </Button>
+    </>
+  );
+}
+
+// -----------------------------------------------------------------------------
 // discussion body — Radio (single) or Checkbox (multi) + optional "Other…".
 // -----------------------------------------------------------------------------
 
@@ -616,6 +755,11 @@ export function summarizeResolution(
   resolution?: ResumeRequestBody,
 ): string {
   if (!resolution) return "等待回答…";
+  if (kind === "plan_approval") {
+    return resolution.approved === false
+      ? `✗ 计划已拒绝${resolution.feedback ? ` · ${resolution.feedback}` : ""}`
+      : "✓ 计划已批准 · 开始执行";
+  }
   if (kind === "tool_approval") {
     const decisions = resolution.decisions ?? [];
     if (decisions.length === 0) return "已响应";

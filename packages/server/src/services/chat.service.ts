@@ -64,7 +64,7 @@ export interface ResumeInput {
 // `ask_user_question_required` chunk and the resume request body.
 // =============================================================================
 
-export type AskKind = "tool_approval" | "discussion" | "clarify";
+export type AskKind = "tool_approval" | "plan_approval" | "discussion" | "clarify";
 
 export interface QuestionOption {
   label: string;
@@ -104,6 +104,8 @@ export interface AskUserQuestionPayload {
 export interface ResumeRequestBody {
   approved?: boolean;
   kind?: AskKind;
+  /** plan_approval — revision feedback when the plan is rejected. */
+  feedback?: string;
   decisions?: Array<
     | { type: "approve" }
     | { type: "reject"; message?: string }
@@ -285,6 +287,21 @@ export function buildAskPayload(
 ): AskUserQuestionPayload {
   const value = interruptInfo?.value ?? interruptInfo ?? {};
 
+  // --- Plan approval gate (submit_plan tool) ---
+  if (value.kind === "plan_approval") {
+    return {
+      kind: "plan_approval",
+      questions: [
+        {
+          question_id: `plan_${Date.now()}`,
+          question: String(value.plan ?? ""),
+          header: "计划审批",
+        },
+      ],
+      thread_id: threadId,
+    };
+  }
+
   // --- Agent-initiated ask (ask_user_question tool) ---
   if (value.kind === "discussion" || value.kind === "clarify") {
     const questions: AskQuestion[] = Array.isArray(value.questions)
@@ -374,7 +391,7 @@ export function buildAskPayload(
 export function normalizeResumeInput(
   body: ResumeRequestBody,
   actionCount: number,
-): { decisions: Array<Record<string, unknown>> } | { answers: ResumeRequestBody["answers"] } {
+): { decisions: Array<Record<string, unknown>> } | { answers: ResumeRequestBody["answers"] } | { approved: boolean; feedback?: string } {
   const kind = body.kind ?? (body.decisions ? "tool_approval" : body.answers ? "discussion" : "tool_approval");
 
   if (kind === "tool_approval") {
@@ -387,6 +404,12 @@ export function normalizeResumeInput(
     return {
       decisions: Array.from({ length: Math.max(actionCount, 1) }, () => ({ type: decisionType })),
     };
+  }
+
+  // plan_approval — the submit_plan tool's interrupt() expects
+  // { approved, feedback? } as its resume value.
+  if (kind === "plan_approval") {
+    return { approved: body.approved !== false, feedback: body.feedback };
   }
 
   // discussion / clarify — answers flow back to the ask_user_question tool.

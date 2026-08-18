@@ -23,7 +23,9 @@
  *    and reference tools we just removed.
  */
 
+import { z } from "zod";
 import { getLogger } from "../logging.js";
+import { tmpdir } from "node:os";
 import {
   readSystemMessageText,
   withSystemMessageText,
@@ -38,25 +40,120 @@ const logger = getLogger("middleware.filesystem_policy");
 // SDK_SEARCH_TOOLS below) to avoid overlap with `execute` — matching ZCode's
 // single-search-entry architecture (all search via Bash). So we only need
 // description overrides for tools that SURVIVE: read_file and execute.
+//
+// Description style borrowed from opencode: shell-specific guidance, output-
+// truncation policy, temp-dir pre-approval, and clear division of labor vs
+// the file tools. All of this lives in the TOOL DESCRIPTION (not the system
+// prompt) because tool descriptions are what the model reads when deciding
+// how to use a tool.
 // =============================================================================
 
-const TOOL_DESCRIPTION_OVERRIDES: Record<string, string> = {
-  read_file:
-    "Read a file from the filesystem. Use offset/limit for files >500 lines.",
-  execute:
-    "Executes a bash command and returns its output. Use this for codebase " +
+/**
+ * Shell-specific guidance block for `execute`. The server runs commands via
+ * Git Bash on Windows and bash elsewhere — the quoting/chaining rules differ
+ * enough that the model needs the right variant per platform.
+ */
+function _shellGuidance(): string {
+  if (process.platform === "win32") {
+    return (
+      "# Shell notes (Git Bash on Windows)\n" +
+      "- Chain dependent commands with `&&`; use `;` only when failure of the first is acceptable\n" +
+      "- Quote paths containing spaces with double quotes: `\"C:/path with spaces/file\"`\n" +
+      "- Prefer forward slashes in paths (`D:/work/project`) — backslashes need escaping\n" +
+      "- Use `node:` protocol for Node built-ins; run `node script.mjs` for JS snippets\n" +
+      "- Windows binaries: `dir /s /b *.ts` also works for file lookup if `find` is slow"
+    );
+  }
+  return (
+    "# Shell notes (bash)\n" +
+    "- Chain dependent commands with `&&`; use `;` only when failure of the first is acceptable\n" +
+    "- Quote paths containing spaces with double quotes\n" +
+    "- Use `node:` protocol for Node built-ins; run `node script.mjs` for JS snippets"
+  );
+}
+
+/**
+ * Build the `execute` tool description. Assembled as a function (rather than a
+ * static string) so the shell guidance and temp dir reflect the actual
+ * runtime platform.
+ */
+function _buildExecuteDescription(): string {
+  return (
+    "Executes a shell command and returns its output. Use this for codebase " +
     "search (rg for content search, find/dir for file lookup), running tests, " +
-    "builds, git operations, and any shell task.\n" +
-    "- For codebase content search: `rg PATTERN` with -n (line numbers), " +
-    "-C (context), -i (case-insensitive), --glob (file filter). Example: " +
+    "builds, git operations, and any shell task.\n\n" +
+    "IMPORTANT: Do NOT use this tool for file operations — avoid `cat`, `head`, " +
+    "`tail`, `sed`, `awk`, `echo >` for reading/writing/editing files. Use " +
+    "read_file / write_file / edit_file instead. This tool is for terminal " +
+    "operations: git, npm, tests, builds, search.\n\n" +
+    "For temporary work outside the workspace, use `" +
+    tmpdir().replace(/\\/g, "/") +
+    "` — it already exists and is pre-approved.\n\n" +
+    _shellGuidance() +
+    "\n\n" +
+    "# Search\n" +
+    "- Content search: `rg PATTERN` with -n (line numbers), -C (context), " +
+    "-i (case-insensitive), --glob (file filter). Example: " +
     "`rg -n -C 3 \"function\\s+\\w+\" --glob \"*.ts\"`\n" +
-    "- For finding files: `find . -name \"*.py\"` or `dir /s /b *.py` on Windows\n" +
-    "- Prefer absolute paths; shell state (env vars, functions) does not persist.\n" +
-    "- For reading files, prefer `read_file` over cat/head/tail. For editing, " +
-    "prefer `edit_file` over sed/awk. For writing new files, prefer " +
-    "`write_file` over echo/heredoc.\n" +
-    "- timeout is in milliseconds (default 120000, max 600000).",
+    "- File lookup: `find . -name \"*.py\"` (or `dir /s /b *.py` on Windows)\n\n" +
+    "# Output handling\n" +
+    "- Output exceeding ~100KB is truncated and the excess is DISCARDED (a truncation notice is appended). If you need the full output, re-run the command redirecting to a temp file (`cmd > \"" +
+    tmpdir().replace(/\\/g, "/") +
+    "/out.txt\"`), then page through it with `read_file`.\n" +
+    "- Keep output small by design: `rg --max-count 20`, `git diff --stat` before full diffs, non-recursive `ls` first.\n\n" +
+    "# Other\n" +
+    "- Prefer absolute paths and avoid `cd` in compound commands. Shell state " +
+    "(env vars, functions) does not persist between calls.\n" +
+    "- Commands time out after 120 seconds (fixed server-side, not a parameter). Long-running commands are killed — split the work or run in background writing to a file."
+  );
+}
+
+/**
+ * Build the `read_file` tool description (opencode-style: line format,
+ * default depth, parallel reads, oversized-line truncation).
+ */
+function _buildReadFileDescription(): string {
+  return (
+    "Read a file or directory from the filesystem.\n" +
+    "- file_path is the only required parameter; omit offset/limit to read the whole file (default 2000 lines)\n" +
+    "- offset (0-indexed line number) + limit to read a later section of a large file\n" +
+    "- Reading a directory returns its entries one per line (dirs get a trailing /)\n" +
+    "- When you need multiple files, issue parallel read_file calls in ONE response\n" +
+    "- Avoid tiny repeated slices (30-line chunks) — read a larger window instead"
+  );
+}
+
+const TOOL_DESCRIPTION_OVERRIDES: Record<string, string> = {
+  read_file: _buildReadFileDescription(),
+  execute: _buildExecuteDescription(),
 };
+
+/**
+ * Replacement schema for `read_file`. The SDK's original marks offset/limit
+ * required (via .default()) with limit defaulting to 100 — the model is forced
+ * to pass both on every call and reads fragment into 100-line chunks. This
+ * schema: only `file_path` required, `offset` optional (0-indexed line),
+ * `limit` optional defaulting to 2000 (full-file reads by default).
+ */
+const READ_FILE_SCHEMA = z
+  .object({
+    file_path: z
+      .string()
+      .describe("Absolute path to the file (or directory) to read"),
+    offset: z
+      .coerce.number()
+      .optional()
+      .describe(
+        "Line offset to start reading from (0-indexed). Omit to read from the start.",
+      ),
+    limit: z
+      .coerce.number()
+      .optional()
+      .describe(
+        "Maximum number of lines to read. Omit to read the whole file (default 2000).",
+      ),
+  })
+  .describe("Read a file or directory from the filesystem");
 
 /**
  * SDK-injected search tools that are REMOVED from the toolset to enforce a
@@ -211,6 +308,22 @@ export class FilesystemPolicyMiddleware {
       }
       if (changed) {
         logger.debug("Overrode filesystem tool descriptions");
+      }
+    }
+
+    // ---- 2.5 Override read_file schema ----
+    // The SDK's read_file marks offset/limit as REQUIRED (via .default()) and
+    // defaults limit to 100 — forcing the model to pass offset+limit on every
+    // call and fragmenting reads into 100-line chunks. Rebuild the schema:
+    // only file_path required, limit optional defaulting to 2000, matching
+    // the description above. `schema` is a public mutable field on
+    // DynamicStructuredTool (same as `description`).
+    if (tools) {
+      for (const t of tools) {
+        if (t?.name === "read_file") {
+          t.schema = READ_FILE_SCHEMA;
+          break;
+        }
       }
     }
 

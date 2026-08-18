@@ -81,12 +81,20 @@ export function interruptOnForMode(
     const all = [...DESTRUCTIVE_TOOLS, "execute", "web_search", "fetch_url"];
     return Object.fromEntries(all.map((n) => [n, false]));
   }
-  // plan: `execute` is now present (needed for search) and HITL-gated by the
-  //   compiled `_addInterruptOn()` default — the user approves each Bash call,
-  //   which is the intended plan-mode safety boundary. write_file/edit_file/
-  //   task are absent from the toolset. No override needed.
+  if (mode === "plan") {
+    // ZCode-style plan mode: read-only operations run freely. The toolset is
+    // already stripped of destructive tools (write_file/edit_file/task/...)
+    // and FileEditGuardMiddleware hard-blocks shell file writes, so the
+    // remaining gated-but-read-only tools are safe to auto-approve:
+    //   - task        : subagent delegation (Explore is read-only by design)
+    //   - execute     : Bash for codebase search (rg/find/ls); writes blocked
+    //                   by FileEditGuard
+    //   - web_search / fetch_url : read-only network access
+    const readOnly = ["task", "execute", "web_search", "fetch_url"];
+    return Object.fromEntries(readOnly.map((n) => [n, false]));
+  }
   // confirm: the compiled `_addInterruptOn()` already gates every destructive
-  //   tool — keep the default.
+  // tool — keep the default.
   return null;
 }
 

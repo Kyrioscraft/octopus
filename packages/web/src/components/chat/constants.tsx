@@ -25,8 +25,8 @@ export const ACCESS_MODES: Record<AccessMode, {
   plan: {
     icon: <Eye />,
     label: "计划模式",
-    hint: "只规划，不执行变更",
-    placeholder: "描述你想要的方案，我只规划不执行…",
+    hint: "只读探索免审批，计划需批准后执行",
+    placeholder: "描述你想要的方案，我先规划再请你批准…",
     borderColor: "var(--gray-150)",
     dangerous: false,
   },

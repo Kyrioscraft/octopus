@@ -135,8 +135,8 @@ export interface ThreadHistoryResponse {
 // interrupt + resume so answers can be paired back to their questions.
 // =============================================================================
 
-/** Discriminator for the three request kinds. */
-export type AskKind = "tool_approval" | "discussion" | "clarify";
+/** Discriminator for the request kinds. */
+export type AskKind = "tool_approval" | "plan_approval" | "discussion" | "clarify";
 
 /** A single selectable option inside a question. */
 export interface QuestionOption {
@@ -197,6 +197,8 @@ export interface ResumeRequestBody {
   approved?: boolean;
   /** Discriminator; inferred server-side when omitted. */
   kind?: AskKind;
+  /** plan_approval — revision feedback when the plan is rejected. */
+  feedback?: string;
   /** tool_approval answers (one per actionRequest, in order). */
   decisions?: Array<
     | { type: "approve" }

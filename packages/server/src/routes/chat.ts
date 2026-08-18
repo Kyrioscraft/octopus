@@ -31,7 +31,7 @@ import {
   type Emit,
   type ResumeRequestBody,
 } from "../services/chat.service.js";
-import { createThread, getThread } from "../db/index.js";
+import { createThread, getThread, updateThreadAccessMode } from "../db/index.js";
 import {
   ensureThreadOutputs,
   resolveAgentCwd,
@@ -357,10 +357,18 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
   // mid-run mode switch take effect at the next approval point: the user can
   // switch to auto/full, and subsequent resumes suppress HITL accordingly.
   // Legacy rows (no access_mode) coerce to "confirm" in the db mapper.
-  const accessMode: AccessMode = (() => {
+  let accessMode: AccessMode = (() => {
     const m = existingThread?.accessMode;
     return m === "plan" || m === "auto" || m === "full" ? m : "confirm";
   })();
+  // Plan approval gate: when the user approves a submitted plan, flip the
+  // thread to confirm mode BEFORE resuming — the resumed turn then runs with
+  // the full (write-capable) toolset under per-tool HITL, mirroring ZCode's
+  // ExitPlanMode behavior. Rejection keeps plan mode so the agent revises.
+  if (resumeBody.kind === "plan_approval" && accessMode === "plan" && resumeBody.approved !== false) {
+    updateThreadAccessMode(threadId, "confirm");
+    accessMode = "confirm";
+  }
   const compiled = await makeGraph(config, {
     cwd: agentCwd,
     workspace: { environment: workspace.environment },

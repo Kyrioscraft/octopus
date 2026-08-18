@@ -48,6 +48,7 @@ import { SubagentOrchestrationMiddleware } from "./middleware/subagent_orchestra
 import { DynamicContextMiddleware } from "./middleware/dynamic_context_middleware.js";
 import { getBuiltinToolsAsStructuredTools } from "./tools.js";
 import { createAskUserQuestionTool } from "./tools/ask_user_question.js";
+import { createSubmitPlanTool } from "./tools/submit_plan.js";
 import { listSkills } from "./skills.js";
 import { resolveAndLoadMcpTools } from "./mcp_tools.js";
 import type { MCPServerInfo } from "./mcp_tools.js";
@@ -179,7 +180,9 @@ async function _buildChatModel(
   const providerConfig: ProviderConfig = config.providers[provider] ?? {};
 
   // Resolve params: config.toml base → modelParams override (modelParams wins)
+  // → inference defaults fill any remaining gaps (thinking / max_tokens)
   const params: Record<string, unknown> = {
+    ..._resolveInferenceDefaults(modelName, modelParams ?? {}),
     ...ModelConfig.getKwargs(provider, modelName),
     ...(modelParams ?? {}),
   };
@@ -266,6 +269,73 @@ async function _buildChatModel(
   }
 
   return { model, provider, modelName };
+}
+
+// =============================================================================
+// Inference defaults — thinking / reasoning_effort / max_tokens.
+//
+// ZCode sends `thinking: {type:"enabled"}` + `reasoning_effort` + a large
+// `max_tokens` for reasoning models. Without these, reasoning-capable models
+// (deepseek-v4 etc.) skip their thinking phase entirely — noticeably worse at
+// planning/delegation decisions. Octopus only passes through explicit config
+// params, so reasoning is silently off by default.
+// =============================================================================
+
+/**
+ * Model-name patterns for models that support the OpenAI-style `thinking`
+ * param. Kept deliberately conservative — sending `thinking` to a model that
+ * doesn't support it can 400. Extend as support is confirmed.
+ */
+const REASONING_MODEL_PATTERNS: RegExp[] = [
+  /deepseek-v\d+-/i, // deepseek-v4-flash etc. (v4+ hybrid reasoning)
+  /-o[134]($|[-.])/i, // OpenAI o1/o3/o4 series
+  /-r1($|[-.])/i, // deepseek-r1 style
+  /glm-4\.\d+[+-]/i, // GLM 4.5+ hybrid reasoning
+  /qwen3.*-thinking/i,
+  /qwen3-\w+-/i, // qwen3 hybrid models
+];
+
+function _isReasoningModel(modelName: string): boolean {
+  return REASONING_MODEL_PATTERNS.some((re) => re.test(modelName));
+}
+
+/**
+ * Compute default inference params for a model. User-explicit params (from
+ * config.json provider `params` or runtime modelParams) always win — we only
+ * fill gaps.
+ *
+ * - Reasoning models get `thinking: {type:"enabled"}` + `reasoning_effort:
+ *   "medium"` (ZCode uses "max"; medium balances cost/latency — override
+ *   via config params if desired).
+ * - All models get a `max_tokens` floor of 16384 when unset, so thinking
+ *   output isn't truncated by a small provider default.
+ *
+ * Global kill-switch: `OCTOPUS_ENABLE_THINKING=0` disables the thinking
+ * injection (max_tokens floor still applies).
+ */
+function _resolveInferenceDefaults(
+  modelName: string,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const thinkingEnabled = process.env.OCTOPUS_ENABLE_THINKING !== "0";
+  const defaults: Record<string, unknown> = {};
+
+  if (params["max_tokens"] === undefined) {
+    defaults["max_tokens"] = 16384;
+  }
+
+  if (
+    thinkingEnabled &&
+    params["thinking"] === undefined &&
+    _isReasoningModel(modelName)
+  ) {
+    defaults["thinking"] = { type: "enabled" };
+    if (params["reasoning_effort"] === undefined) {
+      defaults["reasoning_effort"] = "medium";
+    }
+  }
+
+  return defaults;
 }
 
 // =============================================================================
@@ -549,6 +619,15 @@ async function _makeGraphUncached(
       `plan mode: removed ${before - tools.length} destructive tool(s) ` +
       `(built-in + MCP); ${tools.length} read-only tool(s) remain`,
     );
+    // Plan-mode approval gate (ZCode ExitPlanMode equivalent): the agent must
+    // submit its plan for user approval before any execution happens. Also
+    // injected in confirm mode — when the user approves a plan the server
+    // resumes the thread on the confirm-compiled graph, and the ToolNode must
+    // still contain submit_plan to resolve the pending interrupt.
+    // Auto/full skip it (fully autonomous — no approval gate needed).
+    if (options?.accessMode === "plan" || options?.accessMode === "confirm") {
+      tools.push(createSubmitPlanTool());
+    }
   }
 
   // ---- 4. Build CompositeBackend with temp-directory routing ----
@@ -841,6 +920,7 @@ async function _makeGraphUncached(
         skillSourcePaths.length > 0
           ? skillSourcePaths.map(([p]) => p).join(", ")
           : undefined,
+      skills: skillsList.map((s) => ({ name: s.name, description: s.description })),
     }),
   );
 
