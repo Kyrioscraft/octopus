@@ -25,6 +25,7 @@
 
 import { z } from "zod";
 import { getLogger } from "../logging.js";
+import { resolveBash } from "../shell.js";
 import { tmpdir } from "node:os";
 import {
   readSystemMessageText,
@@ -49,26 +50,46 @@ const logger = getLogger("middleware.filesystem_policy");
 // =============================================================================
 
 /**
- * Shell-specific guidance block for `execute`. The server runs commands via
- * Git Bash on Windows and bash elsewhere — the quoting/chaining rules differ
- * enough that the model needs the right variant per platform.
+ * Shell-specific guidance block for `execute`. Branches on the ACTUAL shell
+ * used by BashShellBackend: on Windows, commands run through Git Bash
+ * (`bash -c`) when one is available (resolveBash, see shell.ts), otherwise
+ * cmd.exe — the model must be told the truth so it doesn't hedge into
+ * `cmd /c findstr` fallbacks or invalid Unix syntax.
  */
 function _shellGuidance(): string {
+  const relativePathRules =
+    "- Path arguments in search commands (rg/grep/find/findstr) must be RELATIVE " +
+    "paths — the working directory is already the workspace root (see " +
+    "<system-reminder>). NEVER hand-construct absolute paths for search; " +
+    "duplicated or misspelled root segments make the path invalid.\n" +
+    "- If a command reports a missing path, run a quick `ls` to confirm the " +
+    "directory structure BEFORE retrying — do not blindly re-guess paths.";
   if (process.platform === "win32") {
+    if (resolveBash()) {
+      return (
+        "# Shell notes (Git Bash on Windows)\n" +
+        "- Unix syntax works: pipes (`grep -rn \"pattern\" src | head -20`), " +
+        "`find`, `ls`, `&&`/`;` chaining\n" +
+        "- Quote paths containing spaces with double quotes\n" +
+        "- Prefer forward slashes in paths\n" +
+        "- Use `node:` protocol for Node built-ins; run `node script.mjs` for JS snippets\n" +
+        relativePathRules
+      );
+    }
     return (
-      "# Shell notes (Git Bash on Windows)\n" +
-      "- Chain dependent commands with `&&`; use `;` only when failure of the first is acceptable\n" +
-      "- Quote paths containing spaces with double quotes: `\"C:/path with spaces/file\"`\n" +
-      "- Prefer forward slashes in paths (`D:/work/project`) — backslashes need escaping\n" +
-      "- Use `node:` protocol for Node built-ins; run `node script.mjs` for JS snippets\n" +
-      "- Windows binaries: `dir /s /b *.ts` also works for file lookup if `find` is slow"
+      "# Shell notes (cmd.exe on Windows — no bash available)\n" +
+      "- NO Unix pipes or grep/find syntax. Content search: " +
+      "`findstr /s /i /n \"pattern\" src\\*.ts`; file lookup: `dir /s /b *.ts`\n" +
+      "- Chain dependent commands with `&&`; variables use `%VAR%` syntax\n" +
+      relativePathRules
     );
   }
   return (
     "# Shell notes (bash)\n" +
     "- Chain dependent commands with `&&`; use `;` only when failure of the first is acceptable\n" +
     "- Quote paths containing spaces with double quotes\n" +
-    "- Use `node:` protocol for Node built-ins; run `node script.mjs` for JS snippets"
+    "- Use `node:` protocol for Node built-ins; run `node script.mjs` for JS snippets\n" +
+    relativePathRules
   );
 }
 
@@ -102,8 +123,8 @@ function _buildExecuteDescription(): string {
     "/out.txt\"`), then page through it with `read_file`.\n" +
     "- Keep output small by design: `rg --max-count 20`, `git diff --stat` before full diffs, non-recursive `ls` first.\n\n" +
     "# Other\n" +
-    "- Prefer absolute paths and avoid `cd` in compound commands. Shell state " +
-    "(env vars, functions) does not persist between calls.\n" +
+    "- Use RELATIVE paths (cwd is the workspace root); avoid `cd` in compound " +
+    "commands. Shell state (env vars, functions) does not persist between calls.\n" +
     "- Commands time out after 120 seconds (fixed server-side, not a parameter). Long-running commands are killed — split the work or run in background writing to a file."
   );
 }

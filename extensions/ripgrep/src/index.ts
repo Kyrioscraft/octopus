@@ -17,7 +17,8 @@
 
 import { z } from "zod";
 import { tool } from "@langchain/core/tools";
-import { runRipgrep } from "./ripgrep.js";
+import { runRipgrep, getRipgrepPath } from "./ripgrep.js";
+import { dirname } from "node:path";
 import { getLogger } from "@octopus/core";
 
 const logger = getLogger("extension.ripgrep.tool");
@@ -70,11 +71,15 @@ const GrepSearchSchema = z.object({
 }).describe("");
 
 /**
- * Create the `grep_search` tool instance.
- *
- * @param cwd The working directory ripgrep runs in when `path` is omitted.
- *            The server passes the agent's resolved cwd here.
+ * Directory containing the bundled ripgrep binary, or null when the binary
+ * is missing. The server passes this to makeGraph({ extraPathDirs }) so bare
+ * `rg` invocations in execute (shell) commands resolve to the bundled binary.
  */
+export function getRipgrepDir(): string | null {
+  const p = getRipgrepPath();
+  return p ? dirname(p) : null;
+}
+
 export function createRipgrepTool(cwd: string) {
   return tool(
     async (input) => {

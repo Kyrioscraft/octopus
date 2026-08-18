@@ -13,7 +13,7 @@ import { Hono, type Context } from "hono";
 import { v4 as uuid } from "uuid";
 import { getOptionalUser } from "../auth/middleware.js";
 import { makeGraph, loadConfig, getLogger, getLogContext, clearGraphCache } from "@octopus/core";
-import { createRipgrepTool } from "@octopus/extension-ripgrep";
+import { createRipgrepTool, getRipgrepDir } from "@octopus/extension-ripgrep";
 import { type AccessMode, type ExternalSubagentSpec, type SubagentEntry, interruptOnForMode, interruptOnForRuleset, GATED_TOOLS } from "@octopus/core";
 import {
   listUserThreads,
@@ -201,6 +201,9 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
   const requestedWsId =
     body.workspace_id ?? existing?.workspaceId ?? undefined;
   const { cwd: agentCwd, workspace } = resolveAgentCwd(userId, requestedWsId ?? null);
+  // Bundled ripgrep binary directory (null when the binary is missing) —
+  // prepended to the shell backend's PATH so bare `rg` works in execute.
+  const rgDir = getRipgrepDir();
   // Resolve the primary agent early so we can persist it on thread creation.
   // New clients send `agent`; legacy clients send `mode` with the same four
   // values (every legacy mode IS a builtin agent in phase 1). Anything missing
@@ -297,6 +300,9 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       // Inject the ripgrep extension tool (grep_search) — high-priority search
       // that returns matches with line numbers and context in one call.
       externalTools: [createRipgrepTool(agentCwd)],
+      // Prepend the bundled ripgrep dir to the shell PATH so bare `rg` in
+      // execute commands works without a host ripgrep install.
+      extraPathDirs: rgDir ? [rgDir] : undefined,
     });
     agent = compiled.agent;
     subagentRegistry = compiled.subagentRegistry;
@@ -392,6 +398,9 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
   // Resume in the same workspace the thread was bound to at creation.
   const existingThread = getThread(threadId);
   const { cwd: agentCwd, workspace } = resolveAgentCwd(userId, existingThread?.workspaceId ?? null);
+  // Bundled ripgrep binary directory (null when the binary is missing) —
+  // prepended to the shell backend's PATH so bare `rg` works in execute.
+  const rgDir = getRipgrepDir();
   // Read the persisted agent (access_mode column) so resume honors the
   // user's LATEST choice, not the agent active when the turn started. This is
   // what makes a mid-run switch take effect at the next approval point: the
@@ -431,6 +440,8 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
     builtinSubagentOverrides: resolveBuiltinOverrides(userId),
     // Inject the same ripgrep extension tool as the original turn.
     externalTools: [createRipgrepTool(agentCwd)],
+    // Same bundled ripgrep PATH dir as the original turn.
+    extraPathDirs: rgDir ? [rgDir] : undefined,
   });
   const agent = compiled.agent;
   const subagentRegistry = compiled.subagentRegistry;

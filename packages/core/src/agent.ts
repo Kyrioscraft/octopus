@@ -37,6 +37,7 @@ import {
 import type { ProviderConfig } from "./model_config.js";
 import { getLogger } from "./logging.js";
 import { getSystemPrompt } from "./prompts.js";
+import { resolveBash } from "./shell.js";
 import { FilesystemEmptyResultMiddleware } from "./middleware/filesystem_empty_result.js";
 import { BinaryContentSanitizerMiddleware } from "./middleware/binary_content_sanitizer.js";
 import { FileEditGuardMiddleware, shouldInterruptExecute, detectFileWrite } from "./middleware/file_edit_guard.js";
@@ -60,8 +61,101 @@ import { tmpdir, homedir } from "node:os";
 import { mkdtempSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
 
 const logger = getLogger("agent.graph");
+
+// =============================================================================
+// BashShellBackend — Windows bash execution (opencode-style).
+//
+// The SDK's LocalShellBackend spawns with `shell: true`, which resolves to
+// cmd.exe on Windows. This subclass routes commands through Git Bash
+// (`bash -c <command>`) when one is available (resolveBash(), see shell.ts),
+// so the model can use Unix syntax (`grep -rn ... | head -20`, `find`) the
+// way ZCode does. Without bash it falls back to the SDK's cmd.exe behavior
+// — the shell guidance prompt is branched to match (see
+// filesystem_policy_middleware.ts).
+//
+// The SDK class keeps env/timeout in `#private` fields (inaccessible to
+// subclasses), so we hold our own copies of the constructor options.
+// =============================================================================
+
+class BashShellBackend extends LocalShellBackend {
+  #timeout: number;
+  #maxOutputBytes: number;
+  #env: Record<string, string>;
+
+  constructor(options: {
+    rootDir: string;
+    timeout?: number;
+    maxOutputBytes?: number;
+    env?: Record<string, string>;
+    inheritEnv?: boolean;
+  }) {
+    super(options);
+    this.#timeout = options.timeout ?? 120;
+    this.#maxOutputBytes = options.maxOutputBytes ?? 1e5;
+    if (options.inheritEnv) {
+      this.#env = { ...process.env } as Record<string, string>;
+      if (options.env) Object.assign(this.#env, options.env);
+    } else {
+      this.#env = options.env ?? {};
+    }
+  }
+
+  async execute(command: string): Promise<{ output: string; exitCode: number; truncated: boolean }> {
+    if (!command || typeof command !== "string") {
+      return { output: "Error: Command must be a non-empty string.", exitCode: 1, truncated: false };
+    }
+    const bash = process.platform === "win32" ? resolveBash() : undefined;
+    return new Promise((resolve) => {
+      let stdout = "";
+      let stderr = "";
+      let timedOut = false;
+      const child = bash
+        ? spawn(bash, ["-c", command], { env: this.#env, cwd: this.cwd })
+        : spawn(command, { shell: true, env: this.#env, cwd: this.cwd });
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+      }, this.#timeout * 1e3);
+      child.stdout.on("data", (data) => {
+        stdout += data.toString();
+      });
+      child.stderr.on("data", (data) => {
+        stderr += data.toString();
+      });
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        resolve({ output: `Error executing command: ${err.message}`, exitCode: 1, truncated: false });
+      });
+      child.on("close", (code, signal) => {
+        clearTimeout(timer);
+        if (timedOut || signal === "SIGTERM") {
+          resolve({
+            output: `Error: Command timed out after ${this.#timeout.toFixed(1)} seconds.`,
+            exitCode: 124,
+            truncated: false,
+          });
+          return;
+        }
+        const outputParts = [];
+        if (stdout) outputParts.push(stdout);
+        if (stderr) {
+          const stderrLines = stderr.trim().split("\n");
+          outputParts.push(...stderrLines.map((line) => `[stderr] ${line}`));
+        }
+        let output = outputParts.join("\n");
+        const truncated = Buffer.byteLength(output, "utf8") > this.#maxOutputBytes;
+        if (truncated) {
+          output = Buffer.from(output, "utf8").subarray(0, this.#maxOutputBytes).toString("utf8");
+          output += `\n[output truncated — exceeded ${this.#maxOutputBytes} bytes]`;
+        }
+        resolve({ output, exitCode: code ?? 1, truncated });
+      });
+    });
+  }
+}
 
 // =============================================================================
 // Checkpointer — process-level singleton MemorySaver.
@@ -513,6 +607,13 @@ export async function makeGraph(
      * filtering. Part of the cache key.
      */
     externalTools?: any[];
+    /**
+     * Extra directories prepended to the shell backend's PATH (e.g. the
+     * bundled ripgrep binary directory), so bare `rg` works in execute
+     * commands without a host-wide ripgrep install. Not part of the cache
+     * key — the dir is constant for a given install.
+     */
+    extraPathDirs?: string[];
   },
 ): Promise<CompiledAgent> {
   const mcpSignature = options?.mcpConfigPath ?? "";
@@ -582,6 +683,12 @@ async function _makeGraphUncached(
     builtinSubagentOverrides?: Record<string, string | null>;
     /** External tools (e.g. ripgrep extension), injected by the server. */
     externalTools?: any[];
+    /**
+     * Extra directories to prepend to the shell backend's PATH (e.g. the
+     * bundled ripgrep binary directory), so bare `rg` works in execute
+     * commands without a host-wide ripgrep install.
+     */
+    extraPathDirs?: string[];
   },
 ): Promise<CompiledAgent> {
   const cwd = options?.cwd ?? process.cwd();
@@ -706,10 +813,19 @@ async function _makeGraphUncached(
   }
   if (!sandboxBuilt) {
     if (config.enableShell) {
-      backend = new LocalShellBackend({
+      // Prepend the bundled ripgrep binary directory (when provided by the
+      // server) to PATH so bare `rg` invocations in execute commands work
+      // even when ripgrep is not installed on the host.
+      const shellEnv: Record<string, string> = { ...(process.env as Record<string, string>) };
+      const rgDir = options?.extraPathDirs?.find((d) => d.includes("ripgrep"));
+      if (rgDir && existsSync(rgDir)) {
+        shellEnv.PATH = `${rgDir};${shellEnv.PATH ?? ""}`;
+        logger.info(`Shell PATH: prepended bundled ripgrep dir ${rgDir}`);
+      }
+      backend = new BashShellBackend({
         rootDir: cwd,
         inheritEnv: true,
-        env: process.env as Record<string, string>,
+        env: shellEnv,
       });
     } else {
       backend = new FilesystemBackend({ rootDir: cwd, virtualMode: false });
