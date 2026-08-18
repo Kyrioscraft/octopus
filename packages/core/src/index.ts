@@ -18,7 +18,7 @@ export type { SystemPromptOptions } from "./prompts.js";
 export { ConfigurableModelMiddleware } from "./middleware/configurable_model.js";
 export { FilesystemEmptyResultMiddleware } from "./middleware/filesystem_empty_result.js";
 export { BinaryContentSanitizerMiddleware } from "./middleware/binary_content_sanitizer.js";
-export { FileEditGuardMiddleware, detectFileWrite } from "./middleware/file_edit_guard.js";
+export { FileEditGuardMiddleware, detectFileWrite, shouldInterruptExecute } from "./middleware/file_edit_guard.js";
 export { ToolExceptionRecoveryMiddleware } from "./middleware/tool_exception_recovery.js";
 export { ResumeStateMiddleware } from "./middleware/resume_state.js";
 export { ShellAllowListMiddleware, isShellCommandAllowed, ShellAllowAll } from "./middleware/shell_allow_list.js";
@@ -65,6 +65,31 @@ export {
   READONLY_TOOL_NAMES,
 } from "./built_in_subagents.js";
 export type { BuiltInSubagent, BuiltinSubagentInjector } from "./built_in_subagents.js";
+
+// Builtin primary agents (agent-based successor to AccessMode — see
+// agents/builtin.ts and AGENT_MIGRATION_PLAN.md)
+export {
+  BUILTIN_AGENTS,
+  AGENT_ORDER,
+  DEFAULT_AGENT,
+  GATED_TOOLS,
+  resolveAgentPreset,
+  presetForAccessMode,
+  interruptOnForRuleset,
+} from "./agents/builtin.js";
+export type { AgentPreset } from "./agents/builtin.js";
+
+// Permission engine (pattern-based allow/ask/deny rules — phase 2)
+export { evaluate, rulesetFromConfig, staticallyDisabledTools } from "./permission/index.js";
+export { wildcardMatch } from "./permission/wildcard.js";
+export {
+  type Ruleset,
+  type PermissionRule,
+  type PermissionAction,
+  type PermissionConfig,
+  type PermissionDecision,
+  PermissionDeniedError,
+} from "./permission/types.js";
 
 // Skills
 export { listSkills, loadSkillContent, validateSkillName, generateSkillTemplate } from "./skills.js";

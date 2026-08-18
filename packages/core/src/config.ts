@@ -12,6 +12,7 @@
 import { z } from "zod";
 import { ModelConfig } from "./model_config.js";
 import { clearCaches } from "./model_config.js";
+import { presetForAccessMode, interruptOnForRuleset, GATED_TOOLS } from "./agents/builtin.js";
 
 // =============================================================================
 // Access modes — workspace access mode (plan / confirm / auto / full).
@@ -70,32 +71,10 @@ export const DESTRUCTIVE_TOOLS = new Set<string>([
 export function interruptOnForMode(
   mode: AccessMode,
 ): Record<string, boolean> | null {
-  if (mode === "auto" || mode === "full") {
-    // Suppress every gated tool (destructive + execute + the
-    // read-only-but-gated web_search/fetch_url) so the run is fully
-    // autonomous. `execute` is no longer in DESTRUCTIVE_TOOLS (it survives
-    // plan mode for search), but it is still HITL-gated in confirm mode via
-    // `_addInterruptOn()`, so it must be listed here to auto-approve in
-    // auto/full. `auto` and `full` share the same HITL override; they differ
-    // only in that `full` additionally bypasses FileEditGuard at build time.
-    const all = [...DESTRUCTIVE_TOOLS, "execute", "web_search", "fetch_url"];
-    return Object.fromEntries(all.map((n) => [n, false]));
-  }
-  if (mode === "plan") {
-    // ZCode-style plan mode: read-only operations run freely. The toolset is
-    // already stripped of destructive tools (write_file/edit_file/task/...)
-    // and FileEditGuardMiddleware hard-blocks shell file writes, so the
-    // remaining gated-but-read-only tools are safe to auto-approve:
-    //   - task        : subagent delegation (Explore is read-only by design)
-    //   - execute     : Bash for codebase search (rg/find/ls); writes blocked
-    //                   by FileEditGuard
-    //   - web_search / fetch_url : read-only network access
-    const readOnly = ["task", "execute", "web_search", "fetch_url"];
-    return Object.fromEntries(readOnly.map((n) => [n, false]));
-  }
-  // confirm: the compiled `_addInterruptOn()` already gates every destructive
-  // tool — keep the default.
-  return null;
+  // Phase 2 of the agent migration: derive the override from the preset's
+  // pattern-based permission rules instead of hard-coded tool lists.
+  // Behavior for the four builtin presets is identical to phase 1.
+  return interruptOnForRuleset(presetForAccessMode(mode).permission, GATED_TOOLS);
 }
 
 // =============================================================================

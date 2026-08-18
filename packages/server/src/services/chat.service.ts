@@ -108,6 +108,7 @@ export interface ResumeRequestBody {
   feedback?: string;
   decisions?: Array<
     | { type: "approve" }
+    | { type: "always"; tool?: string }
     | { type: "reject"; message?: string }
     | { type: "edit"; editedAction: { name: string; args: Record<string, unknown> } }
   >;
@@ -122,12 +123,15 @@ export interface ResumeRequestBody {
 // Persistence helpers (moved from chat.ts)
 // =============================================================================
 
-/** Persist user message to thread store. */
-export function saveUserMessage(threadId: string, content: string): void {
+/** Persist user message to thread store. The optional agent name is stored
+ *  in extraMetadata — message-level agent binding (phase 3 of the agent
+ *  migration, mirroring opencode's per-message agent field). */
+export function saveUserMessage(threadId: string, content: string, agent?: string): void {
   addMessage(threadId, {
     id: `msg_${Date.now()}`,
     role: "user",
     content,
+    extraMetadata: agent ? { agent } : undefined,
     createdAt: new Date().toISOString(),
   });
 }

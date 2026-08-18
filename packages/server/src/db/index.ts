@@ -46,6 +46,12 @@ export interface ThreadRow {
   workspaceId?: string | null;
   /** Persisted access mode (plan/confirm/auto/full). Defaults to "confirm". */
   accessMode: string;
+  /**
+   * Thread-level permission rules (phase 2): JSON-serialized Ruleset appended
+   * after the agent preset's rules. Populated by HITL "always" approvals.
+   * Null = no extra rules (legacy rows / fresh threads).
+   */
+  permission?: string | null;
   createdAt: string;
   messages: MessageRow[];
 }
@@ -280,6 +286,12 @@ function getDb(): BetterSQLite3Database<typeof schema> {
     if (!/duplicate column/i.test(err?.message ?? "")) throw err;
   }
   try {
+    // Thread-level permission rules (JSON Ruleset; see ThreadRow.permission).
+    sqlite.exec(`ALTER TABLE threads ADD COLUMN permission TEXT;`);
+  } catch (err: any) {
+    if (!/duplicate column/i.test(err?.message ?? "")) throw err;
+  }
+  try {
     sqlite.exec(`ALTER TABLE workspaces ADD COLUMN environment TEXT NOT NULL DEFAULT 'local';`);
   } catch (err: any) {
     if (!/duplicate column/i.test(err?.message ?? "")) throw err;
@@ -357,6 +369,8 @@ function mapThread(
     // Legacy rows (created before access_mode existed) have NULL — coerce to
     // the default per-step-approval mode so resume behaves as before.
     accessMode: t.accessMode ?? "confirm",
+    // Thread-level permission rules (JSON array; NULL/legacy → no extra rules).
+    permission: t.permission ?? null,
     createdAt: t.createdAt,
     messages: msgs,
   };
@@ -512,8 +526,68 @@ export function updateThreadAccessMode(id: string, accessMode: string): ThreadRo
   const db = getDb();
   const existing = db.select().from(schema.threads).where(eq(schema.threads.id, id)).get();
   if (!existing) return undefined;
-  db.update(schema.threads).set({ accessMode }).where(eq(schema.threads.id, id)).run();
-  return mapThread({ ...existing, accessMode }, []);
+  // Switching the agent resets the thread-level permission rules — "always"
+  // approvals belong to the agent context they were granted under.
+  db.update(schema.threads)
+    .set({ accessMode, permission: null })
+    .where(eq(schema.threads.id, id))
+    .run();
+  return mapThread({ ...existing, accessMode, permission: null }, []);
+}
+
+/**
+ * Append a permission rule to the thread's ruleset (HITL "always" approval).
+ * Rules are stored as a JSON array; the new rule is appended LAST so it
+ * overrides any earlier thread rule for the same permission+pattern
+ * (findLast evaluation, see core/src/permission/index.ts).
+ */
+export function addThreadPermissionRule(
+  id: string,
+  rule: { permission: string; pattern: string; action: "allow" | "ask" | "deny" },
+): ThreadRow | undefined {
+  const db = getDb();
+  const existing = db.select().from(schema.threads).where(eq(schema.threads.id, id)).get();
+  if (!existing) return undefined;
+  let rules: unknown[] = [];
+  if (existing.permission) {
+    try {
+      const parsed = JSON.parse(existing.permission);
+      if (Array.isArray(parsed)) rules = parsed;
+    } catch {
+      // Corrupt JSON — start fresh rather than failing the approval.
+    }
+  }
+  rules.push(rule);
+  const permission = JSON.stringify(rules);
+  db.update(schema.threads).set({ permission }).where(eq(schema.threads.id, id)).run();
+  return mapThread({ ...existing, permission }, []);
+}
+
+/** Read the thread's permission ruleset (parsed); empty when unset/corrupt. */
+export function getThreadPermissionRules(id: string): Array<{
+  permission: string;
+  pattern: string;
+  action: "allow" | "ask" | "deny";
+}> {
+  const db = getDb();
+  const existing = db.select().from(schema.threads).where(eq(schema.threads.id, id)).get();
+  if (!existing?.permission) return [];
+  try {
+    const parsed = JSON.parse(existing.permission);
+    if (!Array.isArray(parsed)) return [];
+    const out: Array<{ permission: string; pattern: string; action: "allow" | "ask" | "deny" }> = [];
+    for (const r of parsed) {
+      if (
+        r && typeof r.permission === "string" && typeof r.pattern === "string" &&
+        (r.action === "allow" || r.action === "ask" || r.action === "deny")
+      ) {
+        out.push({ permission: r.permission, pattern: r.pattern, action: r.action });
+      }
+    }
+    return out;
+  } catch {
+    return [];
+  }
 }
 
 export function deleteThread(id: string): void {

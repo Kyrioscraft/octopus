@@ -22,6 +22,8 @@
  */
 
 import { ToolMessage } from "@langchain/core/messages";
+import { evaluate } from "../permission/index.js";
+import type { Ruleset } from "../permission/types.js";
 
 interface ToolCallRequest {
   toolCall: { id?: string; name: string; args?: Record<string, unknown> };
@@ -78,21 +80,32 @@ function detectFileWrite(
  *
  * `bypassWhenFull` disables the guard entirely. It is set when the graph is
  * built for `full` access mode, where the user has explicitly opted into a
- * fully autonomous agent (including shell commands that write files). In all
- * other modes (plan/confirm/auto) the guard stays active so non-Anthropic
- * models are still redirected toward `edit_file` / `write_file`.
+ * fully autonomous agent (including shell commands that write files).
+ *
+ * `fileWriteRuleset` (phase 2 leftover #1): when provided, the guard becomes
+ * rule-driven instead of always hard-blocking. Shell file-write commands are
+ * evaluated against the ruleset (findLast, see core/src/permission):
+ *   - "allow" → pass through (no interception; HITL is handled elsewhere)
+ *   - "ask"   → pass through too, but the `execute` HITL `when` predicate
+ *               (configured in agent.ts `_addInterruptOn`) triggers an
+ *               approval interrupt for exactly these commands
+ *   - "deny"  → hard-block with the redirect-to-edit_file message (default
+ *               behavior when no ruleset is given — backwards compatible)
  */
 interface FileEditGuardOptions {
   bypassWhenFull?: boolean;
+  fileWriteRuleset?: Ruleset;
 }
 
 class FileEditGuardMiddleware {
   name = "FileEditGuardMiddleware";
 
   private readonly _bypassWhenFull: boolean;
+  private readonly _ruleset?: Ruleset;
 
   constructor(options: FileEditGuardOptions = {}) {
     this._bypassWhenFull = options.bypassWhenFull === true;
+    this._ruleset = options.fileWriteRuleset;
   }
 
   private _intercept = (request: ToolCallRequest): ToolMessage | undefined => {
@@ -107,6 +120,16 @@ class FileEditGuardMiddleware {
     const command = (args["command"] as string) || "";
     const detected = detectFileWrite(command);
     if (!detected) return undefined;
+
+    // Rule-driven mode: only hard-block on an explicit "deny". "ask" and
+    // "allow" pass through here — the HITL `when` predicate on `execute`
+    // (see _addInterruptOn in agent.ts) handles asking; the default when no
+    // rule matches remains "deny" (the historical always-block behavior,
+    // since FILE_WRITE_PATTERNS are intentionally conservative).
+    if (this._ruleset) {
+      const decision = evaluate("shell_file_write", command, this._ruleset);
+      if (decision.action !== "deny") return undefined;
+    }
 
     const tool = detected.tool;
     return new ToolMessage({
@@ -135,3 +158,25 @@ class FileEditGuardMiddleware {
 }
 
 export { FileEditGuardMiddleware, detectFileWrite };
+
+/**
+ * Should an `execute` (shell) call HITL-interrupt under the given ruleset?
+ * Used by the `execute` entry in `_addInterruptOn` (agent.ts) as its `when`
+ * predicate. Two layers:
+ *
+ *   1. The `execute` rule verdict governs ordinary commands — "ask"
+ *      interrupts (confirm's `*: ask` keeps the historical always-ask),
+ *      "allow" passes.
+ *   2. A detected file-write command ALSO interrupts when its
+ *      `shell_file_write` verdict is "ask" (even when `execute` itself is
+ *      allowed) — pairs with FileEditGuardMiddleware, which hard-blocks
+ *      "deny" and passes "ask"/"allow" through to this predicate.
+ */
+export function shouldInterruptExecute(command: string, ruleset: Ruleset): boolean {
+  const fileWrite = !!detectFileWrite(command);
+  const executeVerdict = evaluate("execute", command, ruleset).action;
+  if (executeVerdict === "ask") return true;
+  if (executeVerdict === "deny") return false; // statically removed / guard blocks
+  // execute allowed: file-write commands still ask when their rule says so.
+  return fileWrite && evaluate("shell_file_write", command, ruleset).action === "ask";
+}

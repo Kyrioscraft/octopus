@@ -64,11 +64,15 @@ export interface ChatRequest {
   /** Optional per-request model override ("provider:model"). Applied server-side
    *  via the configurable_model middleware; omitted = use config default. */
   model?: string;
-  /** Workspace access mode: "plan" | "confirm" | "auto" | "full".
-   *  plan   = read-only (destructive tools stripped).
+  /** Primary agent name: "plan" | "confirm" | "auto" | "full" — the
+   *  agent-based successor of the access mode (every legacy mode IS a
+   *  builtin agent; see @octopus/core agents/builtin.ts).
+   *  plan   = read-only (destructive tools stripped) + plan approval gate.
    *  confirm= per-step HITL approval (default).
    *  auto   = HITL suppressed (but FileEditGuard still redirects shell writes).
    *  full   = HITL suppressed AND FileEditGuard bypassed (fully autonomous). */
+  agent?: "plan" | "confirm" | "auto" | "full";
+  /** Legacy access-mode field — folded into `agent` server-side. @deprecated */
   mode?: "plan" | "confirm" | "auto" | "full";
   /** Optional client-generated request id, used for optimistic UI correlation. */
   request_id?: string;
@@ -202,6 +206,7 @@ export interface ResumeRequestBody {
   /** tool_approval answers (one per actionRequest, in order). */
   decisions?: Array<
     | { type: "approve" }
+    | { type: "always"; tool?: string }
     | { type: "reject"; message?: string }
     | { type: "edit"; editedAction: { name: string; args: Record<string, unknown> } }
   >;

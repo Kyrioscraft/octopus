@@ -77,6 +77,23 @@ running `server`/`web`, since they import compiled `dist/` output.
   `server/src/routes/chat.ts` catches it and resumes with a
   `Command({ resume: { decisions: [...] } })`. The `decisions` array length
   **must** match the number of interrupted action requests.
+- **Agents (not "modes")** — the old AccessMode (plan/confirm/auto/full) is
+  now data-driven agent presets in `core/src/agents/builtin.ts`
+  (`AgentPreset`: promptBlock / disabledTools / interruptOnOverride /
+  bypassFileEditGuard / submitPlan / permissionConfig). `makeGraph` takes
+  `agent?: string` (`accessMode` is a deprecated alias — same values).
+  Wire field `agent` (legacy `mode` still accepted). Plan mode has a
+  `submit_plan` approval gate (opencode plan_exit equivalent); approval
+  switches the thread to the confirm agent + injects a synthetic user
+  message. Agent is bound per message (`messages.extra_metadata.agent`),
+  inherited from the last user message when unspecified.
+- **Permission rules** — `core/src/permission/` implements opencode-style
+  pattern rules (`allow`/`ask`/`deny` + globs, findLast evaluation, default
+  `ask`). Preset `interruptOnOverride` is DERIVED from
+  `permissionConfig` via `interruptOnForRuleset`. HITL "always" approvals
+  persist as thread-level rules (`threads.permission` JSON column, cleared on
+  agent switch) and are merged into the runtime `interruptOn` override.
+  See `AGENT_MIGRATION_PLAN.md` for the full design + implementation log.
 - Model spec format is `"provider:model"` (e.g. `"anthropic:claude-sonnet-4-6"`).
   Unknown providers fall back to OpenAI-compatible `ChatOpenAI` with a custom
   `baseURL`.

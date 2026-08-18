@@ -26,7 +26,7 @@
  */
 
 import { useState } from "react";
-import { Button, Input, Radio, Checkbox, Tooltip } from "antd";
+import { Button, Input, Radio, Checkbox } from "antd";
 import type {
   AskKind,
   AskQuestion,
@@ -64,21 +64,6 @@ const S = {
     border: "1px solid var(--gray-600)",
     boxShadow: "none",
   } as React.CSSProperties,
-
-  rejectBase: {
-    background: "transparent",
-    color: "var(--color-error-500)",
-    border: "1px solid var(--color-error-200)",
-    boxShadow: "none",
-    transition: "all 0.18s ease",
-  } as React.CSSProperties,
-  rejectHover: {
-    background: "var(--color-error-50)",
-    borderColor: "var(--color-error-500)",
-  } as React.CSSProperties,
-  rejectPress: {
-    background: "var(--color-error-100)",
-  } as React.CSSProperties,
 };
 
 /** Merge style objects — later objects override earlier ones. */
@@ -101,7 +86,7 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
 
   // Per-question answer staging. Keyed by question_id so pagination doesn't
   // lose state when the user flips back and forth.
-  type Approval = { type: "approve" | "reject" };
+  type Approval = { type: "approve" | "always" | "reject" };
   const [approvals, setApprovals] = useState<Record<string, Approval>>({});
   const [selections, setSelections] = useState<Record<string, string | string[]>>({});
   const [texts, setTexts] = useState<Record<string, string>>({});
@@ -118,17 +103,33 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
     }
     if (q.options && q.options.length > 0) {
       const sel = selections[q.question_id];
-      return Array.isArray(sel) ? sel.length > 0 : !!sel;
+      if (Array.isArray(sel)) {
+        // "其他" counts only when the free-text is filled.
+        const concrete = sel.filter((v) => v !== "__other__");
+        if (concrete.length > 0) return true;
+        return sel.includes("__other__") && !!(texts[q.question_id] ?? "").trim();
+      }
+      if (sel === "__other__") return !!(texts[q.question_id] ?? "").trim();
+      return !!sel;
     }
     return !!(texts[q.question_id] ?? "").trim();
   };
 
-  /** Build the final ResumeRequestBody from the staged state. */
+  /** Build the final ResumeRequestBody from the staged state.
+   *  (`meta.approveForSession` is legacy — "always" now comes through the
+   *  staged approval itself, selected as an option row in the body.) */
   const buildBody = (meta?: { approveForSession?: boolean }): ResumeRequestBody => {
     if (payload.kind === "tool_approval") {
       const decisions = payload.questions.map((q) => {
         const a = approvals[q.question_id];
-        return a ?? { type: "approve" as const };
+        if (!a) return { type: "approve" as const };
+        if (a.type === "always") {
+          return {
+            type: "always" as const,
+            ...(q.context?.source ? { tool: q.context.source } : {}),
+          };
+        }
+        return a;
       });
       return { kind: "tool_approval", decisions };
     }
@@ -143,11 +144,19 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
       };
     }
     const answers = payload.questions.map((q) => {
-      const sel = selections[q.question_id];
+      const rawSel = selections[q.question_id];
       const txt = texts[q.question_id];
+      // Strip the "其他" sentinel — the free-text IS the answer for it.
+      const sel = Array.isArray(rawSel)
+        ? rawSel.filter((v) => v !== "__other__")
+        : rawSel === "__other__"
+          ? undefined
+          : rawSel;
       return {
         question_id: q.question_id,
-        ...(sel !== undefined ? { selection: sel } : {}),
+        ...(sel !== undefined && (Array.isArray(sel) ? sel.length > 0 : true)
+          ? { selection: sel }
+          : {}),
         ...(txt && txt.trim() ? { text: txt.trim() } : {}),
       };
     });
@@ -241,7 +250,9 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         sessionAllowed={sessionAllowed}
       />
 
-      {/* Footer toolbar — primary action only (pagination moved to header). */}
+      {/* Footer toolbar — primary action only (pagination moved to header).
+          All kinds share the same 下一题/提交 flow now that approvals are
+          staged as option rows in the body (no per-kind button clusters). */}
       <div
         style={{
           display: "flex",
@@ -251,26 +262,7 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
           marginTop: 12,
         }}
       >
-        {/* Right cluster: primary action. */}
-        {payload.kind === "tool_approval" ? (
-          <ToolApprovalActions
-            answered={!!approvals[current.question_id]}
-            approval={approvals[current.question_id]}
-            sessionAllowed={sessionAllowed}
-            isLast={isLast}
-            onSet={(a) => setApprovals((p) => ({ ...p, [current.question_id]: a }))}
-            onNext={() => setPage((p) => Math.min(total - 1, p + 1))}
-            onSubmitAll={submitAll}
-          />
-        ) : payload.kind === "plan_approval" ? (
-          <PlanApprovalActions
-            approval={approvals[current.question_id]}
-            isLast={isLast}
-            onSet={(a) => setApprovals((p) => ({ ...p, [current.question_id]: a }))}
-            onNext={() => setPage((p) => Math.min(total - 1, p + 1))}
-            onSubmitAll={submitAll}
-          />
-        ) : isLast ? (
+        {isLast ? (
           <Button
             size="small"
             icon={<Check />}
@@ -388,10 +380,13 @@ function QuestionBody(p: BodyProps) {
 function ToolApprovalBody({
   q,
   header,
+  approval,
+  onApproval,
   sessionAllowed,
 }: BodyProps & { header: React.ReactNode }) {
   const actionReq = q.context?.actionRequests?.[0];
   const toolName = q.context?.source ?? q.header ?? "工具";
+  const allowAlways = !sessionAllowed;
   const previewKey = actionReq?.args
     ? Object.keys(actionReq.args).find((k) =>
         ["command", "file_path", "path", "url", "query"].includes(k),
@@ -419,8 +414,40 @@ function ToolApprovalBody({
           <span style={{ fontSize: 11, color: "var(--gray-400)" }}>· 已自动批准</span>
         )}
       </div>
-      {/* Only show the question text if it adds info beyond the tool name. */}
-      {q.question && q.question !== `批准执行: ${toolName}?` && header}
+      {/* "Why am I being asked" — the matched permission rule, embedded by the
+          dynamic HITL description (see _addInterruptOn in core/agent.ts).
+          Rendered as a subdued chip so it reads as provenance, not question. */}
+      {(() => {
+        const m = /\(matched permission rule "([^"]+)" → (\w+)\)/.exec(q.question ?? "");
+        if (!m) return null;
+        return (
+          <div
+            style={{
+              fontSize: 11,
+              color: "var(--gray-500)",
+              background: "var(--gray-50)",
+              border: "1px solid var(--gray-150)",
+              borderRadius: 6,
+              padding: "3px 8px",
+              marginBottom: 6,
+              width: "fit-content",
+            }}
+          >
+            触发规则: <code style={{ fontSize: 11 }}>{m[1]}</code> → {m[2]}
+          </div>
+        );
+      })()}
+      {/* Only show the question text if it adds info beyond the tool name AND
+          beyond the rule chip above (strip the embedded rule annotation). */}
+      {(() => {
+        const stripped = (q.question ?? "").replace(/\s*\(matched permission rule "[^"]+" → \w+\)/, "");
+        if (!q.question || q.question === `批准执行: ${toolName}?` || !stripped.trim()) return null;
+        return (
+          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-900)", marginBottom: 8 }}>
+            {stripped}
+          </div>
+        );
+      })()}
       {previewVal && (
         <div
           onClick={() => setExpanded((v) => !v)}
@@ -458,93 +485,87 @@ function ToolApprovalBody({
           {JSON.stringify(actionReq.args, null, 2)}
         </pre>
       )}
+      {/* Decision as option rows — same visual language as the discussion
+          body (radio-style selectable rows) instead of footer buttons. */}
+      <ApprovalOptionRows
+        approval={approval}
+        onApproval={onApproval}
+        sessionAllowed={sessionAllowed}
+        allowAlways={allowAlways}
+      />
     </div>
   );
 }
 
 /**
- * tool_approval action cluster (rendered in the footer's right slot). Shows
- * reject / approve pills; on the last page they submit the full set, on
- * earlier pages they record + auto-advance.
+ * Decision options rendered as selectable rows (radio-style), matching the
+ * discussion body's visual language. Replaces the old footer button cluster:
+ *   批准 / 本会话都批准(always) / 拒绝
+ * Selecting a row stages the decision; the footer's 提交/下一题 button
+ * advances/submits like the discussion flow.
  */
-function ToolApprovalActions({
-  answered,
+function ApprovalOptionRows({
   approval,
+  onApproval,
   sessionAllowed,
-  isLast,
-  onSet,
-  onNext,
-  onSubmitAll,
+  allowAlways,
 }: {
-  answered: boolean;
   approval?: Approval;
+  onApproval: (a: Approval) => void;
   sessionAllowed: boolean;
-  isLast: boolean;
-  onSet: (a: Approval) => void;
-  onNext: () => void;
-  onSubmitAll: (meta?: { approveForSession?: boolean }) => void;
+  allowAlways: boolean;
 }) {
-  // For tool_approval the decision buttons ARE the per-question answer —
-  // tapping one records it, then advances (mid-pages) or submits (last page).
-  const decide = (a: Approval) => {
-    onSet(a);
-    if (isLast) onSubmitAll();
-    else onNext();
-  };
-
-  const [rejectState, setRejectState] = useState<"base" | "hover" | "press">("base");
-  const [approveState, setApproveState] = useState<"base" | "hover" | "press">("base");
-
+  const rows: Array<{ value: Approval["type"]; label: string; hint?: string; danger?: boolean }> = [
+    { value: "approve", label: "批准" },
+    ...(allowAlways
+      ? [{ value: "always" as const, label: "本会话都批准", hint: "本次会话内对该工具自动批准" }]
+      : []),
+    { value: "reject", label: "拒绝", danger: true },
+  ];
   return (
-    <>
-      <Button
-        size="small"
-        onClick={() => decide({ type: "reject" })}
-        style={css(
-          S.rejectBase,
-          rejectState === "hover" && S.rejectHover,
-          rejectState === "press" && S.rejectPress,
-        )}
-        onMouseEnter={() => setRejectState("hover")}
-        onMouseLeave={() => setRejectState("base")}
-        onMouseDown={() => setRejectState("press")}
-        onMouseUp={() => setRejectState("hover")}
-      >
-        拒绝
-      </Button>
-      <Button
-        size="small"
-        icon={<Check />}
-        onClick={() => decide({ type: "approve" })}
-        style={css(
-          S.mainBase,
-          approveState === "hover" && S.mainHover,
-          approveState === "press" && S.mainPress,
-        )}
-        onMouseEnter={() => setApproveState("hover")}
-        onMouseLeave={() => setApproveState("base")}
-        onMouseDown={() => setApproveState("press")}
-        onMouseUp={() => setApproveState("hover")}
-      >
-        批准
-      </Button>
-      {!sessionAllowed && isLast && (
-        <Tooltip title="本次会话内对该工具自动批准（刷新失效）">
-          <Button size="small" onClick={() => onSubmitAll({ approveForSession: true })}>
-            本次会话都批准
-          </Button>
-        </Tooltip>
-      )}
-    </>
+    <Radio.Group
+      value={approval?.type ?? ""}
+      onChange={(e) => {
+        const v = e.target.value as Approval["type"];
+        onApproval({ type: v });
+      }}
+      style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}
+    >
+      {rows.map((r) => (
+        <Radio key={r.value} value={r.value}>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 500,
+              color: r.danger ? "var(--color-error-500)" : "var(--gray-900)",
+            }}
+          >
+            {r.label}
+          </span>
+          {r.hint && (
+            <span style={{ color: "var(--gray-400)", marginLeft: 6, fontSize: 12 }}>
+              {r.hint}
+            </span>
+          )}
+          {sessionAllowed && r.value === "approve" && (
+            <span style={{ fontSize: 11, color: "var(--gray-400)", marginLeft: 6 }}>
+              （已在会话白名单，将自动批准）
+            </span>
+          )}
+        </Radio>
+      ))}
+    </Radio.Group>
   );
 }
 
+
 // -----------------------------------------------------------------------------
-// plan_approval body — the full plan text (markdown-as-plain, scrollable) as
-// submitted by the agent's submit_plan tool.
+// plan_approval body — the full plan text (scrollable) + decision option
+// rows; rejection reveals a feedback input (same visual language as the
+// discussion body's "Other…" inline input).
 // -----------------------------------------------------------------------------
 
-function PlanApprovalBody({ q, approval, text, onText }: BodyProps) {
+function PlanApprovalBody({ q, approval, onApproval, text, onText }: BodyProps) {
   return (
     <div style={{ paddingLeft: 2, width: "100%" }}>
       <pre
@@ -566,6 +587,28 @@ function PlanApprovalBody({ q, approval, text, onText }: BodyProps) {
       >
         {q.question}
       </pre>
+      <Radio.Group
+        value={approval?.type ?? ""}
+        onChange={(e) => onApproval({ type: e.target.value as Approval["type"] })}
+        style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}
+      >
+        <Radio value="approve">
+          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--gray-900)" }}>
+            批准并执行
+          </span>
+          <span style={{ color: "var(--gray-400)", marginLeft: 6, fontSize: 12 }}>
+            切换到 confirm 智能体开始实现
+          </span>
+        </Radio>
+        <Radio value="reject">
+          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-error-500)" }}>
+            拒绝并修改
+          </span>
+          <span style={{ color: "var(--gray-400)", marginLeft: 6, fontSize: 12 }}>
+            继续计划模式，按反馈修订
+          </span>
+        </Radio>
+      </Radio.Group>
       {approval?.type === "reject" && (
         <TextArea
           value={text}
@@ -577,75 +620,6 @@ function PlanApprovalBody({ q, approval, text, onText }: BodyProps) {
         />
       )}
     </div>
-  );
-}
-
-/**
- * plan_approval action cluster — 批准 (switches the session to confirm mode
- * and starts executing) / 拒绝 (agent revises; optional feedback via the
- * clarify-style text area rendered above when a rejection is staged).
- */
-function PlanApprovalActions({
-  approval,
-  isLast,
-  onSet,
-  onNext,
-  onSubmitAll,
-}: {
-  approval?: Approval;
-  isLast: boolean;
-  onSet: (a: Approval) => void;
-  onNext: () => void;
-  onSubmitAll: (meta?: { approveForSession?: boolean }) => void;
-}) {
-  const decide = (a: Approval) => {
-    onSet(a);
-    if (isLast && a.type === "approve") onSubmitAll();
-    // Rejection waits for the (optional) feedback + the 提交 button.
-  };
-
-  const [rejectState, setRejectState] = useState<"base" | "hover" | "press">("base");
-  const [approveState, setApproveState] = useState<"base" | "hover" | "press">("base");
-
-  return (
-    <>
-      {approval?.type === "reject" && (
-        <Button size="small" onClick={() => onSubmitAll()}>
-          提交修改意见
-        </Button>
-      )}
-      <Button
-        size="small"
-        onClick={() => decide({ type: "reject" })}
-        style={css(
-          S.rejectBase,
-          rejectState === "hover" && S.rejectHover,
-          rejectState === "press" && S.rejectPress,
-        )}
-        onMouseEnter={() => setRejectState("hover")}
-        onMouseLeave={() => setRejectState("base")}
-        onMouseDown={() => setRejectState("press")}
-        onMouseUp={() => setRejectState("hover")}
-      >
-        拒绝并修改
-      </Button>
-      <Button
-        size="small"
-        icon={<Check />}
-        onClick={() => decide({ type: "approve" })}
-        style={css(
-          S.mainBase,
-          approveState === "hover" && S.mainHover,
-          approveState === "press" && S.mainPress,
-        )}
-        onMouseEnter={() => setApproveState("hover")}
-        onMouseLeave={() => setApproveState("base")}
-        onMouseDown={() => setApproveState("press")}
-        onMouseUp={() => setApproveState("hover")}
-      >
-        批准并执行
-      </Button>
-    </>
   );
 }
 
@@ -663,6 +637,23 @@ function DiscussionBody({
 }: BodyProps & { header: React.ReactNode }) {
   const multi = !!q.multi_select;
   const options = q.options ?? [];
+  const OTHER = "__other__";
+  // Selection state carries OTHER when the "其他" row is picked; the actual
+  // free-text lives in `text`. Submit (buildBody) strips OTHER and keeps the
+  // text so the agent only sees the typed answer.
+  const sel = selection as string | string[] | undefined;
+  const isOtherSelected = multi
+    ? Array.isArray(sel) && sel.includes(OTHER)
+    : sel === OTHER;
+
+  const pickOther = () => {
+    if (multi) {
+      const cur = Array.isArray(sel) ? sel : [];
+      onSelection(cur.includes(OTHER) ? cur.filter((v) => v !== OTHER) : [...cur, OTHER]);
+    } else {
+      onSelection(OTHER);
+    }
+  };
 
   return (
     <div style={{ paddingLeft: 2 }}>
@@ -706,14 +697,43 @@ function DiscussionBody({
           ))}
         </Radio.Group>
       )}
+      {/* "其他" — an option row WITH an inline input (not a detached
+          textarea below the options). Typing selects the row automatically. */}
       {q.allow_other && (
-        <TextArea
-          value={text}
-          onChange={(e) => onText(e.target.value)}
-          placeholder="其他…（自由输入）"
-          autoSize={{ minRows: 1, maxRows: 4 }}
-          style={{ fontSize: 13, marginTop: 8 }}
-        />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 8,
+            marginTop: 8,
+            padding: isOtherSelected ? "6px 8px" : 0,
+            borderRadius: 6,
+            border: isOtherSelected ? "1px solid var(--gray-300)" : "1px solid transparent",
+            background: isOtherSelected ? "var(--gray-0)" : "transparent",
+            transition: "all 0.15s ease",
+          }}
+        >
+          {multi ? (
+            <Checkbox checked={isOtherSelected} onChange={pickOther} style={{ marginTop: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--gray-900)" }}>其他…</span>
+            </Checkbox>
+          ) : (
+            <Radio checked={isOtherSelected} onClick={pickOther} style={{ marginTop: 4 }}>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--gray-900)" }}>其他…</span>
+            </Radio>
+          )}
+          <TextArea
+            value={text}
+            onChange={(e) => {
+              onText(e.target.value);
+              // Typing implies choosing "其他" — auto-select the row.
+              if (e.target.value && !isOtherSelected) pickOther();
+            }}
+            placeholder="自由输入…"
+            autoSize={{ minRows: 1, maxRows: 4 }}
+            style={{ fontSize: 13, flex: 1, marginTop: 0 }}
+          />
+        </div>
       )}
     </div>
   );
@@ -746,7 +766,7 @@ function ClarifyBody({ q, text, onText, header }: BodyProps & { header: React.Re
 // the same wording as the panel would.
 // -----------------------------------------------------------------------------
 
-type Approval = { type: "approve" | "reject" };
+type Approval = { type: "approve" | "always" | "reject" };
 
 /** Build a short human-readable summary of a resolved AskEvent. */
 export function summarizeResolution(

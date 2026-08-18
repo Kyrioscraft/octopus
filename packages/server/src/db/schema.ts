@@ -32,6 +32,13 @@ export const threads = sqliteTable("threads", {
   // rows is coerced to "confirm" by mapThread.
   // NOTE: added via idempotent ALTER TABLE (see db/index.ts).
   accessMode: text("access_mode"),
+  // Thread-level permission rules (phase 2 of the agent migration) — a JSON
+  // array of { permission, pattern, action } rules appended AFTER the agent
+  // preset's rules at evaluation time. Populated by HITL "always" approvals
+  // (the server-side successor of the client-side sessionAllowlist) and
+  // cleared when the thread's agent changes. NULL/empty = no extra rules.
+  // NOTE: added via idempotent ALTER TABLE (see db/index.ts).
+  permission: text("permission"),
   createdAt: text("created_at").notNull(),
 });
 

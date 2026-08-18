@@ -207,6 +207,15 @@ export function useChat({
     try {
       const r = await sdk.getThreadHistory(tid);
       setMsgs(normalizeHistory(r.history ?? []));
+      // Message-level agent inheritance (phase 3): sync the input bar's
+      // agent selector with the thread's last user-message agent so a
+      // restored session continues where it left off (e.g. plan → approved
+      // → confirm carries into the next turn's default).
+      const lastUser = [...(r.history ?? [])].reverse().find((m) => m.role === "user");
+      const fromMsg = lastUser?.extraMetadata?.agent;
+      if (fromMsg === "plan" || fromMsg === "auto" || fromMsg === "full" || fromMsg === "confirm") {
+        setAccessMode(fromMsg);
+      }
     } catch { setMsgs([]); }
   }, []);
 
@@ -368,7 +377,9 @@ export function useChat({
           messages: [{ role: "user", content }],
           thread_id: activeThreadId,
           ...(sendWorkspaceId ? { workspace_id: sendWorkspaceId } : {}),
-          mode: accessMode,
+          // Agent name (successor of the access mode — same four values in
+          // phase 1, see AGENT_MIGRATION_PLAN.md).
+          agent: accessMode,
           ...(selectedModel ? { model: selectedModel } : {}),
         },
         { signal: controller.signal }
@@ -397,6 +408,13 @@ export function useChat({
             return next;
           });
         }
+      }
+      // Plan approved → the server flips the thread to the confirm agent.
+      // Mirror that locally so the input bar's selector updates AND the next
+      // message is sent with agent=confirm (otherwise /agent would sync the
+      // thread BACK to plan, re-stripping the write tools mid-execution).
+      if (body.kind === "plan_approval" && body.approved !== false) {
+        setAccessMode("confirm");
       }
       turnAcc.current?.resolveAsk(body);
       const resolvedEvents = turnAcc.current?.snapshot();
@@ -454,10 +472,10 @@ export function useChat({
     setAccessMode(mode);
     const tid = activeThreadId;
     if (tid) {
-      sdk.setThreadMode(tid, mode).catch((err) => {
+      sdk.setThreadAgent(tid, mode).catch((err) => {
         // Don't surface as a user-facing error: the next /agent request also
-        // syncs the mode, so a failed PATCH here is self-healing.
-        console.warn("Failed to persist access mode on thread", tid, err);
+        // syncs the agent, so a failed PATCH here is self-healing.
+        console.warn("Failed to persist agent on thread", tid, err);
       });
     }
   }, [activeThreadId]);

@@ -24,6 +24,9 @@ import { BUILTIN_SUBAGENTS } from "./built_in_subagents.js";
 import { CompositeBackend, FilesystemBackend, LocalShellBackend, LangSmithSandbox } from "deepagents";
 import { MemorySaver } from "@langchain/langgraph-checkpoint";
 import { type ServerConfig, type AccessMode, DESTRUCTIVE_TOOLS } from "./config.js";
+import { resolveAgentPreset } from "./agents/builtin.js";
+import type { Ruleset } from "./permission/types.js";
+import { evaluate } from "./permission/index.js";
 import {
   ModelConfig,
   resolveEnvVar,
@@ -36,7 +39,7 @@ import { getLogger } from "./logging.js";
 import { getSystemPrompt } from "./prompts.js";
 import { FilesystemEmptyResultMiddleware } from "./middleware/filesystem_empty_result.js";
 import { BinaryContentSanitizerMiddleware } from "./middleware/binary_content_sanitizer.js";
-import { FileEditGuardMiddleware } from "./middleware/file_edit_guard.js";
+import { FileEditGuardMiddleware, shouldInterruptExecute, detectFileWrite } from "./middleware/file_edit_guard.js";
 import { ToolExceptionRecoveryMiddleware } from "./middleware/tool_exception_recovery.js";
 import { ResumeStateMiddleware } from "./middleware/resume_state.js";
 import { ShellAllowListMiddleware } from "./middleware/shell_allow_list.js";
@@ -352,18 +355,45 @@ const REQUIRE_COMPACT_TOOL_APPROVAL = true;
  * external resources is gated behind an approval prompt.
  *
  * Equivalent to Python `_add_interrupt_on()`.
+ *
+ * @param fileWriteRuleset the preset's permission rules, used by the
+ *        `execute` entry's `when` predicate: ordinary commands follow the
+ *        `execute` rule verdict; detected file-write commands additionally
+ *        follow `shell_file_write` (see shouldInterruptExecute — pairs with
+ *        FileEditGuardMiddleware, which hard-blocks "deny").
  */
-function _addInterruptOn(): Record<string, {
-  allowedDecisions: string[];
-  description?: string;
-}> {
-  const interruptMap: Record<string, {
-    allowedDecisions: string[];
-    description?: string;
-  }> = {
+function _addInterruptOn(fileWriteRuleset?: Ruleset): Record<string, any> {
+  const interruptMap: Record<string, any> = {
     execute: {
       allowedDecisions: ["approve", "reject"],
-      description: "Allow shell command execution?",
+      // Dynamic description (langchain HITL calls description(toolCall, state,
+      // runtime)) — surfaces WHY this command asks: the matched permission
+      // rule for execute / shell_file_write, so the approval UI can show
+      // "triggered by rule X" instead of a generic message.
+      ...(fileWriteRuleset
+        ? {
+            description: (toolCall: { args?: Record<string, unknown> }) => {
+              const command = String(toolCall?.args?.["command"] ?? "");
+              const isFileWrite = !!detectFileWrite(command);
+              const permission = isFileWrite ? "shell_file_write" : "execute";
+              const decision = evaluate(permission, command, fileWriteRuleset);
+              if (decision.rule) {
+                return (
+                  `Allow shell command execution? (matched permission rule ` +
+                  `"${decision.rule.permission}: ${decision.rule.pattern}" → ${decision.rule.action})`
+                );
+              }
+              return "Allow shell command execution? (no matching rule — default ask)";
+            },
+            when: (request: {
+              toolCall: { name: string; args?: Record<string, unknown> };
+            }) =>
+              shouldInterruptExecute(
+                String((request.toolCall.args as Record<string, unknown>)?.["command"] ?? ""),
+                fileWriteRuleset,
+              ),
+          }
+        : { description: "Allow shell command execution?" }),
     },
     write_file: {
       allowedDecisions: ["approve", "reject"],
@@ -444,10 +474,19 @@ export async function makeGraph(
     /** Workspace environment hint — "sandbox" selects the sandbox backend. */
     workspace?: { environment?: "local" | "sandbox" };
     /**
-     * Workspace access mode. `plan` strips destructive tools from the
-     * toolset (read-only); `confirm`/`auto` keep them (HITL gating is then
-     * controlled at runtime via the server-injected context). Part of the
-     * cache key so different modes compile separate graphs.
+     * Primary agent name (e.g. "plan" | "confirm" | "auto" | "full" or a
+     * user-defined primary agent). Resolved via resolveAgentPreset — drives
+     * toolset shaping (plan strips destructive tools), FileEditGuard bypass
+     * (full), submit_plan injection, and the mode guidance prompt block.
+     * Part of the cache key so different agents compile separate graphs.
+     */
+    agent?: string;
+    /**
+     * Legacy access mode — kept for backwards compatibility. Every legacy
+     * mode resolves to the same-named builtin agent preset; `agent` wins
+     * when both are given.
+     *
+     * @deprecated use `agent` instead
      */
     accessMode?: AccessMode;
     /**
@@ -480,10 +519,12 @@ export async function makeGraph(
   // Include workspace environment in the cache key so local vs sandbox graphs
   // are not reused for each other.
   const wsSignature = options?.workspace?.environment === "sandbox" ? ":sandbox" : "";
-  // accessMode changes the toolset (plan removes destructive tools), so it
-  // must distinguish cache entries — otherwise a confirm-compiled graph would
-  // be wrongly reused for a plan request.
-  const modeSignature = options?.accessMode ?? "confirm";
+  // The agent preset changes the toolset (plan removes destructive tools,
+  // full bypasses FileEditGuard), so it must distinguish cache entries —
+  // otherwise a confirm-compiled graph would be wrongly reused for a plan
+  // request. Unknown names fall back to "confirm" inside resolveAgentPreset;
+  // mirror that in the key so both resolve to the same cache entry.
+  const modeSignature = options?.agent ?? options?.accessMode ?? "confirm";
   // Subagent shape (names + tool whitelists + model + enabled) affects the
   // compiled graph, so it must be part of the cache key — otherwise graphs
   // compiled for different user subagent configs would be wrongly reused.
@@ -531,7 +572,9 @@ async function _makeGraphUncached(
      * directory. Falls back to local if sandbox is unconfigured/failed.
      */
     workspace?: { environment?: "local" | "sandbox" };
-    /** Access mode — `plan` strips destructive tools. See makeGraph. */
+    /** Primary agent name — see makeGraph. @deprecated-pair of accessMode */
+    agent?: string;
+    /** Legacy access mode — every legacy mode is a same-named builtin agent. */
     accessMode?: AccessMode;
     /** External subagents (file + user-defined), injected by the server. */
     userSubagents?: ExternalSubagentSpec[];
@@ -605,29 +648,31 @@ async function _makeGraphUncached(
     logger.info(`Injected ${options.externalTools.length} external tool(s): ${options.externalTools.map((t: any) => t?.name ?? "?").join(", ")}`);
   }
 
-  // ---- 3b. plan mode — strip destructive tools (read-only enforcement) ----
-  // Done AFTER MCP loading so MCP-registered destructive tools are also removed.
-  // plan mode means the agent may only research/plan: it cannot write, edit,
-  // execute, delegate, or compact. The toolset reduction is what makes the
-  // mode enforceable (vs. relying on prompt guidance alone).
-  if (options?.accessMode === "plan") {
+  // ---- 3b. agent preset — static toolset shaping (read-only enforcement in
+  // plan, submit_plan injection) ----
+  // Done AFTER MCP loading so MCP-registered destructive tools are also
+  // removed. The preset is the data-driven successor of the old access-mode
+  // switches (see agents/builtin.ts); every legacy mode resolves to a preset
+  // with identical behavior.
+  const preset = resolveAgentPreset(options?.agent ?? options?.accessMode);
+  if (preset.disabledTools.size > 0) {
     const before = tools.length;
     for (let i = tools.length - 1; i >= 0; i--) {
-      if (DESTRUCTIVE_TOOLS.has(tools[i].name)) tools.splice(i, 1);
+      if (preset.disabledTools.has(tools[i].name)) tools.splice(i, 1);
     }
     logger.info(
-      `plan mode: removed ${before - tools.length} destructive tool(s) ` +
-      `(built-in + MCP); ${tools.length} read-only tool(s) remain`,
+      `agent "${preset.name}": removed ${before - tools.length} disabled tool(s) ` +
+      `(built-in + MCP); ${tools.length} tool(s) remain`,
     );
-    // Plan-mode approval gate (ZCode ExitPlanMode equivalent): the agent must
-    // submit its plan for user approval before any execution happens. Also
-    // injected in confirm mode — when the user approves a plan the server
-    // resumes the thread on the confirm-compiled graph, and the ToolNode must
-    // still contain submit_plan to resolve the pending interrupt.
-    // Auto/full skip it (fully autonomous — no approval gate needed).
-    if (options?.accessMode === "plan" || options?.accessMode === "confirm") {
-      tools.push(createSubmitPlanTool());
-    }
+  }
+  // Plan-mode approval gate (ZCode ExitPlanMode equivalent): the agent must
+  // submit its plan for user approval before any execution happens. Also
+  // injected in confirm mode — when the user approves a plan the server
+  // resumes the thread on the confirm-compiled graph, and the ToolNode must
+  // still contain submit_plan to resolve the pending interrupt.
+  // Auto/full skip it (fully autonomous — no approval gate needed).
+  if (preset.submitPlan) {
+    tools.push(createSubmitPlanTool());
   }
 
   // ---- 4. Build CompositeBackend with temp-directory routing ----
@@ -718,7 +763,10 @@ async function _makeGraphUncached(
   // directly. accessMode is part of the graph cache key, so `full` compiles
   // its own graph with the bypass enabled — cache-safe by construction.
   middleware.push(
-    new FileEditGuardMiddleware({ bypassWhenFull: options?.accessMode === "full" }),
+    new FileEditGuardMiddleware({
+      bypassWhenFull: preset.bypassFileEditGuard,
+      fileWriteRuleset: preset.permission,
+    }),
   );
   middleware.push(new ToolExceptionRecoveryMiddleware());
   middleware.push(new ResumeStateMiddleware());
@@ -915,7 +963,8 @@ async function _makeGraphUncached(
       modelName,
       provider,
       interactive: config.interactive,
-      accessMode: options?.accessMode ?? "confirm",
+      agentName: preset.name,
+      promptBlock: preset.promptBlock,
       skillsPath:
         skillSourcePaths.length > 0
           ? skillSourcePaths.map(([p]) => p).join(", ")
@@ -929,8 +978,10 @@ async function _makeGraphUncached(
   if (config.autoApprove) {
     // No HITL interrupts — tools run automatically (empty object = no interrupts)
   } else if (config.interactive) {
-    // Full HITL for destructive operations
-    interruptOn = _addInterruptOn();
+    // Full HITL for destructive operations. The preset's permission rules
+    // drive the execute `when` predicate (shell file-write commands only
+    // interrupt when their rule verdict is "ask").
+    interruptOn = _addInterruptOn(preset.permission);
   }
   // else: non-interactive mode — empty interrupts (headless execution)
 
