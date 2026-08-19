@@ -230,63 +230,48 @@ export const ModelConfig = {
 };
 
 // =============================================================================
-// Config file writers — JSON read-modify-write with temp file + rename.
+// Config file writers — all persistence goes through the shared JsonStore
+// (store/json-store.ts). Writes to the default path share one store instance
+// with the sandbox + mcp-disabled domains, so a write here invalidates their
+// read caches too. Custom paths get a transient store.
 // =============================================================================
 
-function _readConfigOrEmpty(configPath: string): Record<string, unknown> {
-  try {
-    if (existsSync(configPath)) {
-      return JSON.parse(readFileSync(configPath, "utf-8"));
-    }
-  } catch {
-    // Invalid JSON → start fresh
-  }
-  return {};
+import { JsonStore, configStore } from "../store/json-store.js";
+
+function _storeFor(configPath?: string): JsonStore {
+  return configPath === undefined ? configStore : new JsonStore(configPath);
 }
 
-function _writeConfig(data: Record<string, unknown>, configPath: string): boolean {
-  try {
-    mkdirSync(dirname(configPath), { recursive: true });
-    const tmpPath = join(dirname(configPath), `.${basename(configPath)}.tmp.${Date.now()}`);
-    writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf-8");
-    renameSync(tmpPath, configPath);
-    _configCache = null;
-    return true;
-  } catch (err) {
-    logger.error(`Could not save config to ${configPath}: ${String(err)}`);
-    return false;
-  }
+function _updateModelsSection(
+  store: JsonStore,
+  update: (models: Record<string, unknown>) => Record<string, unknown> | undefined,
+): boolean {
+  return store.updateSection<Record<string, unknown>>("models", (current) => {
+    const models = current ?? {};
+    const next = update(models);
+    return next === undefined || Object.keys(next).length > 0 ? next : undefined;
+  });
 }
 
 export function saveDefaultModel(modelSpec: string, configPath?: string): boolean {
-  const path = configPath ?? DEFAULT_CONFIG_PATH;
-  const data = _readConfigOrEmpty(path);
-  const models = (data["models"] ?? {}) as Record<string, unknown>;
-  models["default"] = modelSpec;
-  data["models"] = models;
-  return _writeConfig(data, path);
+  return _updateModelsSection(_storeFor(configPath), (models) => {
+    models["default"] = modelSpec;
+    return models;
+  });
 }
 
 export function saveRecentModel(modelSpec: string, configPath?: string): boolean {
-  const path = configPath ?? DEFAULT_CONFIG_PATH;
-  const data = _readConfigOrEmpty(path);
-  const models = (data["models"] ?? {}) as Record<string, unknown>;
-  models["recent"] = modelSpec;
-  data["models"] = models;
-  return _writeConfig(data, path);
+  return _updateModelsSection(_storeFor(configPath), (models) => {
+    models["recent"] = modelSpec;
+    return models;
+  });
 }
 
 export function clearDefaultModel(configPath?: string): boolean {
-  const path = configPath ?? DEFAULT_CONFIG_PATH;
-  const data = _readConfigOrEmpty(path);
-  const models = data["models"] as Record<string, unknown> | undefined;
-  if (models) {
+  return _updateModelsSection(_storeFor(configPath), (models) => {
     delete models["default"];
-    if (Object.keys(models).length === 0) {
-      delete data["models"];
-    }
-  }
-  return _writeConfig(data, path);
+    return models;
+  });
 }
 
 // =============================================================================
@@ -386,28 +371,7 @@ export function saveProviderConfig(
   patch: ProviderConfigPatch,
   configPath?: string,
 ): string {
-  const path = configPath ?? DEFAULT_CONFIG_PATH;
-  const data = _readConfigOrEmpty(path);
-  const models = (data["models"] ?? {}) as Record<string, unknown>;
-  const providers = ((models["providers"] ?? {}) as Record<string, unknown>) as Record<
-    string,
-    ProviderConfig
-  >;
-  const provider: ProviderConfig = providers[providerName] ?? {};
-
-  if (patch.enabled !== undefined) provider.enabled = patch.enabled;
-  if (patch.apiKeyEnv !== undefined) provider.api_key_env = patch.apiKeyEnv;
-  if (patch.baseUrl !== undefined) provider.base_url = patch.baseUrl;
-  if (patch.models !== undefined) provider.models = patch.models;
-  if (patch.displayName !== undefined) provider.display_name = patch.displayName;
-  if (patch.apiType !== undefined) provider.api_type = patch.apiType;
-  if (patch.apiKey !== undefined) {
-    if (patch.apiKey === "") {
-      delete provider.api_key;
-    } else {
-      provider.api_key = patch.apiKey;
-    }
-  }
+  const store = _storeFor(configPath);
 
   // Determine the final key (handle rename).
   let finalKey = providerName;
@@ -419,14 +383,37 @@ export function saveProviderConfig(
     finalKey = target;
   }
 
-  // Write under the (possibly new) key; remove the old key on rename.
-  if (finalKey !== providerName) {
-    delete providers[providerName];
-  }
-  providers[finalKey] = provider;
-  models["providers"] = providers;
-  data["models"] = models;
-  _writeConfig(data, path);
+  store.updateSection<Record<string, unknown>>("models", (current) => {
+    const models = current ?? {};
+    const providers = ((models["providers"] ?? {}) as Record<string, unknown>) as Record<
+      string,
+      ProviderConfig
+    >;
+    const provider: ProviderConfig = providers[providerName] ?? {};
+
+    if (patch.enabled !== undefined) provider.enabled = patch.enabled;
+    if (patch.apiKeyEnv !== undefined) provider.api_key_env = patch.apiKeyEnv;
+    if (patch.baseUrl !== undefined) provider.base_url = patch.baseUrl;
+    if (patch.models !== undefined) provider.models = patch.models;
+    if (patch.displayName !== undefined) provider.display_name = patch.displayName;
+    if (patch.apiType !== undefined) provider.api_type = patch.apiType;
+    if (patch.apiKey !== undefined) {
+      if (patch.apiKey === "") {
+        delete provider.api_key;
+      } else {
+        provider.api_key = patch.apiKey;
+      }
+    }
+
+    // Write under the (possibly new) key; remove the old key on rename.
+    if (finalKey !== providerName) {
+      delete providers[providerName];
+    }
+    providers[finalKey] = provider;
+    models["providers"] = providers;
+    return models;
+  });
+
   return finalKey;
 }
 

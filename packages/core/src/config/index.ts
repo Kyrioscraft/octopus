@@ -12,32 +12,6 @@
 import { z } from "zod";
 import { ModelConfig } from "../providers/index.js";
 import { clearCaches } from "../providers/index.js";
-// Cycle break: AccessMode / DESTRUCTIVE_TOOLS live in the leaf module
-// agent/access-mode.ts so config no longer owns them. Re-exported here for
-// API compatibility; presets depend on the leaf, not on config.
-import type { AccessMode } from "../agent/access-mode.js";
-export { DESTRUCTIVE_TOOLS } from "../agent/access-mode.js";
-export type { AccessMode } from "../agent/access-mode.js";
-import { presetForAccessMode, interruptOnForRuleset, GATED_TOOLS } from "../agent/presets.js";
-
-/**
- * Compute the runtime `interruptOn` override for a given access mode.
- *
- * The langchain `humanInTheLoopMiddleware` merges its compiled `interruptOn`
- * with `runtime.context` (the latter wins — see hitl.js config assembly), so
- * injecting `{ interruptOn: { <tool>: false } }` into the runtime context
- * auto-approves those tools for the whole run without recompiling the graph.
- *
- * @returns The override object, or `null` to keep the compiled default.
- */
-export function interruptOnForMode(
-  mode: AccessMode,
-): Record<string, boolean> | null {
-  // Phase 2 of the agent migration: derive the override from the preset's
-  // pattern-based permission rules instead of hard-coded tool lists.
-  // Behavior for the four builtin presets is identical to phase 1.
-  return interruptOnForRuleset(presetForAccessMode(mode).permission, GATED_TOOLS);
-}
 
 // =============================================================================
 // Schema

@@ -22,8 +22,8 @@
  */
 
 import { ToolMessage } from "@langchain/core/messages";
-import { evaluate } from "../permission/index.js";
-import type { Ruleset } from "../permission/types.js";
+import { evaluate } from "../safety/permission/index.js";
+import type { Ruleset } from "../safety/permission/types.js";
 
 interface ToolCallRequest {
   toolCall: { id?: string; name: string; args?: Record<string, unknown> };

@@ -5,7 +5,7 @@
  * Equivalent to Python `cortex.unicode_security`.
  */
 
-import { getLogger } from "./logging.js";
+import { getLogger } from "../logging.js";
 
 const logger = getLogger("unicode.security");
 

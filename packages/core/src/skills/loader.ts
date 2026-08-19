@@ -331,3 +331,84 @@ export function generateSkillTemplate(skillName: string): string {
     "",
   ].join("\n");
 }
+
+// =============================================================================
+// discoverSkillSources — the full skills-discovery convention in one place.
+//
+// Owns every path convention (~/.deepagents, ~/.agents, ~/.claude, project
+// mirrors, and the package's built-in assets under skills/builtin/). The
+// agent runtime (graph.ts) just calls this — it no longer knows where skills
+// live. Also derives the labeled source-path list that createDeepAgent's
+// `skills` option and DynamicContextMiddleware consume.
+// =============================================================================
+
+import { homedir } from "node:os";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** Labeled skills root directory (rootDir → UI label). */
+export type SkillSourcePath = [string, string];
+
+export interface DiscoveredSkills {
+  /** Skill metadata from all sources. */
+  skills: SkillMetadata[];
+  /** Deduped, labeled root directories (for createDeepAgent `skills`). */
+  sourcePaths: SkillSourcePath[];
+}
+
+export function discoverSkillSources(options: {
+  cwd: string;
+  assistantId?: string;
+  projectSkillsDir?: string | null;
+  projectAgentSkillsDir?: string | null;
+  projectRoot?: string | null;
+}): DiscoveredSkills {
+  const userSkillsDir = join(homedir(), ".deepagents", options.assistantId ?? "agent", "skills");
+  const userAgentSkillsDir = join(homedir(), ".agents", "skills");
+  const userClaudeSkillsDir = join(homedir(), ".claude", "skills");
+
+  // Built-in skills shipped with the package (src/skills/builtin/ — this
+  // module lives in dist/skills/, so the assets sit next to it).
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const builtInSkillsDir = join(__dirname, "builtin");
+
+  const skills = listSkills({
+    builtInSkillsDir: existsSync(builtInSkillsDir) ? builtInSkillsDir : null,
+    userSkillsDir: existsSync(userSkillsDir) ? userSkillsDir : null,
+    userAgentSkillsDir: existsSync(userAgentSkillsDir) ? userAgentSkillsDir : null,
+    projectSkillsDir: options.projectSkillsDir ?? null,
+    projectAgentSkillsDir: options.projectAgentSkillsDir ?? null,
+    userClaudeSkillsDir: existsSync(userClaudeSkillsDir) ? userClaudeSkillsDir : null,
+    projectClaudeSkillsDir: options.projectRoot
+      ? join(options.projectRoot, ".claude", "skills")
+      : null,
+  });
+
+  // Build skill source paths for createSkillsMiddleware / createDeepAgent skills option
+  const sourcePaths: SkillSourcePath[] = [];
+  const seenDirs = new Set<string>();
+  for (const skill of skills) {
+    // Extract the skills root directory from the skill path
+    // Skill path is like: {rootDir}/{name}/SKILL.md
+    const parts = skill.path.split(/[\\/]/);
+    if (parts.length >= 2) {
+      const rootDir = parts.slice(0, -2).join("/");
+      if (!seenDirs.has(rootDir)) {
+        seenDirs.add(rootDir);
+        // Determine label from source
+        let label: string;
+        switch (skill.source) {
+          case "built-in": label = "Built-in"; break;
+          case "user": label = rootDir.includes(".agents") ? "User Agents" : "User Deepagents"; break;
+          case "project": label = rootDir.includes(".agents") ? "Project Agents" : "Project Deepagents"; break;
+          case "claude (experimental)": label = rootDir.includes(homedir()) ? "User Claude" : "Project Claude"; break;
+          default: label = "Unknown";
+        }
+        sourcePaths.push([rootDir, label]);
+      }
+    }
+  }
+
+  return { skills, sourcePaths };
+}

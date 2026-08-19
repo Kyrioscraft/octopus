@@ -20,7 +20,7 @@
 import { spawnSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { getLogger } from "./logging.js";
+import { getLogger } from "../logging.js";
 
 const logger = getLogger("shell");
 

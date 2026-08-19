@@ -1,79 +1,14 @@
 /**
- * Agent engine interface + standardized event model.
+ * LangChain stream adapter — wraps a raw LangGraph stream into AgentEvent[].
  *
- * Decouples the server from LangGraph's raw stream format. The server consumes
- * `AsyncIterable<AgentEvent>` instead of poking at LangChain message objects
- * directly — so the transport/serialization layer (chat.service) never touches
- * LangGraph internals.
- *
- * `wrapAgentStream` adapts an existing compiled agent's stream into this shape
- * WITHOUT modifying makeGraph — it's a pure post-processing wrapper. This keeps
- * the "existing code minimally adjusted" constraint intact.
- *
- * Equivalent to a transport-agnostic view of Python `chat_service.py` events.
+ * All LangChain/LangGraph wire-format knowledge (message chunk unpacking,
+ * content-block extraction, tool-call normalization, subagent namespace
+ * parsing) lives here. The event protocol itself (engine/protocol.ts) stays
+ * dependency-free.
  */
 
-import type { SubagentRegistryEntry } from "./agent/index.js";
-
-// =============================================================================
-// Standardized event model
-// =============================================================================
-
-/**
- * A transport-agnostic agent event (v2 typed protocol). The server assigns
- * per-thread `seq` and serializes these as NDJSON `StreamEvent`s; the client
- * applies targeted patches keyed by the stable ids. No LangChain message dumps
- * are forwarded — everything the UI needs is a typed field.
- *
- * Turn-boundary events (started/finished/error/interrupted) are owned by the
- * chat service layer, NOT emitted here.
- */
-export type AgentEvent =
-  | { type: "text.delta"; messageId: string; agentNs?: string; delta: string }
-  | { type: "reasoning.delta"; messageId: string; agentNs?: string; delta: string }
-  | { type: "tool.started"; toolCallId: string; name: string; agentNs?: string }
-  | { type: "tool.args.delta"; toolCallId: string; index: number; argsDelta: string }
-  | { type: "tool.result"; toolCallId: string; result: string; isError: boolean }
-  | {
-      type: "subagent.started";
-      /** task tool_call_id — stable correlation key across started/finished. */
-      callId: string;
-      /** Resolved instance key ("tools:<run-id>") when known, else "pending:<callId>". */
-      instanceKey: string;
-      description: string;
-      subagentName: string;
-    }
-  | { type: "subagent.finished"; instanceKey: string };
-
-/** Input for running a fresh chat turn through the engine wrapper. */
-export interface AgentRunInput {
-  threadId: string;
-  requestId: string;
-  /** The compiled agent (from makeGraph). */
-  agent: any;
-  subagentRegistry: Map<string, SubagentRegistryEntry>;
-  langgraphConfig: Record<string, unknown>;
-}
-
-// =============================================================================
-// AgentEngine interface (capability contract for the server)
-// =============================================================================
-
-/**
- * Stable engine contract the server depends on. The current implementation
- * delegates to makeGraph + wrapAgentStream; future runtimes (remote sandbox,
- * multi-model router) can implement this interface without touching the server.
- *
- * NOTE: resolve/stream here are defined for future direct use; the server
- * currently calls makeGraph + wrapAgentStream separately (Phase B wiring).
- * They're provided so the server CAN migrate to engine.stream() incrementally.
- */
-export interface AgentEngine {
-  /** Stream a fresh turn, yielding standardized events. */
-  stream(input: AgentRunInput & { userMessage: string }): AsyncIterable<AgentEvent>;
-  /** Stream a HITL resume, yielding standardized events. */
-  resume(input: AgentRunInput & { approved: boolean }): AsyncIterable<AgentEvent>;
-}
+import type { AgentEvent, AgentRunInput } from "./protocol.js";
+import type { SubagentRegistryEntry } from "../agent/index.js";
 
 // =============================================================================
 // Stream adapter — wraps a raw LangGraph stream into AgentEvent[]

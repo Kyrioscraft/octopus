@@ -15,7 +15,7 @@ import { CompositeBackend, FilesystemBackend, LocalShellBackend, LangSmithSandbo
 import type { ServerConfig } from "../config/index.js";
 import { getSandboxConfig, resolveSandboxApiKey, sandboxHasCredentials } from "../providers/index.js";
 import { getLogger } from "../logging.js";
-import { resolveBash } from "../shell.js";
+import { resolveBash } from "../platform/shell.js";
 
 const logger = getLogger("agent.backend");
 

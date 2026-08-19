@@ -20,8 +20,8 @@ import {
   evaluate,
   rulesetFromConfig,
   staticallyDisabledTools,
-} from "../permission/index.js";
-import type { PermissionConfig, Ruleset } from "../permission/types.js";
+} from "../safety/permission/index.js";
+import type { PermissionConfig, Ruleset } from "../safety/permission/types.js";
 
 // =============================================================================
 // AgentPreset

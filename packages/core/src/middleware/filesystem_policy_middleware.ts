@@ -25,7 +25,7 @@
 
 import { z } from "zod";
 import { getLogger } from "../logging.js";
-import { resolveBash } from "../shell.js";
+import { resolveBash } from "../platform/shell.js";
 import { tmpdir } from "node:os";
 import {
   readSystemMessageText,

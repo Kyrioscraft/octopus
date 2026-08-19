@@ -1,15 +1,22 @@
 /**
  * Agent public surface — re-exports the split agent modules.
  *
- * agent/graph.ts was split into:
- *   - access-mode.ts  — legacy AccessMode leaf (cycle break)
+ *   - graph.ts        — makeGraph entry + compilation pipeline
+ *   - kernel.ts       — checkpointer singleton + graph cache
+ *   - model.ts        — buildChatModel / generateTitle
+ *   - backend.ts      — BashShellBackend / CompositeBackend construction
+ *   - hitl.ts         — HITL interrupt configuration
+ *   - assembly.ts     — subagent specs + registry assembly
  *   - presets.ts      — builtin AgentPreset catalog
+ *   - access-mode.ts  — legacy AccessMode leaf
  *   - subagent-defs.ts — builtin subagent data (Explore, general-purpose)
  *   - subagents.ts    — subagent FS scanner
- *   - model.ts        — buildChatModel / generateTitle
- *   - graph.ts        — graph compilation + cache + makeGraph
  */
 
-export { createAgent, makeGraph, getCheckpointer, setCheckpointer, clearGraphCache } from "./graph.js";
+export { createAgent, makeGraph } from "./graph.js";
 export type { AgentGraph, CompiledAgent, SubagentRegistryEntry, ExternalSubagentSpec } from "./graph.js";
+export { getCheckpointer, setCheckpointer, clearGraphCache } from "./kernel.js";
 export { buildChatModel, generateTitle, TITLE_MAX_LENGTH } from "./model.js";
+export { interruptOnForMode } from "./hitl.js";
+export { DESTRUCTIVE_TOOLS } from "./access-mode.js";
+export type { AccessMode } from "./access-mode.js";

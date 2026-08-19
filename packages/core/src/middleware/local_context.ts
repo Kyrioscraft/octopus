@@ -10,7 +10,7 @@
  */
 
 import { getLogger } from "../logging.js";
-import { sanitizeControlChars } from "../security.js";
+import { sanitizeControlChars } from "../safety/security.js";
 import type { MCPServerInfo } from "../mcp/index.js";
 
 const logger = getLogger("local.context");
