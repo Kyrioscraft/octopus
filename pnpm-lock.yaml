@@ -86,6 +86,9 @@ importers:
       '@langchain/langgraph':
         specifier: ^1.4.0
         version: 1.4.7(@langchain/core@1.2.1(patch_hash=179f28214b52aa450abad5dfee34805e244519a920cb33308d28ca5b781fbd39)(openai@6.45.0(ws@8.21.0)(zod@4.4.3))(ws@8.21.0))(react-dom@19.2.7(react@19.2.7))(react@19.2.7)(zod@4.4.3)
+      '@langchain/langgraph-checkpoint-sqlite':
+        specifier: ^1.0.3
+        version: 1.0.3(@langchain/core@1.2.1(patch_hash=179f28214b52aa450abad5dfee34805e244519a920cb33308d28ca5b781fbd39)(openai@6.45.0(ws@8.21.0)(zod@4.4.3))(ws@8.21.0))(@langchain/langgraph-checkpoint@1.1.3(@langchain/core@1.2.1(patch_hash=179f28214b52aa450abad5dfee34805e244519a920cb33308d28ca5b781fbd39)(openai@6.45.0(ws@8.21.0)(zod@4.4.3))(ws@8.21.0)))
       '@node-rs/argon2':
         specifier: ^2.0.0
         version: 2.0.2
@@ -635,6 +638,13 @@ packages:
   '@langchain/core@1.2.1':
     resolution: {integrity: sha512-NNG/cC5FGuHDOAP56h0ddp8Rfk8p+othWzEK5RV9JIG6RvnF5vGa5r0AEGtKfQieed7s1kC42GuIzVOBvMBL/g==}
     engines: {node: '>=20'}
+
+  '@langchain/langgraph-checkpoint-sqlite@1.0.3':
+    resolution: {integrity: sha512-odOy8z45HvbWerx4t9g//fA38QNq0Rr6cw8UeHbx1LDOXbarMsfJ5CrmmJs5FlhK16MTlsyaF2m+JJ2cXkTLPg==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@langchain/core': ^1.1.44
+      '@langchain/langgraph-checkpoint': ^1.0.0
 
   '@langchain/langgraph-checkpoint@1.1.3':
     resolution: {integrity: sha512-wgzdQNeEsdw1e+4lvlj0tdq/RYR/k1vPin10g0ymGoehZDDgd9nvIllGXSXN4TFgF9sf5qQP/KTkOcLfeseIhA==}
@@ -3365,6 +3375,12 @@ snapshots:
       - '@opentelemetry/sdk-trace-base'
       - openai
       - ws
+
+  '@langchain/langgraph-checkpoint-sqlite@1.0.3(@langchain/core@1.2.1(patch_hash=179f28214b52aa450abad5dfee34805e244519a920cb33308d28ca5b781fbd39)(openai@6.45.0(ws@8.21.0)(zod@4.4.3))(ws@8.21.0))(@langchain/langgraph-checkpoint@1.1.3(@langchain/core@1.2.1(patch_hash=179f28214b52aa450abad5dfee34805e244519a920cb33308d28ca5b781fbd39)(openai@6.45.0(ws@8.21.0)(zod@4.4.3))(ws@8.21.0)))':
+    dependencies:
+      '@langchain/core': 1.2.1(patch_hash=179f28214b52aa450abad5dfee34805e244519a920cb33308d28ca5b781fbd39)(openai@6.45.0(ws@8.21.0)(zod@4.4.3))(ws@8.21.0)
+      '@langchain/langgraph-checkpoint': 1.1.3(@langchain/core@1.2.1(patch_hash=179f28214b52aa450abad5dfee34805e244519a920cb33308d28ca5b781fbd39)(openai@6.45.0(ws@8.21.0)(zod@4.4.3))(ws@8.21.0))
+      better-sqlite3: 12.11.1
 
   '@langchain/langgraph-checkpoint@1.1.3(@langchain/core@1.2.1(patch_hash=179f28214b52aa450abad5dfee34805e244519a920cb33308d28ca5b781fbd39)(openai@6.45.0(ws@8.21.0)(zod@4.4.3))(ws@8.21.0))':
     dependencies:

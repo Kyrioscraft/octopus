@@ -7,7 +7,7 @@
  * merging using these helpers; tui can use them directly to merge its local
  * file view with HTTP-fetched user-defined entries.
  *
- * See ARCHITECTURE_PLAN.md §11 for the full design.
+ * See architecture/ARCHITECTURE_PLAN.md §11 for the full design.
  */
 
 import type { SkillMetadata } from "./skills.js";

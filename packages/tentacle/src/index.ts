@@ -13,7 +13,7 @@ export {
   type MessageRow,
   type StreamCallOptions,
   type StreamEvent,
-  type StreamStatus,
+  type StreamEventType,
   type Thread,
   type ThreadHistoryResponse,
   type ThreadListResponse,

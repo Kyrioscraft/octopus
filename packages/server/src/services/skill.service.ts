@@ -6,7 +6,7 @@
  * rule: file/builtin are read-only, user-defined are editable. The route layer
  * calls these and encodes the result as JSON.
  *
- * See ARCHITECTURE_PLAN.md §11.
+ * See architecture/ARCHITECTURE_PLAN.md §11.
  */
 
 import { homedir } from "node:os";

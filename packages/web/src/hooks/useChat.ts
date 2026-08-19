@@ -5,7 +5,6 @@ import {
   type StreamEvent,
   type ModelProviderEntry,
   type AskUserQuestionPayload,
-  type AskQuestion,
   type ResumeRequestBody,
   type SlashCommandEntry,
 } from "@octopus/tentacle";
@@ -335,9 +334,21 @@ export function useChat({
   // ---- Stream consumer ----
   const doStream = useCallback(async (stream: AsyncGenerator<StreamEvent>, tid: string) => {
     const setThreadRunning = useChatStore.getState().setThreadRunning;
-    /** Freeze the turn's work timer: prefer the server-reported duration
-     *  (meta.duration_ms, includes time before re-attach), else the local
-     *  startedAtMs elapsed. */
+    /** Patch the last assistant bubble's events from the accumulator snapshot. */
+    const patchEvents = () => {
+      const acc = turnAcc.current;
+      if (!acc) return;
+      const events = acc.snapshot();
+      setMsgs((prev) => {
+        const c = [...prev];
+        const last = c[c.length - 1];
+        if (!(last?.role === "assistant" && last?.status === "streaming")) return prev;
+        c[c.length - 1] = { ...last, events, content: contentFromEvents(events) };
+        return c;
+      });
+    };
+    /** Freeze the turn's work timer: prefer the server-reported duration,
+     *  else the local startedAtMs elapsed. */
     const freezeTimer = (durationMs?: number) =>
       setMsgs((prev) => {
         const c = [...prev];
@@ -354,7 +365,9 @@ export function useChat({
       });
     try {
       for await (const ev of stream) {
-        switch (ev.status) {
+        // v2 typed protocol: discriminate on `type` (legacy `status`-based
+        // chunks no longer exist — server + client switched together).
+        switch (ev.type) {
           case "heartbeat":
             // /events keepalive — nothing to render.
             break;
@@ -376,85 +389,55 @@ export function useChat({
             setBusy(false);
             listThreads();
             break;
-          case "init": {
-            // Re-attach calibration: the /events replay header carries the
-            // run's true start time — set it on the streaming bubble so the
-            // WorkTimer continues from the real elapsed time.
-            const runStartedAt = ev.meta?.run_started_at as number | undefined;
-            if (runStartedAt !== undefined) {
+          case "turn.started": {
+            // Calibrate the WorkTimer from the run's true start time (matters
+            // for re-attach: the run began before this client connected).
+            if (ev.runStartedAt !== undefined) {
               setMsgs((prev) => {
                 const c = [...prev];
                 const last = c[c.length - 1];
                 if (last?.role === "assistant" && last.status === "streaming") {
-                  c[c.length - 1] = { ...last, startedAtMs: runStartedAt };
+                  c[c.length - 1] = { ...last, startedAtMs: ev.runStartedAt };
                 }
                 return c;
               });
             }
-            if (!activeThreadId && ev.meta?.thread_id) {
-              setActiveThreadId(ev.meta?.thread_id as string);
-              setThreadRunning(ev.meta.thread_id as string, true);
+            if (!activeThreadId && ev.threadId && ev.threadId !== tid) {
+              setActiveThreadId(ev.threadId);
+              setThreadRunning(ev.threadId, true);
               listThreads();
             }
             break;
           }
-          case "loading":
-          case "reasoning": {
-            const acc = turnAcc.current;
-            if (!acc) break;
-            const tok = typeof ev.response === "string" ? ev.response : "";
-            acc.consume({
-              text: tok,
-              isReasoning: ev.status === "reasoning",
-              msgType: ev.msg?.type as string | undefined,
-              toolCalls:
-                (ev.msg?.tool_calls as Array<Record<string, unknown>> | undefined) ?? undefined,
-              toolCallChunks:
-                (ev.msg?.tool_call_chunks as
-                  | Array<{ name?: string; args?: string; index?: string | number; id?: string }>
-                  | undefined) ?? undefined,
-              toolCallId: ev.msg?.tool_call_id as string | undefined,
-              agentNs: ev.msg?.agent_ns as string | undefined,
-              agentName: ev.msg?.agent_name as string | undefined,
-              description: ev.msg?.description as string | undefined,
-            });
-            const events = acc.snapshot();
-            setMsgs((prev) => {
-              const c = [...prev];
-              const last = c[c.length - 1];
-              if (!(last?.role === "assistant" && last?.status === "streaming")) return prev;
-              c[c.length - 1] = { ...last, events, content: contentFromEvents(events) };
-              return c;
-            });
+          case "text.delta":
+          case "reasoning.delta":
+          case "tool.started":
+          case "tool.args.delta":
+          case "tool.result":
+          case "subagent.started":
+          case "subagent.finished": {
+            turnAcc.current?.consume(ev);
+            patchEvents();
             scroll();
             break;
           }
-          case "ask_user_question_required": {
+          case "ask": {
             // Paused awaiting user input — the turn is STILL ACTIVE (the
             // server registry keeps it `paused`, /threads reports running).
             // Keep the running flag so re-entering the thread re-attaches and
             // restores this ask panel from the replay stream.
-            const kind = (ev.kind as AskUserQuestionPayload["kind"] | undefined) ?? "tool_approval";
-            const questions = (ev.questions as AskQuestion[] | undefined) ?? [];
             const payload: AskUserQuestionPayload = {
-              kind,
-              questions,
-              thread_id: (ev.thread_id as string | undefined) ?? activeThreadId ?? "",
+              kind: ev.kind,
+              questions: ev.questions,
+              thread_id: ev.thread_id ?? activeThreadId ?? "",
             };
             const acc = turnAcc.current;
             if (acc) {
               acc.consumeAskReadOnly(payload);
-              const events = acc.snapshot();
-              setMsgs((prev) => {
-                const c = [...prev];
-                const last = c[c.length - 1];
-                if (!(last?.role === "assistant" && last?.status === "streaming")) return prev;
-                c[c.length - 1] = { ...last, events, content: contentFromEvents(events) };
-                return c;
-              });
+              patchEvents();
             }
-            if (kind === "tool_approval") {
-              const sources = questions
+            if (payload.kind === "tool_approval") {
+              const sources = payload.questions
                 .map((q) => q.context?.source)
                 .filter((s): s is string => !!s);
               if (sources.length > 0 && sources.every((s) => sessionAllowlistRef.current.has(s))) {
@@ -465,22 +448,16 @@ export function useChat({
             setAsk(payload);
             return;
           }
-          case "finished": {
+          case "turn.finished": {
             setThreadRunning(tid, false);
-            const durationMs = ev.meta?.duration_ms as number | undefined;
-            freezeTimer(durationMs);
-            const acc = turnAcc.current;
-            acc?.finalizeDone();
-            const events = acc?.snapshot();
+            freezeTimer(ev.durationMs);
+            turnAcc.current?.finalizeDone();
+            patchEvents();
             setMsgs((prev) => {
               const c = [...prev];
               const last = c[c.length - 1];
               if (last?.role === "assistant") {
-                c[c.length - 1] = {
-                  ...last,
-                  status: "done",
-                  ...(events ? { events, content: contentFromEvents(events) } : {}),
-                };
+                c[c.length - 1] = { ...last, status: "done" };
               }
               return c;
             });
@@ -488,34 +465,28 @@ export function useChat({
             scroll(); // follow only if stuck to the bottom
             break;
           }
-          case "interrupted": {
+          case "turn.interrupted": {
             // Explicit stop (server saved partial output + emitted this).
             setThreadRunning(tid, false);
-            freezeTimer(ev.meta?.duration_ms as number | undefined);
-            const acc = turnAcc.current;
-            acc?.finalizeDone();
-            const events = acc?.snapshot();
+            freezeTimer(ev.durationMs);
+            turnAcc.current?.finalizeDone();
+            patchEvents();
             setMsgs((prev) => {
               const c = [...prev];
               const last = c[c.length - 1];
               if (last?.role === "assistant") {
-                c[c.length - 1] = {
-                  ...last,
-                  status: "done",
-                  ...(events ? { events, content: contentFromEvents(events) } : {}),
-                };
+                c[c.length - 1] = { ...last, status: "done" };
               }
               return c;
             });
             scroll();
             break;
           }
-          case "error": {
+          case "turn.error": {
             setThreadRunning(tid, false);
             freezeTimer(undefined);
-            const acc = turnAcc.current;
-            acc?.finalizeError();
-            const events = acc?.snapshot();
+            turnAcc.current?.finalizeError();
+            patchEvents();
             setMsgs((prev) => {
               const c = [...prev];
               const last = c[c.length - 1];
@@ -523,8 +494,7 @@ export function useChat({
                 c[c.length - 1] = {
                   ...last,
                   status: "error",
-                  error: ev.error_message ?? "未知错误",
-                  ...(events ? { events, content: contentFromEvents(events) } : {}),
+                  error: ev.message ?? "未知错误",
                 };
               }
               return c;
@@ -536,9 +506,8 @@ export function useChat({
       }
     } catch (err: any) {
       if (err?.name === "AbortError") return;
-      const acc = turnAcc.current;
-      acc?.finalizeError();
-      const events = acc?.snapshot();
+      turnAcc.current?.finalizeError();
+      patchEvents();
       setMsgs((prev) => {
         const c = [...prev];
         const last = c[c.length - 1];
@@ -547,7 +516,6 @@ export function useChat({
             ...last,
             status: "error",
             error: err?.message ?? "请求失败",
-            ...(events ? { events, content: contentFromEvents(events) } : {}),
           };
         }
         return c;
@@ -565,7 +533,7 @@ export function useChat({
       const last = prev[prev.length - 1];
       if (last?.role === "assistant" && last.status === "streaming") return prev;
       // startedAtMs intentionally omitted — calibrated from the replay
-      // stream's init chunk (meta.run_started_at) so the timer shows the
+      // turn.started event (runStartedAt) so the timer shows the
       // run's TRUE elapsed time, not time-since-reattach.
       return [...prev, { id: `a_reattach_${Date.now()}`, role: "assistant", content: "", status: "streaming", events: [] } as Msg];
     });
@@ -607,7 +575,7 @@ export function useChat({
           thread_id: activeThreadId,
           ...(sendWorkspaceId ? { workspace_id: sendWorkspaceId } : {}),
           // Agent name (successor of the access mode — same four values in
-          // phase 1, see AGENT_MIGRATION_PLAN.md).
+          // phase 1, see architecture/AGENT_MIGRATION_PLAN.md).
           agent: accessMode,
           ...(selectedModel ? { model: selectedModel } : {}),
         },

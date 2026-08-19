@@ -1,6 +1,6 @@
 // =============================================================================
 // BlockView — dispatcher that routes an AgentBlock to its renderer.
-// Equivalent to the BlockView component in tui-solution.md §5.1.
+// Equivalent to the BlockView component in architecture/tui-solution.md §5.1.
 // =============================================================================
 
 import React from "react";

@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { eq, and, asc, desc, isNull } from "drizzle-orm";
+import { eq, and, asc, desc, isNull, gt, like, inArray } from "drizzle-orm";
 import { getLogger } from "@octopus/core";
 import * as schema from "./schema.js";
 
@@ -267,6 +267,15 @@ function getDb(): BetterSQLite3Database<typeof schema> {
       UNIQUE(user_id, name)
     );
     CREATE INDEX IF NOT EXISTS idx_workspaces_user_id ON workspaces(user_id);
+
+    -- Durable per-thread event log (durable-replay source for /events).
+    CREATE TABLE IF NOT EXISTS thread_events (
+      thread_id TEXT NOT NULL,
+      seq       INTEGER NOT NULL,
+      event     TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (thread_id, seq)
+    );
   `);
 
   // --- Idempotent column additions for pre-existing DB files ---
@@ -1236,6 +1245,76 @@ export function deleteUserSlashCommand(userId: string, id: string): void {
     .delete(schema.userSlashCommands)
     .where(
       and(eq(schema.userSlashCommands.userId, userId), eq(schema.userSlashCommands.id, id)),
+    )
+    .run();
+}
+
+// =============================================================================
+// Thread events — durable event log (replay source for /events)
+// =============================================================================
+
+/** Append one durable event for a thread. Fire-and-forget safe (callers
+ *  swallow errors so persistence never blocks the stream). */
+export function insertThreadEvent(
+  threadId: string,
+  seq: number,
+  event: Record<string, unknown>,
+): void {
+  getDb()
+    .insert(schema.threadEvents)
+    .values({
+      threadId,
+      seq,
+      event: JSON.stringify(event),
+      createdAt: new Date().toISOString(),
+    })
+    .onConflictDoNothing()
+    .run();
+}
+
+/** Replay durable events with seq > after for a thread (ascending). */
+export function listThreadEvents(
+  threadId: string,
+  after = 0,
+): Array<{ seq: number; event: Record<string, unknown> }> {
+  const rows = getDb()
+    .select()
+    .from(schema.threadEvents)
+    .where(and(eq(schema.threadEvents.threadId, threadId), gt(schema.threadEvents.seq, after)))
+    .orderBy(asc(schema.threadEvents.seq))
+    .all();
+  return rows.map((r) => ({
+    seq: r.seq,
+    event: (unpackJson<Record<string, unknown>>(r.event) ?? {}) as Record<string, unknown>,
+  }));
+}
+
+/**
+ * Compact a finished turn's delta events: keep lifecycle events
+ * (turn.started/finished/error/interrupted, ask, subagent lifecycle) — which
+ * the client needs to rebuild the timeline — and drop the high-frequency
+ * content deltas (text/reasoning/tool.args) that were already folded into the
+ * persisted messages by saveAiMessages. Prevents unbounded table growth.
+ */
+export function compactThreadEvents(threadId: string): void {
+  getDb()
+    .delete(schema.threadEvents)
+    .where(
+      and(
+        eq(schema.threadEvents.threadId, threadId),
+        inArray(
+          schema.threadEvents.seq,
+          getDb()
+            .select({ seq: schema.threadEvents.seq })
+            .from(schema.threadEvents)
+            .where(
+              and(
+                eq(schema.threadEvents.threadId, threadId),
+                like(schema.threadEvents.event, '%"type":"text.delta"%'),
+              ),
+            ),
+        ),
+      ),
     )
     .run();
 }

@@ -1,6 +1,6 @@
 /**
  * Permission types — the pattern-based permission system (phase 2 of the
- * agent migration, see AGENT_MIGRATION_PLAN.md).
+ * agent migration, see architecture/AGENT_MIGRATION_PLAN.md).
  *
  * Modeled after opencode's PermissionV1 (packages/opencode/src/permission/):
  * a Ruleset is an ordered list of rules; each rule matches a permission

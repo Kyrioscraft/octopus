@@ -126,7 +126,7 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
     requests: ApprovalRequest[];
   } | null>(null);
 
-  // --- Block-level state (new rendering model per tui-solution.md) ---
+  // --- Block-level state (new rendering model per architecture/tui-solution.md) ---
   const [sessionState, setSessionState] = useState<SessionState>({
     turns: [],
     pendingConfirm: null,

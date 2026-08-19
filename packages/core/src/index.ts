@@ -3,7 +3,7 @@ export { configure, getLogger, withContext, getLogContext, LogLevel } from "./lo
 export type { Logger, LogContext } from "./logging.js";
 
 // Agent graph
-export { createAgent, makeGraph, getCheckpointer, clearGraphCache, buildChatModel, generateTitle, TITLE_MAX_LENGTH } from "./agent.js";
+export { createAgent, makeGraph, getCheckpointer, setCheckpointer, clearGraphCache, buildChatModel, generateTitle, TITLE_MAX_LENGTH } from "./agent.js";
 export type { AgentGraph, CompiledAgent, SubagentRegistryEntry, ExternalSubagentSpec } from "./agent.js";
 
 // Agent engine (standardized event model — decouples server from LangGraph)
@@ -67,7 +67,7 @@ export {
 export type { BuiltInSubagent, BuiltinSubagentInjector } from "./built_in_subagents.js";
 
 // Builtin primary agents (agent-based successor to AccessMode — see
-// agents/builtin.ts and AGENT_MIGRATION_PLAN.md)
+// agents/builtin.ts and architecture/AGENT_MIGRATION_PLAN.md)
 export {
   BUILTIN_AGENTS,
   AGENT_ORDER,

@@ -1,7 +1,9 @@
 import { serve } from "@hono/node-server";
-import { loadDotEnv, configure, getLogger } from "@octopus/core";
+import { loadDotEnv, configure, getLogger, setCheckpointer } from "@octopus/core";
 import { createApp } from "./app.js";
 import { configureLangSmithTracing } from "./langsmith-tracing.js";
+import { initDb } from "./db/index.js";
+import { createSqliteCheckpointer } from "./checkpointer.js";
 
 // =============================================================================
 // Entry point — loads .env, configures logging, starts the HTTP server.
@@ -18,6 +20,19 @@ configure();
 //    standard LANGSMITH_* vars that @langchain/core's callback manager reads,
 //    and logs the resulting status. Must run after loadDotEnv + configure.
 configureLangSmithTracing();
+
+// 4. Init the DB and swap the process-level LangGraph checkpointer from
+//    MemorySaver to SQLite, so HITL interrupt state survives restarts
+//    (a paused thread's /resume works after a server restart). Uses a
+//    SEPARATE db file from the message store to keep checkpoint WAL traffic
+//    off octopus.db.
+initDb();
+try {
+  setCheckpointer(createSqliteCheckpointer());
+} catch (err) {
+  const boot = getLogger("server.main");
+  boot.exception("SQLite checkpointer unavailable — falling back to MemorySaver", err as Error);
+}
 
 const logger = getLogger("server.main");
 

@@ -30,8 +30,26 @@ const logger = getLogger("chat.service");
 // Types
 // =============================================================================
 
+/**
+ * Transport-boundary events owned by this service layer (turn lifecycle, HITL
+ * ask, /events control). Content events come from core's AgentEvent; both are
+ * serialized as NDJSON `StreamEvent`s with a per-thread `seq` assigned by the
+ * route's run-registry wrapper before enqueue/persist.
+ */
+export type BoundaryEvent =
+  | { type: "turn.started"; threadId: string; requestId: string; runStartedAt: number; userMessage?: string }
+  | { type: "turn.finished"; threadId: string; title?: string; durationMs?: number }
+  | { type: "turn.error"; errorType: string; message: string; threadId?: string }
+  | { type: "turn.interrupted"; partialSaved: boolean; durationMs?: number }
+  | { type: "ask"; kind: AskKind; questions: AskQuestion[]; thread_id: string }
+  | { type: "idle"; threadId?: string }
+  | { type: "heartbeat" };
+
+/** Everything the service may emit on the wire (seq assigned downstream). */
+export type WireEvent = AgentEvent | BoundaryEvent;
+
 /** Emit a chunk to the client. The route wraps controller.enqueue here. */
-export type Emit = (chunk: Record<string, unknown>) => void;
+export type Emit = (chunk: WireEvent) => void;
 
 /** Input for a fresh chat turn. */
 export interface ChatInput {
@@ -468,15 +486,16 @@ export async function checkAndHandleInterrupts(
     if (!interruptInfo) return false;
 
     const payload = buildAskPayload(interruptInfo, threadId);
-    logger.info("HITL interrupt detected — emitting ask_user_question_required", {
+    logger.info("HITL interrupt detected — emitting ask", {
       thread_id: threadId,
       kind: payload.kind,
       question_count: payload.questions.length,
     });
     emit({
-      status: "ask_user_question_required",
-      ...payload,
-      meta: { thread_id: threadId, interrupt: payload },
+      type: "ask",
+      kind: payload.kind,
+      questions: payload.questions,
+      thread_id: threadId,
     });
     return true;
   } catch (err) {
@@ -490,57 +509,20 @@ export async function checkAndHandleInterrupts(
 // =============================================================================
 
 /**
- * Translate one standardized AgentEvent into zero or more emit() calls and
- * accumulate assistant text for partial-save. The service no longer touches
- * LangGraph message objects — it consumes the engine's AgentEvent contract.
+ * Translate one standardized AgentEvent into an emit() call and accumulate
+ * assistant text for partial-save. Content events pass through verbatim — the
+ * engine already emits the typed protocol shape; `seq` is assigned by the
+ * route's run-registry wrapper.
  */
 function processAgentEvent(
   event: AgentEvent,
   accumulate: (text: string) => void,
   emit: Emit,
 ): void {
-  switch (event.type) {
-    case "token": {
-      // Accumulate non-reasoning AI text for partial-save on disconnect.
-      if (event.text && !event.isReasoning) {
-        accumulate(event.text);
-      }
-      emit({
-        status: event.isReasoning ? "reasoning" : "loading",
-        response: event.text,
-        msg: event.msg,
-        request_id: event.requestId,
-      });
-      return;
-    }
-    case "subagent_started": {
-      emit({
-        status: "loading",
-        msg: {
-          type: "subagent_started",
-          agent_ns: event.agentNs,
-          description: event.description,
-          system_prompt: event.systemPrompt,
-          agent_name: event.subagentName,
-        },
-        request_id: event.requestId,
-      });
-      return;
-    }
-    case "subagent_finished": {
-      emit({
-        status: "loading",
-        msg: {
-          type: "subagent_finished",
-          agent_ns: event.agentNs,
-        },
-        request_id: event.requestId,
-      });
-      return;
-    }
-    // init/finished/error are transport-boundary events owned by the service
-    // loop itself; they don't come from wrapAgentStream.
+  if (event.type === "text.delta") {
+    accumulate(event.delta);
   }
+  emit(event);
 }
 
 /**
@@ -558,11 +540,13 @@ export async function streamChat(
   const accumulate = (text: string) => { accumulatedContent += text; };
 
   try {
-    // 1. init chunk
+    // 1. turn.started
     emit({
-      status: "init",
-      msg: { role: "user", content: input.userMessage, message_type: "text" },
-      meta: { thread_id: input.threadId },
+      type: "turn.started",
+      threadId: input.threadId,
+      requestId: input.requestId,
+      runStartedAt: input.startedAt ?? Date.now(),
+      userMessage: input.userMessage,
     });
 
     // 2. Stream graph (via standardized AgentEvent — no LangGraph coupling here)
@@ -577,7 +561,6 @@ export async function streamChat(
       );
 
       const agentEvents = wrapAgentStream(eventStream, {
-        requestId: input.requestId,
         subagentRegistry: input.subagentRegistry,
       });
       for await (const event of agentEvents) {
@@ -602,13 +585,9 @@ export async function streamChat(
           const saved = savePartialAssistantMessage(input.threadId, accumulatedContent, input.requestId);
           const durationMs = stampWorkDuration(input.threadId, input.startedAt);
           emit({
-            status: "interrupted",
-            error_message: "对话已中断",
-            meta: {
-              thread_id: input.threadId,
-              partial_saved: saved,
-              ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
-            },
+            type: "turn.interrupted",
+            partialSaved: saved,
+            ...(durationMs !== undefined ? { durationMs } : {}),
           });
           logger.info(`Run aborted by stop request${saved ? " (partial saved)" : ""}`, {
             thread_id: input.threadId,
@@ -687,12 +666,10 @@ export async function streamChat(
     const durationMs = stampWorkDuration(input.threadId, input.startedAt);
     if (!hasInterrupt) {
       emit({
-        status: "finished",
-        meta: {
-          thread_id: input.threadId,
-          ...(newTitle ? { title: newTitle } : {}),
-          ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
-        },
+        type: "turn.finished",
+        threadId: input.threadId,
+        ...(newTitle ? { title: newTitle } : {}),
+        ...(durationMs !== undefined ? { durationMs } : {}),
       });
     }
   } catch (err) {
@@ -704,12 +681,9 @@ export async function streamChat(
         }
         const durationMs = stampWorkDuration(input.threadId, input.startedAt);
         emit({
-          status: "interrupted",
-          error_message: "对话已中断",
-          meta: {
-            thread_id: input.threadId,
-            ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
-          },
+          type: "turn.interrupted",
+          partialSaved: accumulatedContent.length > 0,
+          ...(durationMs !== undefined ? { durationMs } : {}),
         });
         logger.info(`Run aborted (outer)`, {
           thread_id: input.threadId,
@@ -726,10 +700,10 @@ export async function streamChat(
     } else {
       logger.exception("Agent stream failed", err);
       emit({
-        status: "error",
-        error_type: "agent_error",
-        error_message: err instanceof Error ? err.message : "未知错误",
-        meta: { thread_id: input.threadId },
+        type: "turn.error",
+        errorType: "agent_error",
+        message: err instanceof Error ? err.message : "未知错误",
+        threadId: input.threadId,
       });
     }
   }
@@ -777,9 +751,11 @@ export async function streamResume(
         ? `Resume: answers (${input.resumeBody.answers?.length ?? 0})`
         : `Resume: ${input.resumeBody.approved === false ? "rejected" : "approved"}`;
     emit({
-      status: "init",
-      msg: { type: "system", content: initMsg },
-      meta: { thread_id: input.threadId },
+      type: "turn.started",
+      threadId: input.threadId,
+      requestId: input.requestId,
+      runStartedAt: input.startedAt ?? Date.now(),
+      userMessage: initMsg,
     });
 
     // Step 3: Stream the resumed graph (standardized AgentEvent).
@@ -791,7 +767,6 @@ export async function streamResume(
       });
 
       const agentEvents = wrapAgentStream(eventStream, {
-        requestId: input.requestId,
         subagentRegistry: input.subagentRegistry,
       });
       // Resume skips the accumulation/partial-save path (state was already
@@ -809,9 +784,8 @@ export async function streamResume(
         // events are already recorded, finish silently.
         if (abortSignal?.aborted) {
           emit({
-            status: "interrupted",
-            error_message: "对话已中断",
-            meta: { thread_id: input.threadId },
+            type: "turn.interrupted",
+            partialSaved: false,
           });
         }
       } else if (!isInterrupt) throw streamErr;
@@ -834,20 +808,18 @@ export async function streamResume(
     if (!hasInterrupt) {
       const durationMs = stampWorkDuration(input.threadId, input.startedAt);
       emit({
-        status: "finished",
-        meta: {
-          thread_id: input.threadId,
-          ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
-        },
+        type: "turn.finished",
+        threadId: input.threadId,
+        ...(durationMs !== undefined ? { durationMs } : {}),
       });
     }
   } catch (err) {
     logger.exception("Agent stream failed", err);
     emit({
-      status: "error",
-      error_type: "agent_error",
-      error_message: err instanceof Error ? err.message : "未知错误",
-      meta: { thread_id: input.threadId },
+      type: "turn.error",
+      errorType: "agent_error",
+      message: err instanceof Error ? err.message : "未知错误",
+      threadId: input.threadId,
     });
   }
 }

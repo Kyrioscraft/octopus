@@ -93,7 +93,7 @@ running `server`/`web`, since they import compiled `dist/` output.
   `permissionConfig` via `interruptOnForRuleset`. HITL "always" approvals
   persist as thread-level rules (`threads.permission` JSON column, cleared on
   agent switch) and are merged into the runtime `interruptOn` override.
-  See `AGENT_MIGRATION_PLAN.md` for the full design + implementation log.
+  See `architecture/AGENT_MIGRATION_PLAN.md` for the full design + implementation log.
 - Model spec format is `"provider:model"` (e.g. `"anthropic:claude-sonnet-4-6"`).
   Unknown providers fall back to OpenAI-compatible `ChatOpenAI` with a custom
   `baseURL`.

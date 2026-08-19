@@ -1,0 +1,49 @@
+diff --git a/dist/callbacks/manager.js b/dist/callbacks/manager.js
+index b0c65109d03698e80eb4daaa9813ec574fd47dc8..84ab4605e6940045bc3743032a88c2ff5fd6461d 100644
+--- a/dist/callbacks/manager.js
++++ b/dist/callbacks/manager.js
+@@ -381,8 +381,12 @@ var CallbackManager = class CallbackManager extends BaseCallbackManager {
+ 		}, handler.awaitHandlers)));
+ 	}
+ 	addHandler(handler, inherit = true) {
++		// PATCH(octopus): reference-dedupe. Callback managers inherited into
++		// subagent configs (deepagents task tool) get the same handler instance
++		// added again on merge, duplicating every streamed subagent token.
++		if (this.handlers.includes(handler)) return;
+ 		this.handlers.push(handler);
+-		if (inherit) this.inheritableHandlers.push(handler);
++		if (inherit && !this.inheritableHandlers.includes(handler)) this.inheritableHandlers.push(handler);
+ 	}
+ 	removeHandler(handler) {
+ 		this.handlers = this.handlers.filter((_handler) => _handler !== handler);
+diff --git a/dist/runnables/config.js b/dist/runnables/config.js
+index c4469afac935678a9a6700fe22debd57937a9981..3edd05f12d16d771962c7dddd182fc4c566e734c 100644
+--- a/dist/runnables/config.js
++++ b/dist/runnables/config.js
+@@ -53,9 +53,15 @@ function mergeConfigs(...configs) {
+ 			const manager = providedCallbacks.copy();
+ 			for (const callback of baseCallbacks) manager.addHandler(ensureHandler(callback), true);
+ 			copy.callbacks = manager;
+-		} else copy.callbacks = new CallbackManager(providedCallbacks._parentRunId, {
+-			handlers: baseCallbacks.handlers.concat(providedCallbacks.handlers),
+-			inheritableHandlers: baseCallbacks.inheritableHandlers.concat(providedCallbacks.inheritableHandlers),
++		} else {
++			// PATCH(octopus): dedupe handlers present in BOTH managers by reference.
++			// Without this, a handler inherited into a subagent config (e.g. LangGraph
++			// StreamMessagesHandler passed through the deepagents task tool) ends up
++			// twice in the merged manager, and every subagent LLM token is emitted twice.
++			const seen = new Set(baseCallbacks.handlers);
++			copy.callbacks = new CallbackManager(providedCallbacks._parentRunId, {
++			handlers: baseCallbacks.handlers.concat(providedCallbacks.handlers.filter((h) => !seen.has(h))),
++			inheritableHandlers: (() => { const seenI = new Set(baseCallbacks.inheritableHandlers); return baseCallbacks.inheritableHandlers.concat(providedCallbacks.inheritableHandlers.filter((h) => !seenI.has(h))); })(),
+ 			tags: Array.from(new Set(baseCallbacks.tags.concat(providedCallbacks.tags))),
+ 			inheritableTags: Array.from(new Set(baseCallbacks.inheritableTags.concat(providedCallbacks.inheritableTags))),
+ 			metadata: {
+@@ -63,6 +69,7 @@ function mergeConfigs(...configs) {
+ 				...providedCallbacks.metadata
+ 			}
+ 		});
++		}
+ 	} else {
+ 		const typedKey = key;
+ 		copy[typedKey] = options[typedKey] ?? copy[typedKey];

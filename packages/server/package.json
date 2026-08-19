@@ -14,6 +14,7 @@
     "@hono/node-server": "^1.13.0",
     "@hono/zod-validator": "^0.8.0",
     "@langchain/langgraph": "^1.4.0",
+    "@langchain/langgraph-checkpoint-sqlite": "^1.0.3",
     "@node-rs/argon2": "^2.0.0",
     "@octopus/core": "workspace:*",
     "@octopus/extension-ripgrep": "workspace:*",

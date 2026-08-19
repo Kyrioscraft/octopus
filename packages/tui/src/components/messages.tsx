@@ -154,7 +154,7 @@ export const MessageList: React.FC<MessageListProps> = ({
 
 // =============================================================================
 // Block-level ChatRenderer — Static/Dynamic split at block granularity.
-// Equivalent to ChatRenderer in tui-solution.md §4.
+// Equivalent to ChatRenderer in architecture/tui-solution.md §4.
 //
 // Key insight: completed blocks are immediately frozen into <Static>,
 // so only the currently-streaming block participates in React diff.

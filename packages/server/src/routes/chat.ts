@@ -42,7 +42,7 @@ import {
   isRunning,
   type RunState,
 } from "../services/run-registry.js";
-import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules } from "../db/index.js";
+import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules, insertThreadEvent, listThreadEvents, compactThreadEvents } from "../db/index.js";
 import {
   ensureThreadOutputs,
   resolveAgentCwd,
@@ -86,22 +86,48 @@ const makeChunk = (payload: Record<string, unknown>): Uint8Array =>
   encoder.encode(JSON.stringify(payload) + "\n");
 
 /**
- * Wrap controller.enqueue with the run registry: every chunk is recorded to
- * the thread's run buffer (so re-attaching clients can replay it) and the
- * run's status transitions are derived from terminal chunk statuses. An
- * enqueue failure (client disconnected / switched thread) is swallowed — the
- * run belongs to the server and keeps going; only the HTTP side is gone.
+ * Persist an event to the durable thread_events log (opencode durable-event
+ * pattern). Persistence failures degrade to memory-only — they must never
+ * block or kill the live stream.
+ */
+function persistThreadEvent(threadId: string, seq: number, chunk: Record<string, unknown>): void {
+  try {
+    insertThreadEvent(threadId, seq, { ...chunk, seq });
+  } catch (err) {
+    logger.warn("thread_events persist failed (continuing memory-only)", {
+      thread_id: threadId,
+      seq,
+      error: String(err).slice(0, 120),
+    });
+  }
+}
+
+/**
+ * Wrap controller.enqueue with the run registry: every chunk gets a
+ * per-thread monotonic `seq` assigned, is persisted to thread_events (durable
+ * replay), recorded to the run buffer (live tail), and drives the run's
+ * status transitions (terminal event types). An enqueue failure (client
+ * disconnected / switched thread) is swallowed — the run belongs to the
+ * server and keeps going; only the HTTP side is gone.
  */
 function makeRunEmit(run: RunState, controller: ReadableStreamDefaultController): Emit {
   return (chunk) => {
-    recordEvent(run, chunk);
-    const status = chunk.status as string | undefined;
-    if (status === "ask_user_question_required") pauseRun(run.threadId);
-    if (status === "finished" || status === "error" || status === "interrupted") {
+    const seq = recordEvent(run, chunk);
+    persistThreadEvent(run.threadId, seq, chunk);
+    const type = (chunk as { type?: string }).type;
+    if (type === "ask") pauseRun(run.threadId);
+    if (type === "turn.finished" || type === "turn.error" || type === "turn.interrupted") {
       finishRun(run.threadId);
+      // Compact the finished turn's delta events asynchronously — the wire
+      // event was persisted above, messages were saved by the service.
+      setImmediate(() => {
+        try {
+          compactThreadEvents(run.threadId);
+        } catch { /* best-effort */ }
+      });
     }
     try {
-      controller.enqueue(makeChunk(chunk));
+      controller.enqueue(makeChunk({ ...chunk, seq }));
     } catch {
       // Client gone — run continues in the background (opencode semantics:
       // disconnect unsubscribes, it never cancels the run).
@@ -577,12 +603,13 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
 // =========================================================================
 //
 // Re-attachment protocol (opencode's replay-then-live pattern): the client
-// opens this stream when entering a thread whose run is still active. Events
-// with seq > after are replayed from the registry buffer first, then live
-// events tail. A 10s heartbeat keeps intermediaries from killing the idle
-// connection. When the run is already gone, residual buffered events (if the
-// run just finished within the retain window) are replayed followed by a
-// synthetic `idle` chunk so the client knows to fall back to /history.
+// opens this stream when entering a thread whose run may still be active.
+// Events with seq > after are replayed from the DURABLE thread_events table
+// first (survives restarts and late re-attach), then live events tail from the
+// in-memory run registry. A 10s heartbeat keeps intermediaries from killing
+// the idle connection. When no run is active and the durable log's last event
+// is terminal (or empty), a synthetic `idle` tells the client to fall back to
+// /history.
 
 chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
   const threadId = c.req.param("id");
@@ -601,56 +628,73 @@ chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
         }
       };
 
-      if (!run || run.events.length === 0 && run.status !== "running" && run.status !== "paused") {
-        // No run (never started, or long finished): tell the client it's idle.
-        push({ status: "idle", meta: { thread_id: threadId } });
+      // Durable replay from SQLite (deltas of finished turns were compacted,
+      // so this is cheap). This is the authoritative history.
+      let maxSeq = after;
+      let lastType: string | undefined;
+      const replayed: Array<{ seq: number; chunk: Record<string, unknown> }> = [];
+      try {
+        for (const e of listThreadEvents(threadId, after)) {
+          replayed.push({ seq: e.seq, chunk: e.event });
+          maxSeq = Math.max(maxSeq, e.seq);
+          const t = e.event["type"];
+          if (typeof t === "string") lastType = t;
+        }
+      } catch (err) {
+        logger.exception("Durable event replay failed", err);
+      }
+      for (const e of replayed) push(e.chunk);
+
+      const runActive = run !== undefined && (run.status === "running" || run.status === "paused");
+      if (!runActive) {
+        // No live run. If the durable log ends at a non-terminal state (crash /
+        // restart mid-turn), tell the client the turn was lost so it can mark
+        // the bubble errored instead of hanging.
+        if (lastType && lastType !== "turn.finished" && lastType !== "turn.error" &&
+            lastType !== "turn.interrupted" && lastType !== "idle") {
+          push({ type: "turn.error", errorType: "run_lost", message: "服务重启导致本轮执行中断", threadId, seq: maxSeq + 1 });
+        }
+        push({ type: "idle", threadId, seq: maxSeq + 2 });
         try { controller.close(); } catch { /* */ }
         return;
       }
 
-      // Close the replay→live race: register the live listener FIRST and
-      // collect anything it receives into a pending set, then replay the
-      // snapshot, then flush pending entries whose seq wasn't in the snapshot.
-      // Duplicate detection is by seq (monotonic per run).
+      // Live tail: close the replay→live race by registering the listener and
+      // collecting into a pending set; flush entries whose seq wasn't replayed.
       const pending = new Map<number, Record<string, unknown>>();
-      const seenSeqs = new Set<number>();
+      const seenSeqs = new Set<number>(replayed.map((e) => e.seq));
       const detach = attachListener(threadId, after, (e) => {
         if (!seenSeqs.has(e.seq)) pending.set(e.seq, e.chunk);
       }) ?? (() => {});
 
-      // Replay stream header: tells the re-attaching client when the run
-      // actually started, so the WorkTimer resumes from the true elapsed time
-      // instead of restarting from zero.
-      push({ status: "init", meta: { thread_id: threadId, run_started_at: run.startedAt } });
-
-      // Replay snapshot (events with seq > after).
-      for (const e of run.events) {
-        if (e.seq > after) {
-          seenSeqs.add(e.seq);
-          push(e.chunk);
+      // Flush anything the replay snapshot missed but the durable writer
+      // already persisted (recordEvent fans out BEFORE the route persisted —
+      // so a listener entry may predate the durable row; pull the gap from db).
+      try {
+        for (const e of listThreadEvents(threadId, maxSeq)) {
+          if (!seenSeqs.has(e.seq)) {
+            seenSeqs.add(e.seq);
+            pending.set(e.seq, e.event);
+          }
         }
-      }
+      } catch { /* best-effort gap fill */ }
 
-      // If the run already ended (done/paused), the buffer is complete — emit
-      // a synthetic idle and finish. (paused = waiting for user input over
-      // /resume; the client has everything it needs. Close after flushing.)
       let heartbeat: ReturnType<typeof setInterval> | undefined;
       const finalize = () => {
         detach();
         if (heartbeat) clearInterval(heartbeat);
-        push({ status: "idle", meta: { thread_id: threadId } });
+        push({ type: "idle", threadId });
         try { controller.close(); } catch { /* */ }
       };
 
-      if (run.status !== "running") {
-        // Flush anything the listener caught during replay, then close.
+      if (run!.status !== "running") {
+        // paused (HITL) — the replayed log already contains the `ask`; close.
         for (const [, chunk] of [...pending.entries()].sort((a, b) => a[0] - b[0])) push(chunk);
         finalize();
         return;
       }
 
-      // Live tail: heartbeat + pending flush loop.
-      heartbeat = setInterval(() => push({ status: "heartbeat" }), 10_000);
+      heartbeat = setInterval(() => push({ type: "heartbeat" }), 10_000);
       const flush = setInterval(() => {
         const entries = [...pending.entries()].sort((a, b) => a[0] - b[0]);
         for (const [seq, chunk] of entries) {
@@ -658,7 +702,8 @@ chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
           if (seenSeqs.has(seq)) continue;
           seenSeqs.add(seq);
           push(chunk);
-          if (chunk.status === "finished" || chunk.status === "error" || chunk.status === "interrupted") {
+          const t = (chunk as { type?: string }).type;
+          if (t === "turn.finished" || t === "turn.error" || t === "turn.interrupted") {
             finalize();
             return;
           }

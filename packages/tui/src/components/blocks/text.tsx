@@ -1,6 +1,6 @@
 // =============================================================================
 // TextBlock — renders streaming / completed text output from the agent.
-// Equivalent to tui-solution.md §5.3.
+// Equivalent to architecture/tui-solution.md §5.3.
 // =============================================================================
 
 import React from "react";

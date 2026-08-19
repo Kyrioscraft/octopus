@@ -1,6 +1,6 @@
 // =============================================================================
 // block-stream.ts — maps server NDJSON StreamEvents to BlockStreamCallbacks.
-// Equivalent to the "Block stream" concept in tui-solution.md §3.
+// Equivalent to the "Block stream" concept in architecture/tui-solution.md §3.
 //
 // Returns an InterruptContext when the server pauses for user input (HITL),
 // so the caller can resume the stream after the user responds.

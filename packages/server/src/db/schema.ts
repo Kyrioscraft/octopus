@@ -1,4 +1,4 @@
-import { sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, uniqueIndex, integer, primaryKey } from "drizzle-orm/sqlite-core";
 
 // =============================================================================
 // Drizzle schema for the SQLite store.
@@ -155,6 +155,29 @@ export const userSubagents = sqliteTable(
 // =============================================================================
 // User-defined slash commands — input shortcuts with prompt templates
 // =============================================================================
+
+// =============================================================================
+// Thread events — durable append-only event log (opencode's durable-event
+// pattern). Every StreamEvent emitted on a run is persisted with a per-thread
+// monotonic `seq` BEFORE fan-out, so `/events?after=` can replay from SQLite
+// (survives restarts / late re-attach) and the in-memory run-registry buffer
+// only serves the live tail. Delta events of a finished turn are compacted
+// (deleted) after the turn's terminal event lands — see compactThreadEvents.
+// =============================================================================
+
+export const threadEvents = sqliteTable(
+  "thread_events",
+  {
+    threadId: text("thread_id").notNull(),
+    seq: integer("seq").notNull(),
+    // Full StreamEvent JSON (including seq) as sent on the wire.
+    event: text("event").notNull(),
+    createdAt: text("created_at").notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.threadId, t.seq] }),
+  }),
+);
 
 // Per-user model overrides for built-in subagents (Explore, general-purpose).
 // Built-ins are not editable/deletable; the UI only allows overriding their

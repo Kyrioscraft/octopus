@@ -1,7 +1,7 @@
 /**
  * Builtin primary agents — the agent-based successor to AccessMode.
  *
- * Phase 1 of the agent migration (see AGENT_MIGRATION_PLAN.md): the four
+ * Phase 1 of the agent migration (see architecture/AGENT_MIGRATION_PLAN.md): the four
  * access modes (plan/confirm/auto/full) become data-driven agent presets.
  * Each preset bundles the three things a "mode" used to drive in code:
  *   - promptBlock  : mode guidance injected by DynamicContextMiddleware

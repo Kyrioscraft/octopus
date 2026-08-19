@@ -1,6 +1,6 @@
 // =============================================================================
 // useTextBuffer — rAF-throttled token buffer for smooth streaming text.
-// Equivalent to tui-solution.md §7.1.
+// Equivalent to architecture/tui-solution.md §7.1.
 //
 // Problem:  LLM streaming can produce 50–100 tokens/second. Calling setState
 //           on every token causes excessive re-renders, blocking the Node event

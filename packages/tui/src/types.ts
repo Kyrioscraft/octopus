@@ -190,7 +190,7 @@ export interface SubagentActivityMeta {
 
 // =============================================================================
 // AgentBlock data model — block-level rendering units within a turn.
-// Equivalent to Python (new design per tui-solution.md).
+// Equivalent to Python (new design per architecture/tui-solution.md).
 //
 // Each agent turn (user → assistant) is composed of multiple AgentBlocks
 // that have independent lifecycles: thinking, text streaming, tool calls,

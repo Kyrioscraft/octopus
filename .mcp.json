@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "chart": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@antv/mcp-server-chart"]
+    }
+  }
+}

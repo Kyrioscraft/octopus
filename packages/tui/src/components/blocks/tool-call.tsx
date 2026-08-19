@@ -1,6 +1,6 @@
 // =============================================================================
 // ToolCallBlock — renders a tool invocation and its result.
-// Equivalent to tui-solution.md §5.4.
+// Equivalent to architecture/tui-solution.md §5.4.
 // =============================================================================
 
 import React from "react";

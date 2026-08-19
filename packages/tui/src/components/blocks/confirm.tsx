@@ -1,6 +1,6 @@
 // =============================================================================
 // ConfirmBlock — renders a y/n confirmation prompt inline in the conversation.
-// Equivalent to tui-solution.md §5.5.
+// Equivalent to architecture/tui-solution.md §5.5.
 // =============================================================================
 
 import React from "react";

@@ -1,6 +1,6 @@
 // =============================================================================
 // ThinkingBlock — renders the "thinking/reasoning" phase of an agent.
-// Equivalent to tui-solution.md §5.2.
+// Equivalent to architecture/tui-solution.md §5.2.
 // =============================================================================
 
 import React from "react";

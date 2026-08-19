@@ -80,7 +80,7 @@ export interface MainScreenProps {
   // --- Agent ---
   agentName: string;
 
-  // --- Block-level rendering (new per tui-solution.md) ---
+  // --- Block-level rendering (new per architecture/tui-solution.md) ---
   /** Block-based session state for the ChatRenderer. */
   sessionState?: SessionState;
   /** Whether to use the new block-level rendering (default: false). */

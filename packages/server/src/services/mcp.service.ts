@@ -6,7 +6,7 @@
  * them with core's pure helpers, and applies the disabled-state layer
  * (core's getDisabledServers/setServerDisabled).
  *
- * See ARCHITECTURE_PLAN.md §11.
+ * See architecture/ARCHITECTURE_PLAN.md §11.
  */
 
 import {

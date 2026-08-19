@@ -5,7 +5,7 @@
  * logic (file vs user-defined merge, editability rules, disabled state) lives
  * in services/skill.service.ts + services/mcp.service.ts.
  *
- * See ARCHITECTURE_PLAN.md §11.
+ * See architecture/ARCHITECTURE_PLAN.md §11.
  */
 
 import { Hono } from "hono";

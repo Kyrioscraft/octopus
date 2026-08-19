@@ -224,95 +224,55 @@ export interface ResumeRequestBody {
 }
 
 // =============================================================================
-// Stream events (NDJSON protocol)
+// Typed stream events (v2 NDJSON protocol)
 //
-// Wire format: one JSON object per line (`\n`), each carrying a `status`
-// discriminator. The set below mirrors the statuses emitted by the Python
-// `chat_service.stream_agent_chat` / `stream_agent_resume` functions:
+// Wire format: one JSON object per line (`\n`), discriminated by `type`.
+// Replaces the legacy `status`-discriminated v1 bag. Content events carry
+// stable ids (`messageId` / `toolCallId` / `instanceKey`) so the
+// client applies targeted patches instead of re-deriving structure from a
+// LangChain message dump.
 //
-//   init, loading, reasoning, agent_state, ask_user_question_required,
-//   finished, interrupted, error, warning.
-//
-// `loading` carries a token fragment; `reasoning` carries a reasoning token
-// fragment (additional_kwargs.reasoning_content); the rest carry metadata.
+// Design notes:
+// - delta events are append-only fragments; the client accumulates.
+// - `seq` is assigned per-thread by the server (run-registry / thread_events
+//   row) and used by the `/events?after=` replay protocol.
+// - `agentNs` scopes an event to a subagent instance (the LangGraph
+//   checkpoint-ns first segment, e.g. "tools:<run-id>"). Absent = main agent.
 // =============================================================================
 
-export type StreamStatus =
-  | "init"
-  | "loading"
-  | "reasoning"
-  | "agent_state"
-  | "ask_user_question_required"
-  | "finished"
-  | "interrupted"
-  | "error"
-  | "warning"
-  /** /events only: the thread has no active run (client falls back to /history). */
-  | "idle"
-  /** /events only: 10s keepalive, no payload — safe to ignore. */
-  | "heartbeat";
+/** Discriminator for StreamEvent. */
+export type StreamEventType = StreamEvent["type"];
 
-/**
- * One NDJSON record. Use `status` to narrow. Optional fields are kept
- * permissive so forward-compatible additions don't require a type bump —
- * only the common, stable fields are declared.
- */
-export interface StreamEvent {
-  status: StreamStatus;
-
-  /** `loading`/`reasoning` carry the token fragment here. */
-  response?: unknown;
-
-  /**
-   * LangChain message dump. Common keys: `{ type, content }`. The server may
-   * also attach:
-   * - `agent_ns` — subagent type (e.g. "general-purpose") when the message
-   *   originated inside a subagent.
-   * - `tool_calls` — array of `{ id, name, args }` on AIMessages.
-   * - `tool_call_id` / `name` — on ToolMessages, identify which tool ran.
-   * - `type: "subagent_started"` — synthetic chunk announcing a subagent is
-   *   about to run; carries `agent_ns`, `description`, `system_prompt`.
-   * - `type: "subagent_finished"` — synthetic chunk announcing a subagent has
-   *   returned its result to the main agent; carries `agent_ns`. Drives the
-   *   UI's "collapse on completion" for nested subagent timelines.
-   */
-  msg?: Record<string, unknown>;
-
-  /** Per-chunk request id; omitted on the first `init` (see chat_service). */
-  request_id?: string;
-
-  /** Per-request metadata bag: thread_id, agent_id, user_id, time_cost, … */
-  meta?: Record<string, unknown>;
-
-  /** `error` chunk type tag — `agent_error` / `invalid_config` / `unexpected_error`. */
-  error_type?: string;
-  /** `error`/`interrupted` human-readable message. */
-  error_message?: string;
-
-  /** `warning`/`interrupted` carry a free-text message here. */
-  message?: string;
-
-  /**
-   * `ask_user_question_required` payload. `questions` is the typed array;
-   * `kind` / `actionRequests` / `source` / `thread_id` are also lifted to
-   * top-level fields for direct access (the server emits them via spread).
-   */
-  questions?: AskQuestion[];
-  /** Discriminator for the ask payload (see AskUserQuestionPayload). */
-  kind?: AskKind;
-  /** tool_approval — the pending tool calls (mirror of questions[].context). */
-  actionRequests?: NonNullable<NonNullable<AskQuestion["context"]>["actionRequests"]>;
-  /** tool_approval — the source tool name. */
-  source?: string;
-  /** thread_id the ask is bound to. */
-  thread_id?: string;
-
-  /** `agent_state` carries `{todos, files, artifacts}`. */
-  agent_state?: Record<string, unknown>;
-
-  /** LangGraph stream metadata (langgraph_node, langgraph_step, …). */
-  metadata?: Record<string, unknown>;
-}
+export type StreamEvent =
+  // --- turn lifecycle (emitted by the chat service layer) ---
+  | { type: "turn.started"; seq: number; threadId: string; requestId: string; runStartedAt: number; userMessage?: ChatMessage }
+  | { type: "turn.finished"; seq: number; threadId: string; title?: string; durationMs: number }
+  | { type: "turn.error"; seq: number; errorType: string; message: string; threadId?: string }
+  | { type: "turn.interrupted"; seq: number; partialSaved: boolean; durationMs: number }
+  // --- content deltas ---
+  | { type: "text.delta"; seq: number; messageId: string; agentNs?: string; delta: string }
+  | { type: "reasoning.delta"; seq: number; messageId: string; agentNs?: string; delta: string }
+  // --- tool calls (first-class events, keyed by toolCallId) ---
+  | { type: "tool.started"; seq: number; toolCallId: string; name: string; agentNs?: string }
+  | { type: "tool.args.delta"; seq: number; toolCallId: string; index: number; argsDelta: string; agentNs?: string }
+  | { type: "tool.result"; seq: number; toolCallId: string; result: string; isError: boolean; agentNs?: string }
+  // --- subagents (explicit lifecycle; no heuristic inference client-side) ---
+  | {
+      type: "subagent.started";
+      seq: number;
+      /** task tool_call_id — stable correlation key across started/finished. */
+      callId: string;
+      /** Resolved instance key ("tools:<run-id>") when known, else the pending key "pending:<callId>". */
+      instanceKey: string;
+      description: string;
+      subagentName: string;
+    }
+  | { type: "subagent.finished"; seq: number; instanceKey: string }
+  // --- HITL ask (payload identical to the legacy ask_user_question_required chunk) ---
+  | { type: "ask"; seq: number; kind: AskKind; questions: AskQuestion[]; threadId?: string; thread_id?: string }
+  // --- transport control (/events endpoint) ---
+  | { type: "idle"; seq: number; threadId?: string }
+  | { type: "heartbeat"; seq: number };
 
 // =============================================================================
 // Errors
@@ -343,9 +303,11 @@ export class StreamServerError extends Error {
   readonly errorType: string;
   readonly event: StreamEvent;
   constructor(event: StreamEvent) {
-    super(event.error_message ?? event.message ?? "Stream error");
+    super(
+      (event.type === "turn.error" ? event.message : undefined) ?? "Stream error",
+    );
     this.name = "StreamServerError";
-    this.errorType = event.error_type ?? "unexpected_error";
+    this.errorType = event.type === "turn.error" ? event.errorType : "unexpected_error";
     this.event = event;
   }
 }

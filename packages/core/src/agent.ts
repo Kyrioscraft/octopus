@@ -158,16 +158,29 @@ class BashShellBackend extends LocalShellBackend {
 }
 
 // =============================================================================
-// Checkpointer — process-level singleton MemorySaver.
+// Checkpointer — process-level singleton. Defaults to MemorySaver (state lost
+// on restart); the server can inject a durable one (SQLite) via
+// setCheckpointer() at startup so HITL interrupts survive restarts.
 // =============================================================================
 
-let _checkpointer: MemorySaver | null = null;
+let _checkpointer: MemorySaver | unknown = null;
 
-export function getCheckpointer(): MemorySaver {
+export function getCheckpointer(): unknown {
   if (!_checkpointer) {
     _checkpointer = new MemorySaver();
   }
   return _checkpointer;
+}
+
+/**
+ * Replace the process-level checkpointer (e.g. with the SQLite checkpointer).
+ * Must be called BEFORE any graph is built/used — existing compiled graphs
+ * hold a reference to the previous instance, so this also clears the graph
+ * cache to force recompilation against the new checkpointer.
+ */
+export function setCheckpointer(cp: unknown): void {
+  _checkpointer = cp;
+  clearGraphCache();
 }
 
 // =============================================================================
@@ -1110,7 +1123,7 @@ async function _makeGraphUncached(
     model,
     systemPrompt,
     tools,
-    checkpointer: getCheckpointer(),
+    checkpointer: getCheckpointer() as any,
     backend: compositeBackend,
     middleware,
     interruptOn,
