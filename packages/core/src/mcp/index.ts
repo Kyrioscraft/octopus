@@ -10,8 +10,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { getLogger } from "./logging.js";
-import { getDisabledServers } from "./mcp_disabled.js";
+import { getLogger } from "../logging.js";
+import { getDisabledServers } from "./disabled.js";
 
 const logger = getLogger("mcp.tools");
 

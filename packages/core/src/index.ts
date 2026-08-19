@@ -3,8 +3,8 @@ export { configure, getLogger, withContext, getLogContext, LogLevel } from "./lo
 export type { Logger, LogContext } from "./logging.js";
 
 // Agent graph
-export { createAgent, makeGraph, getCheckpointer, setCheckpointer, clearGraphCache, buildChatModel, generateTitle, TITLE_MAX_LENGTH } from "./agent.js";
-export type { AgentGraph, CompiledAgent, SubagentRegistryEntry, ExternalSubagentSpec } from "./agent.js";
+export { createAgent, makeGraph, getCheckpointer, setCheckpointer, clearGraphCache, buildChatModel, generateTitle, TITLE_MAX_LENGTH } from "./agent/index.js";
+export type { AgentGraph, CompiledAgent, SubagentRegistryEntry, ExternalSubagentSpec } from "./agent/index.js";
 
 // Agent engine (standardized event model — decouples server from LangGraph)
 export { wrapAgentStream } from "./engine.js";
@@ -27,35 +27,35 @@ export { FilesystemPolicyMiddleware } from "./middleware/filesystem_policy_middl
 export { ReadBudgetMiddleware } from "./middleware/read_budget_middleware.js";
 
 // ServerConfig
-export { loadConfig, fromDict, toDict, ServerConfigSchema, interruptOnForMode, DESTRUCTIVE_TOOLS } from "./config.js";
-export type { ServerConfig, AccessMode } from "./config.js";
+export { loadConfig, fromDict, toDict, ServerConfigSchema, interruptOnForMode, DESTRUCTIVE_TOOLS } from "./config/index.js";
+export type { ServerConfig, AccessMode } from "./config/index.js";
 
 // ModelConfig (config.toml reader)
-export { ModelConfig, resolveEnvVar, clearCaches } from "./model_config.js";
-export type { ProviderConfig, ModelConfigData } from "./model_config.js";
+export { ModelConfig, resolveEnvVar, clearCaches } from "./providers/index.js";
+export type { ProviderConfig, ModelConfigData } from "./providers/index.js";
 
 // Config writers
-export { saveDefaultModel, saveRecentModel, clearDefaultModel, listProvidersOverview, saveProviderConfig } from "./model_config.js";
-export type { ProviderOverview, ProviderConfigPatch } from "./model_config.js";
+export { saveDefaultModel, saveRecentModel, clearDefaultModel, listProvidersOverview, saveProviderConfig } from "./providers/index.js";
+export type { ProviderOverview, ProviderConfigPatch } from "./providers/index.js";
 export {
   getSandboxConfig,
   saveSandboxConfig,
   sandboxHasCredentials,
   resolveSandboxApiKey,
-} from "./model_config.js";
-export type { SandboxConfig, SandboxProvider } from "./model_config.js";
+} from "./providers/index.js";
+export type { SandboxConfig, SandboxProvider } from "./providers/index.js";
 
 // Settings (env + API keys)
-export { fromEnvironment, reloadFromEnvironment, loadDotEnv } from "./settings.js";
-export type { Settings } from "./settings.js";
+export { fromEnvironment, reloadFromEnvironment, loadDotEnv } from "./config/settings.js";
+export type { Settings } from "./config/settings.js";
 
 // Built-in tools
-export { fetchUrl, webSearch, getBuiltinTools, getBuiltinToolsAsStructuredTools } from "./tools.js";
-export type { FetchUrlResult, WebSearchResult, WebSearchResultItem } from "./tools.js";
+export { fetchUrl, webSearch, getBuiltinTools, getBuiltinToolsAsStructuredTools } from "./tools/web.js";
+export type { FetchUrlResult, WebSearchResult, WebSearchResultItem } from "./tools/web.js";
 
 // Subagents
-export { listSubagents } from "./subagents.js";
-export type { SubagentMetadata } from "./subagents.js";
+export { listSubagents } from "./agent/subagents.js";
+export type { SubagentMetadata } from "./agent/subagents.js";
 
 // Built-in subagents (Explore, general-purpose, ...) — unified registry
 export {
@@ -63,8 +63,8 @@ export {
   GENERAL_PURPOSE_BUILTIN,
   BUILTIN_SUBAGENTS,
   READONLY_TOOL_NAMES,
-} from "./built_in_subagents.js";
-export type { BuiltInSubagent, BuiltinSubagentInjector } from "./built_in_subagents.js";
+} from "./agent/subagent-defs.js";
+export type { BuiltInSubagent, BuiltinSubagentInjector } from "./agent/subagent-defs.js";
 
 // Builtin primary agents (agent-based successor to AccessMode — see
 // agents/builtin.ts and architecture/AGENT_MIGRATION_PLAN.md)
@@ -76,8 +76,8 @@ export {
   resolveAgentPreset,
   presetForAccessMode,
   interruptOnForRuleset,
-} from "./agents/builtin.js";
-export type { AgentPreset } from "./agents/builtin.js";
+} from "./agent/presets.js";
+export type { AgentPreset } from "./agent/presets.js";
 
 // Permission engine (pattern-based allow/ask/deny rules — phase 2)
 export { evaluate, rulesetFromConfig, staticallyDisabledTools } from "./permission/index.js";
@@ -92,8 +92,8 @@ export {
 } from "./permission/types.js";
 
 // Skills
-export { listSkills, loadSkillContent, validateSkillName, generateSkillTemplate } from "./skills.js";
-export type { SkillMetadata, SkillSource, ListSkillsOptions } from "./skills.js";
+export { listSkills, loadSkillContent, validateSkillName, generateSkillTemplate } from "./skills/loader.js";
+export type { SkillMetadata, SkillSource, ListSkillsOptions } from "./skills/loader.js";
 
 // Config management (skill/mcp/subagent unified view — pure helpers + types, see §11)
 export {
@@ -105,7 +105,7 @@ export {
   inferTransport,
   tagFileSubagents,
   mergeSubagentEntries,
-} from "./config_types.js";
+} from "./config/entries.js";
 export type {
   SkillEntry,
   McpServerEntry,
@@ -113,20 +113,20 @@ export type {
   McpOrigin,
   SubagentEntry,
   SubagentOrigin,
-} from "./config_types.js";
+} from "./config/entries.js";
 
 // MCP tools
-export { loadMcpConfig, mergeMcpConfigs, discoverMcpConfigs, resolveAndLoadMcpTools } from "./mcp_tools.js";
-export type { MCPToolInfo, MCPServerInfo, MCPServerStatus, McpLoadResult } from "./mcp_tools.js";
+export { loadMcpConfig, mergeMcpConfigs, discoverMcpConfigs, resolveAndLoadMcpTools } from "./mcp/index.js";
+export type { MCPToolInfo, MCPServerInfo, MCPServerStatus, McpLoadResult } from "./mcp/index.js";
 
 // MCP disabled servers
-export { getDisabledServers, isServerDisabled, setServerDisabled } from "./mcp_disabled.js";
+export { getDisabledServers, isServerDisabled, setServerDisabled } from "./mcp/disabled.js";
 
 // MCP trust store
-export { computeConfigFingerprint, isProjectMcpTrusted, trustProjectMcp, revokeProjectMcpTrust } from "./mcp_trust.js";
+export { computeConfigFingerprint, isProjectMcpTrusted, trustProjectMcp, revokeProjectMcpTrust } from "./mcp/trust.js";
 
 // Project utilities
-export { findProjectRoot, ProjectContext, getServerProjectContext } from "./project_utils.js";
+export { findProjectRoot, ProjectContext, getServerProjectContext } from "./config/project.js";
 
 // Unicode security
 export {
@@ -136,8 +136,8 @@ export {
   summarizeIssues,
   checkUrlSafety,
   iterStringValues,
-} from "./unicode_security.js";
-export type { UnicodeIssue, UrlSafetyResult } from "./unicode_security.js";
+} from "./security.js";
+export type { UnicodeIssue, UrlSafetyResult } from "./security.js";
 
 // Constants
 export {
@@ -146,7 +146,7 @@ export {
   PROVIDER_API_KEY_ENV,
   PROVIDER_BASE_URL_ENV,
   DEFAULT_AGENT_ID,
-} from "./constants.js";
+} from "./config/constants.js";
 
 // Built-in slash commands
 export {

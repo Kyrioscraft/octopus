@@ -8,7 +8,7 @@
  * StructuredTool wrappers (for passing to `createDeepAgent`).
  */
 
-import { resolveEnvVar } from "./model_config.js";
+import { resolveEnvVar } from "../providers/index.js";
 import { z } from "zod";
 
 // =============================================================================

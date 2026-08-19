@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "node -e \"const{rmSync,cpSync}=require('fs');try{rmSync('dist/built_in_skills',{recursive:true,force:true})}catch{};cpSync('src/built_in_skills','dist/built_in_skills',{recursive:true})\" && tsc",
+    "build": "node -e \"const{rmSync,cpSync}=require('fs');try{rmSync('dist/skills/builtin',{recursive:true,force:true})}catch{};cpSync('src/skills/builtin','dist/skills/builtin',{recursive:true})\" && tsc",
     "dev": "tsc --watch",
     "lint": "tsc --noEmit"
   },

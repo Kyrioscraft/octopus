@@ -6,8 +6,8 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { getLogger } from "./logging.js";
-import { DEFAULT_STATE_DIR } from "./constants.js";
+import { getLogger } from "../logging.js";
+import { DEFAULT_STATE_DIR } from "../config/constants.js";
 
 const logger = getLogger("mcp.trust");
 const STORAGE_VERSION = 1;

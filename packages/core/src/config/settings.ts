@@ -7,8 +7,8 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { resolveEnvVar, ModelConfig } from "./model_config.js";
-import { DEFAULT_CONFIG_DIR } from "./constants.js";
+import { resolveEnvVar, ModelConfig } from "../providers/index.js";
+import { DEFAULT_CONFIG_DIR } from "../config/constants.js";
 
 // =============================================================================
 // Types

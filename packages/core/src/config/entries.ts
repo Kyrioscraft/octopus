@@ -10,9 +10,9 @@
  * See architecture/ARCHITECTURE_PLAN.md §11 for the full design.
  */
 
-import type { SkillMetadata } from "./skills.js";
-import type { SubagentMetadata } from "./subagents.js";
-import type { MCPServerStatus } from "./mcp_tools.js";
+import type { SkillMetadata } from "../skills/loader.js";
+import type { SubagentMetadata } from "../agent/subagents.js";
+import type { MCPServerStatus } from "../mcp/index.js";
 
 // =============================================================================
 // Types

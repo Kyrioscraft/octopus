@@ -21,7 +21,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { getLogger } from "./logging.js";
+import { getLogger } from "../logging.js";
 
 const logger = getLogger("subagents");
 

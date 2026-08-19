@@ -6,8 +6,8 @@
 
 import { existsSync, readFileSync, mkdirSync, writeFileSync, renameSync } from "node:fs";
 import { dirname, basename, join } from "node:path";
-import { getLogger } from "./logging.js";
-import { DEFAULT_CONFIG_PATH } from "./constants.js";
+import { getLogger } from "../logging.js";
+import { DEFAULT_CONFIG_PATH } from "../config/constants.js";
 
 const logger = getLogger("mcp.disabled");
 

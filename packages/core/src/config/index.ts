@@ -10,53 +10,15 @@
  */
 
 import { z } from "zod";
-import { ModelConfig } from "./model_config.js";
-import { clearCaches } from "./model_config.js";
-import { presetForAccessMode, interruptOnForRuleset, GATED_TOOLS } from "./agents/builtin.js";
-
-// =============================================================================
-// Access modes — workspace access mode (plan / confirm / auto / full).
-//
-// Drives two orthogonal behaviors at graph-build and runtime:
-//   - plan   : destructive tools are removed from the toolset (read-only).
-//   - confirm: per-tool HITL interrupts apply (the compiled default).
-//   - auto   : all HITL interrupts are suppressed at runtime via context.
-//   - full   : like auto (HITL suppressed) AND the FileEditGuard content
-//              guard is bypassed at build time — shell commands that write
-//              files are no longer hard-blocked. The agent runs fully
-//              autonomously and is responsible for its own actions.
-// The front-end sends `mode` per request; the server resolves it to one of
-// these and threads it into makeGraph (tool filtering + FileEditGuard bypass)
-// and the runtime context (HITL override). Defined here (not in tentacle) to
-// keep architecture boundaries: server → core only.
-// =============================================================================
-
-export type AccessMode = "plan" | "confirm" | "auto" | "full";
-
-/**
- * Tool names with side effects — file writes, subagent/task delegation, and
- * conversation compaction. In `plan` mode these are stripped from the toolset
- * so the agent can only research/plan, not modify anything.
- *
- * NOTE: `execute` (shell) is deliberately NOT in this set. Plan mode needs Bash
- * for codebase search (`rg`/`find`/`ls`), since the dedicated search tools
- * (`ls`/`glob`/`grep`) are removed by FilesystemPolicyMiddleware to avoid tool
- * overlap (ZCode-style architecture). Shell file writes are still blocked by
- * `FileEditGuardMiddleware` in plan/confirm/auto modes (only `full` bypasses),
- * and `execute` remains HITL-gated via `_addInterruptOn()`.
- *
- * Read-only tools (read_file, grep_search, web_search, fetch_url) are safe in
- * every mode and need no gating.
- */
-export const DESTRUCTIVE_TOOLS = new Set<string>([
-  "write_file",
-  "edit_file",
-  "task",
-  "start_async_task",
-  "update_async_task",
-  "cancel_async_task",
-  "compact_conversation",
-]);
+import { ModelConfig } from "../providers/index.js";
+import { clearCaches } from "../providers/index.js";
+// Cycle break: AccessMode / DESTRUCTIVE_TOOLS live in the leaf module
+// agent/access-mode.ts so config no longer owns them. Re-exported here for
+// API compatibility; presets depend on the leaf, not on config.
+import type { AccessMode } from "../agent/access-mode.js";
+export { DESTRUCTIVE_TOOLS } from "../agent/access-mode.js";
+export type { AccessMode } from "../agent/access-mode.js";
+import { presetForAccessMode, interruptOnForRuleset, GATED_TOOLS } from "../agent/presets.js";
 
 /**
  * Compute the runtime `interruptOn` override for a given access mode.

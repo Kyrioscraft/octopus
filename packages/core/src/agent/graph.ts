@@ -2,160 +2,54 @@
  * Agent graph factory — compile LangGraph graphs from ServerConfig.
  *
  * Equivalent to Python `cortex.server_graph.make_graph()` +
- * `cortex.server_graph._build_chat_model()` +
  * `cortex.agent.create_cli_agent()` (middleware stack, HITL, backend).
  *
- * Key features:
- *   - Model construction with config.toml params / base_url / api_key
- *   - Provider override support (web DB overrides > config.toml)
- *   - Built-in tools (fetch_url, web_search) wired via StructuredTool
- *   - MCP tool loading (reserved interface)
- *   - Full HITL interrupt configuration
- *   - CompositeBackend with temp-directory routing
- *   - Middleware stack: FilesystemEmptyResult → ToolExceptionRecovery →
- *     ResumeState → ShellAllowList → Summarization
- *   - System prompt generation (interactive / headless modes)
- *   - Graph caching by signature key
- *   - Backward-compatible `createAgent` alias
+ * Split co-conspirators (see agent/):
+ *   - model.ts      — _buildChatModel / buildChatModel / generateTitle
+ *   - backend.ts    — BashShellBackend / CompositeBackend construction
+ *   - presets.ts    — AgentPreset resolution (plan/confirm/auto/full)
+ *   - access-mode.ts — legacy AccessMode leaf (cycle break)
+ *
+ * This module owns: graph caching, HITL interrupt configuration, middleware
+ * stack assembly, tool/subagent/skill wiring, and the checkpointer singleton.
  */
 
 import { createDeepAgent } from "deepagents";
-import { BUILTIN_SUBAGENTS } from "./built_in_subagents.js";
-import { CompositeBackend, FilesystemBackend, LocalShellBackend, LangSmithSandbox } from "deepagents";
 import { MemorySaver } from "@langchain/langgraph-checkpoint";
-import { type ServerConfig, type AccessMode, DESTRUCTIVE_TOOLS } from "./config.js";
-import { resolveAgentPreset } from "./agents/builtin.js";
-import type { Ruleset } from "./permission/types.js";
-import { evaluate } from "./permission/index.js";
-import {
-  ModelConfig,
-  resolveEnvVar,
-  getSandboxConfig,
-  resolveSandboxApiKey,
-  sandboxHasCredentials,
-} from "./model_config.js";
-import type { ProviderConfig } from "./model_config.js";
-import { getLogger } from "./logging.js";
-import { getSystemPrompt } from "./prompts.js";
-import { resolveBash } from "./shell.js";
-import { FilesystemEmptyResultMiddleware } from "./middleware/filesystem_empty_result.js";
-import { BinaryContentSanitizerMiddleware } from "./middleware/binary_content_sanitizer.js";
-import { FileEditGuardMiddleware, shouldInterruptExecute, detectFileWrite } from "./middleware/file_edit_guard.js";
-import { ToolExceptionRecoveryMiddleware } from "./middleware/tool_exception_recovery.js";
-import { ResumeStateMiddleware } from "./middleware/resume_state.js";
-import { ShellAllowListMiddleware } from "./middleware/shell_allow_list.js";
-import { LocalContextMiddleware } from "./middleware/local_context.js";
-import { ConfigurableModelMiddleware } from "./middleware/configurable_model.js";
-import { FilesystemPolicyMiddleware } from "./middleware/filesystem_policy_middleware.js";
-import { ReadBudgetMiddleware } from "./middleware/read_budget_middleware.js";
-import { SubagentOrchestrationMiddleware } from "./middleware/subagent_orchestration_middleware.js";
-import { DynamicContextMiddleware } from "./middleware/dynamic_context_middleware.js";
-import { getBuiltinToolsAsStructuredTools } from "./tools.js";
-import { createAskUserQuestionTool } from "./tools/ask_user_question.js";
-import { createSubmitPlanTool } from "./tools/submit_plan.js";
-import { listSkills } from "./skills.js";
-import { resolveAndLoadMcpTools } from "./mcp_tools.js";
-import type { MCPServerInfo } from "./mcp_tools.js";
-import { ProjectContext, findProjectRoot } from "./project_utils.js";
+import { type ServerConfig } from "../config/index.js";
+import type { AccessMode } from "./access-mode.js";
+import { resolveAgentPreset } from "./presets.js";
+import type { Ruleset } from "../permission/types.js";
+import { evaluate } from "../permission/index.js";
+import { getLogger } from "../logging.js";
+import { getSystemPrompt } from "../prompts.js";
+import { FilesystemEmptyResultMiddleware } from "../middleware/filesystem_empty_result.js";
+import { BinaryContentSanitizerMiddleware } from "../middleware/binary_content_sanitizer.js";
+import { FileEditGuardMiddleware, shouldInterruptExecute, detectFileWrite } from "../middleware/file_edit_guard.js";
+import { ToolExceptionRecoveryMiddleware } from "../middleware/tool_exception_recovery.js";
+import { ResumeStateMiddleware } from "../middleware/resume_state.js";
+import { LocalContextMiddleware } from "../middleware/local_context.js";
+import { ConfigurableModelMiddleware } from "../middleware/configurable_model.js";
+import { FilesystemPolicyMiddleware } from "../middleware/filesystem_policy_middleware.js";
+import { ReadBudgetMiddleware } from "../middleware/read_budget_middleware.js";
+import { SubagentOrchestrationMiddleware } from "../middleware/subagent_orchestration_middleware.js";
+import { DynamicContextMiddleware } from "../middleware/dynamic_context_middleware.js";
+import { getBuiltinToolsAsStructuredTools } from "../tools/index.js";
+import { createAskUserQuestionTool } from "../tools/ask_user_question.js";
+import { createSubmitPlanTool } from "../tools/submit_plan.js";
+import { listSkills } from "../skills/loader.js";
+import { resolveAndLoadMcpTools } from "../mcp/index.js";
+import type { MCPServerInfo } from "../mcp/index.js";
+import { ProjectContext } from "../config/project.js";
+import { BUILTIN_SUBAGENTS } from "./subagent-defs.js";
+import { _buildChatModel, buildChatModel } from "./model.js";
+import { buildBackend } from "./backend.js";
 import { tmpdir, homedir } from "node:os";
-import { mkdtempSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
 
 const logger = getLogger("agent.graph");
-
-// =============================================================================
-// BashShellBackend — Windows bash execution (opencode-style).
-//
-// The SDK's LocalShellBackend spawns with `shell: true`, which resolves to
-// cmd.exe on Windows. This subclass routes commands through Git Bash
-// (`bash -c <command>`) when one is available (resolveBash(), see shell.ts),
-// so the model can use Unix syntax (`grep -rn ... | head -20`, `find`) the
-// way ZCode does. Without bash it falls back to the SDK's cmd.exe behavior
-// — the shell guidance prompt is branched to match (see
-// filesystem_policy_middleware.ts).
-//
-// The SDK class keeps env/timeout in `#private` fields (inaccessible to
-// subclasses), so we hold our own copies of the constructor options.
-// =============================================================================
-
-class BashShellBackend extends LocalShellBackend {
-  #timeout: number;
-  #maxOutputBytes: number;
-  #env: Record<string, string>;
-
-  constructor(options: {
-    rootDir: string;
-    timeout?: number;
-    maxOutputBytes?: number;
-    env?: Record<string, string>;
-    inheritEnv?: boolean;
-  }) {
-    super(options);
-    this.#timeout = options.timeout ?? 120;
-    this.#maxOutputBytes = options.maxOutputBytes ?? 1e5;
-    if (options.inheritEnv) {
-      this.#env = { ...process.env } as Record<string, string>;
-      if (options.env) Object.assign(this.#env, options.env);
-    } else {
-      this.#env = options.env ?? {};
-    }
-  }
-
-  async execute(command: string): Promise<{ output: string; exitCode: number; truncated: boolean }> {
-    if (!command || typeof command !== "string") {
-      return { output: "Error: Command must be a non-empty string.", exitCode: 1, truncated: false };
-    }
-    const bash = process.platform === "win32" ? resolveBash() : undefined;
-    return new Promise((resolve) => {
-      let stdout = "";
-      let stderr = "";
-      let timedOut = false;
-      const child = bash
-        ? spawn(bash, ["-c", command], { env: this.#env, cwd: this.cwd })
-        : spawn(command, { shell: true, env: this.#env, cwd: this.cwd });
-      const timer = setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGTERM");
-      }, this.#timeout * 1e3);
-      child.stdout.on("data", (data) => {
-        stdout += data.toString();
-      });
-      child.stderr.on("data", (data) => {
-        stderr += data.toString();
-      });
-      child.on("error", (err) => {
-        clearTimeout(timer);
-        resolve({ output: `Error executing command: ${err.message}`, exitCode: 1, truncated: false });
-      });
-      child.on("close", (code, signal) => {
-        clearTimeout(timer);
-        if (timedOut || signal === "SIGTERM") {
-          resolve({
-            output: `Error: Command timed out after ${this.#timeout.toFixed(1)} seconds.`,
-            exitCode: 124,
-            truncated: false,
-          });
-          return;
-        }
-        const outputParts = [];
-        if (stdout) outputParts.push(stdout);
-        if (stderr) {
-          const stderrLines = stderr.trim().split("\n");
-          outputParts.push(...stderrLines.map((line) => `[stderr] ${line}`));
-        }
-        let output = outputParts.join("\n");
-        const truncated = Buffer.byteLength(output, "utf8") > this.#maxOutputBytes;
-        if (truncated) {
-          output = Buffer.from(output, "utf8").subarray(0, this.#maxOutputBytes).toString("utf8");
-          output += `\n[output truncated — exceeded ${this.#maxOutputBytes} bytes]`;
-        }
-        resolve({ output, exitCode: code ?? 1, truncated });
-      });
-    });
-  }
-}
 
 // =============================================================================
 // Checkpointer — process-level singleton. Defaults to MemorySaver (state lost
@@ -246,206 +140,6 @@ function _cacheKey(config: ServerConfig, mcpSignature?: string, subagentSignatur
     mcpSignature ?? "",
     subagentSignature ?? "",
   ]);
-}
-
-// =============================================================================
-// Model construction — equivalent to Python `_build_chat_model()`.
-// =============================================================================
-
-interface BuildModelResult {
-  model: any; // BaseChatModel
-  provider: string;
-  modelName: string;
-}
-
-/**
- * Build a LangChain chat model instance from a model spec and provider config.
- *
- * Reads `~/.deepagents/config.toml` for per-provider params / base_url /
- * api_key_env. Provider overrides (from web DB) take precedence over
- * config.toml values. API keys are resolved via `resolveEnvVar` for
- * `DEEPAGENTS_CODE_` prefix support.
- *
- * Merges modelParams from ServerConfig on top of config.toml params.
- *
- * Equivalent to Python `cortex.server_graph._build_chat_model()`.
- */
-async function _buildChatModel(
-  modelSpec: string,
-  providerOverrides?: Record<string, { baseUrl?: string; apiKeyEnv?: string; apiKey?: string }>,
-  modelParams?: Record<string, unknown>,
-): Promise<BuildModelResult> {
-  // Parse "provider:model"
-  const colonIdx = modelSpec.indexOf(":");
-  if (colonIdx <= 0) {
-    throw new Error(
-      `Invalid model spec "${modelSpec}" — must be in provider:model format`,
-    );
-  }
-  const provider = modelSpec.slice(0, colonIdx);
-  const modelName = modelSpec.slice(colonIdx + 1);
-
-  // Read provider config from config.toml
-  const config = ModelConfig.load();
-  const providerConfig: ProviderConfig = config.providers[provider] ?? {};
-
-  // Resolve params: config.toml base → modelParams override (modelParams wins)
-  // → inference defaults fill any remaining gaps (thinking / max_tokens)
-  const params: Record<string, unknown> = {
-    ..._resolveInferenceDefaults(modelName, modelParams ?? {}),
-    ...ModelConfig.getKwargs(provider, modelName),
-    ...(modelParams ?? {}),
-  };
-
-  // Resolve base_url: providerOverride > config.toml > env var
-  let baseUrl: string | undefined;
-  const override = providerOverrides?.[provider];
-  if (override?.baseUrl) {
-    baseUrl = override.baseUrl;
-  }
-  if (!baseUrl) {
-    baseUrl = ModelConfig.getBaseUrl(provider);
-  }
-
-  // Resolve API key: providerOverride (web DB) > config.json api_key > config.json api_key_env > env var
-  let apiKey: string | undefined;
-  if (override?.apiKey) {
-    apiKey = override.apiKey;
-  }
-  if (!apiKey) {
-    apiKey = ModelConfig.getApiKey(provider);
-  }
-  if (!apiKey) {
-    logger.debug(
-      `No API key configured for provider "${provider}". ` +
-      "The model will fail at runtime if no key is available.",
-    );
-  }
-
-  // Build the model instance
-  let model: any;
-
-  // Map provider to the appropriate LangChain chat model class.
-  // Primary support: OpenAI + Anthropic. All other providers fall back to
-  // ChatOpenAI with custom baseURL (OpenAI-compatible API pattern).
-  switch (provider) {
-    case "anthropic": {
-      const { ChatAnthropic } = await import("@langchain/anthropic");
-      model = new ChatAnthropic({
-        model: modelName,
-        streaming: true,
-        ...(apiKey ? { apiKey } : {}),
-        ...(baseUrl ? { clientOptions: { baseURL: baseUrl } } : {}),
-      });
-      // Apply known params individually (ChatAnthropic doesn't spread arbitrary params)
-      if (params["temperature"] !== undefined) {
-        (model as any).temperature = params["temperature"];
-      }
-      if (params["max_tokens"] !== undefined) {
-        (model as any).maxTokens = params["max_tokens"];
-      }
-      break;
-    }
-    case "google_genai":
-    case "google_vertexai": {
-      // Google — use ChatOpenAI-compatible mode (Gemini API supports OpenAI spec via baseUrl)
-      // For native Gemini SDK, install @langchain/google-genai separately.
-      logger.debug(
-        `Provider "${provider}" — using OpenAI-compatible mode. ` +
-        "Install @langchain/google-genai for native Gemini SDK support.",
-      );
-      const { ChatOpenAI } = await import("@langchain/openai");
-      model = new ChatOpenAI({
-        model: modelName,
-        streaming: true,
-        ...(apiKey ? { apiKey } : {}),
-        ...(baseUrl ? { configuration: { baseURL: baseUrl } } : {}),
-        ...params,
-      });
-      break;
-    }
-    default: {
-      // OpenAI + all OpenAI-compatible providers (deepseek, openrouter, together, xai,
-      // groq, fireworks, perplexity, baseten, mistralai, nvidia, cohere, huggingface, etc.)
-      const { ChatOpenAI } = await import("@langchain/openai");
-      model = new ChatOpenAI({
-        model: modelName,
-        streaming: true,
-        ...(apiKey ? { apiKey } : {}),
-        ...(baseUrl ? { configuration: { baseURL: baseUrl } } : {}),
-        ...params,
-      });
-    }
-  }
-
-  return { model, provider, modelName };
-}
-
-// =============================================================================
-// Inference defaults — thinking / reasoning_effort / max_tokens.
-//
-// ZCode sends `thinking: {type:"enabled"}` + `reasoning_effort` + a large
-// `max_tokens` for reasoning models. Without these, reasoning-capable models
-// (deepseek-v4 etc.) skip their thinking phase entirely — noticeably worse at
-// planning/delegation decisions. Octopus only passes through explicit config
-// params, so reasoning is silently off by default.
-// =============================================================================
-
-/**
- * Model-name patterns for models that support the OpenAI-style `thinking`
- * param. Kept deliberately conservative — sending `thinking` to a model that
- * doesn't support it can 400. Extend as support is confirmed.
- */
-const REASONING_MODEL_PATTERNS: RegExp[] = [
-  /deepseek-v\d+-/i, // deepseek-v4-flash etc. (v4+ hybrid reasoning)
-  /-o[134]($|[-.])/i, // OpenAI o1/o3/o4 series
-  /-r1($|[-.])/i, // deepseek-r1 style
-  /glm-4\.\d+[+-]/i, // GLM 4.5+ hybrid reasoning
-  /qwen3.*-thinking/i,
-  /qwen3-\w+-/i, // qwen3 hybrid models
-];
-
-function _isReasoningModel(modelName: string): boolean {
-  return REASONING_MODEL_PATTERNS.some((re) => re.test(modelName));
-}
-
-/**
- * Compute default inference params for a model. User-explicit params (from
- * config.json provider `params` or runtime modelParams) always win — we only
- * fill gaps.
- *
- * - Reasoning models get `thinking: {type:"enabled"}` + `reasoning_effort:
- *   "medium"` (ZCode uses "max"; medium balances cost/latency — override
- *   via config params if desired).
- * - All models get a `max_tokens` floor of 16384 when unset, so thinking
- *   output isn't truncated by a small provider default.
- *
- * Global kill-switch: `OCTOPUS_ENABLE_THINKING=0` disables the thinking
- * injection (max_tokens floor still applies).
- */
-function _resolveInferenceDefaults(
-  modelName: string,
-  params: Record<string, unknown>,
-): Record<string, unknown> {
-  const thinkingEnabled = process.env.OCTOPUS_ENABLE_THINKING !== "0";
-  const defaults: Record<string, unknown> = {};
-
-  if (params["max_tokens"] === undefined) {
-    defaults["max_tokens"] = 16384;
-  }
-
-  if (
-    thinkingEnabled &&
-    params["thinking"] === undefined &&
-    _isReasoningModel(modelName)
-  ) {
-    defaults["thinking"] = { type: "enabled" };
-    if (params["reasoning_effort"] === undefined) {
-      defaults["reasoning_effort"] = "medium";
-    }
-  }
-
-  return defaults;
 }
 
 // =============================================================================
@@ -772,7 +466,7 @@ async function _makeGraphUncached(
   // plan, submit_plan injection) ----
   // Done AFTER MCP loading so MCP-registered destructive tools are also
   // removed. The preset is the data-driven successor of the old access-mode
-  // switches (see agents/builtin.ts); every legacy mode resolves to a preset
+  // switches (see agent/presets.ts); every legacy mode resolves to a preset
   // with identical behavior.
   const preset = resolveAgentPreset(options?.agent ?? options?.accessMode);
   if (preset.disabledTools.size > 0) {
@@ -795,68 +489,11 @@ async function _makeGraphUncached(
     tools.push(createSubmitPlanTool());
   }
 
-  // ---- 4. Build CompositeBackend with temp-directory routing ----
-  // Matching Python: local mode uses CompositeBackend with routes for
-  // /large_tool_results/ and /conversation_history/ to temp directories.
-  //
-  // Workspace environment drives the primary backend: "sandbox" tries to build
-  // a LangSmith sandbox (falls back to local if unconfigured/fails); otherwise
-  // a local host backend rooted at `cwd`.
-  let backend: any;
-  const useSandbox = options?.workspace?.environment === "sandbox";
-  let sandboxBuilt = false;
-  if (useSandbox) {
-    try {
-      const sbCfg = getSandboxConfig();
-      const apiKey = resolveSandboxApiKey(sbCfg);
-      if (sbCfg.enabled !== false && sandboxHasCredentials(sbCfg)) {
-        logger.info("Building LangSmith sandbox backend");
-        backend = await LangSmithSandbox.create({
-          ...(apiKey ? { apiKey } : {}),
-          ...(sbCfg.template_name ? { templateName: sbCfg.template_name } : {}),
-          ...(sbCfg.snapshot_id ? { snapshotId: sbCfg.snapshot_id } : {}),
-        });
-        sandboxBuilt = true;
-      } else {
-        logger.warn("Sandbox workspace requested but sandbox not configured; falling back to local");
-      }
-    } catch (err) {
-      logger.exception("Failed to build sandbox backend; falling back to local", err as Error);
-    }
-  }
-  if (!sandboxBuilt) {
-    if (config.enableShell) {
-      // Prepend the bundled ripgrep binary directory (when provided by the
-      // server) to PATH so bare `rg` invocations in execute commands work
-      // even when ripgrep is not installed on the host.
-      const shellEnv: Record<string, string> = { ...(process.env as Record<string, string>) };
-      const rgDir = options?.extraPathDirs?.find((d) => d.includes("ripgrep"));
-      if (rgDir && existsSync(rgDir)) {
-        shellEnv.PATH = `${rgDir};${shellEnv.PATH ?? ""}`;
-        logger.info(`Shell PATH: prepended bundled ripgrep dir ${rgDir}`);
-      }
-      backend = new BashShellBackend({
-        rootDir: cwd,
-        inheritEnv: true,
-        env: shellEnv,
-      });
-    } else {
-      backend = new FilesystemBackend({ rootDir: cwd, virtualMode: false });
-    }
-  }
-
-  const largeResultsBackend = new FilesystemBackend({
-    rootDir: mkdtempSync(join(tmpdir(), "deepagents_large_results_")),
-    virtualMode: true,
-  });
-  const conversationHistoryBackend = new FilesystemBackend({
-    rootDir: mkdtempSync(join(tmpdir(), "deepagents_conversation_history_")),
-    virtualMode: true,
-  });
-
-  const compositeBackend = new CompositeBackend(backend, {
-    "/large_tool_results/": largeResultsBackend,
-    "/conversation_history/": conversationHistoryBackend,
+  // ---- 4. Build CompositeBackend (sandbox or local) with temp-dir routing ----
+  const backend = await buildBackend(config, {
+    cwd,
+    workspace: options?.workspace,
+    extraPathDirs: options?.extraPathDirs,
   });
 
   // ---- 5. Build middleware stack ----
@@ -921,7 +558,7 @@ async function _makeGraphUncached(
   middleware.push(new SubagentOrchestrationMiddleware());
 
   // DynamicContextMiddleware is pushed later (after `skillSourcePaths` is
-  // populated, ~L790) because it needs the resolved skills paths at construct
+  // populated) because it needs the resolved skills paths at construct
   // time. It is still pushed AFTER SubagentOrchestrationMiddleware, preserving
   // the intended stack order. See the push site for details.
 
@@ -1023,10 +660,11 @@ async function _makeGraphUncached(
   const userAgentSkillsDir = join(homedir(), ".agents", "skills");
   const userClaudeSkillsDir = join(homedir(), ".claude", "skills");
 
-  // Built-in skills shipped with the package
+  // Built-in skills shipped with the package (src/skills/builtin/ — one level
+  // up from this module's compiled output directory).
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = dirname(__filename);
-  const builtInSkillsDir = join(__dirname, "built_in_skills");
+  const builtInSkillsDir = join(__dirname, "..", "skills", "builtin");
 
   const skillsList = listSkills({
     builtInSkillsDir: existsSync(builtInSkillsDir) ? builtInSkillsDir : null,
@@ -1114,7 +752,7 @@ async function _makeGraphUncached(
   }
   // else: non-interactive mode — empty interrupts (headless execution)
 
-  // ---- 11. Compile the agent graph via deepagents SDK ----
+  // ---- 10. Compile the agent graph via deepagents SDK ----
   // Note: web mode disables ask_user and memory middleware
   // (matching Python's web-mode configuration in make_graph()).
   // Enable_shell is already controlled by the backend choice above.
@@ -1124,7 +762,7 @@ async function _makeGraphUncached(
     systemPrompt,
     tools,
     checkpointer: getCheckpointer() as any,
-    backend: compositeBackend,
+    backend,
     middleware,
     interruptOn,
     subagents: subagentSpecs.length > 0 ? subagentSpecs : undefined,
@@ -1190,86 +828,3 @@ export async function createAgent(config: ServerConfig): Promise<any> {
 }
 
 export type AgentGraph = Awaited<ReturnType<typeof makeGraph>>;
-
-// =============================================================================
-// buildChatModel — public alias for the internal model constructor.
-//
-// Exposed so non-graph callers (e.g. title generation) can reuse the same
-// config.toml / provider-override / env-var resolution logic without spinning
-// up a full LangGraph deepagents graph.
-// =============================================================================
-
-/**
- * Build a standalone LangChain chat model from a `provider:model` spec.
- *
- * Reuses the same `_buildChatModel` that `makeGraph` uses internally, so the
- * provider config (base_url, api_key_env, params) resolution is identical.
- * Unlike `makeGraph`, this does NOT attach a checkpointer, tools, or the
- * deepagents middleware stack — it returns a bare `BaseChatModel` you can call
- * `.invoke()` / `.stream()` on directly.
- */
-export async function buildChatModel(
-  modelSpec: string,
-  providerOverrides?: Record<string, { baseUrl?: string; apiKeyEnv?: string; apiKey?: string }>,
-): Promise<any> {
-  const { model } = await _buildChatModel(modelSpec, providerOverrides);
-  return model;
-}
-
-// =============================================================================
-// generateTitle — auto-summarize a conversation title from the first user turn.
-//
-// Equivalent to the Python project's frontend-driven title generation
-// (ui/web/src/apis/agent_api.js generateTitle + AgentChatComponent.vue
-// orchestration), moved server-side into core so the web client doesn't need
-// a separate /call round-trip.
-//
-// - Uses a single non-streaming model.invoke([HumanMessage]) call.
-// - Prompt asks for ≤30 chars, no markdown.
-// - Output is truncated to 30 chars and whitespace-collapsed.
-// - Returns null on any failure so callers can fall back to a truncated user msg.
-// =============================================================================
-
-/** Max title length (characters), matching the reference implementation. */
-export const TITLE_MAX_LENGTH = 30;
-
-/**
- * Generate a short conversation title from the user's first message.
- *
- * @param userMessage  The user's first turn text (truncated to 2000 chars internally).
- * @param modelSpec    A `provider:model` spec; resolved via the same config.toml
- *                     rules as the main agent model.
- * @returns The generated title (≤30 chars), or `null` if generation failed.
- */
-export async function generateTitle(
-  userMessage: string,
-  modelSpec: string,
-): Promise<string | null> {
-  const titleLogger = getLogger("agent.title");
-  // Match the reference: cap the prompt input at 2000 chars.
-  const snippet = userMessage.replace(/\s+/g, " ").trim().slice(0, 2000);
-
-  const prompt =
-    `根据以下对话内容生成一个简短的标题（最多30个字符，中英文均可），` +
-    `不要包含 markdown 标记：\n\n${snippet}`;
-
-  try {
-    const model = await buildChatModel(modelSpec);
-    const { HumanMessage } = await import("@langchain/core/messages");
-    const res = await model.invoke([new HumanMessage(prompt)]);
-    const raw: string =
-      typeof res?.content === "string"
-        ? res.content
-        : Array.isArray(res?.content)
-          ? res.content
-              .map((b: any) => (b?.type === "text" ? b.text : ""))
-              .join("")
-          : "";
-    const title = raw.slice(0, TITLE_MAX_LENGTH).replace(/\s+/g, " ").trim();
-    titleLogger.debug(`Generated title "${title}" from snippet (${snippet.length} chars)`);
-    return title || null;
-  } catch (err) {
-    titleLogger.exception("Title generation failed", err);
-    return null;
-  }
-}

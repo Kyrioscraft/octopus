@@ -7,7 +7,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve, sep, isAbsolute } from "node:path";
-import { getLogger } from "./logging.js";
+import { getLogger } from "../logging.js";
 
 const logger = getLogger("project.utils");
 

@@ -14,8 +14,8 @@
  * tool-name booleans with a pattern-based permission Ruleset.
  */
 
-import type { AccessMode } from "../config.js";
-import { DESTRUCTIVE_TOOLS } from "../config.js";
+import type { AccessMode } from "./access-mode.js";
+import { DESTRUCTIVE_TOOLS } from "./access-mode.js";
 import {
   evaluate,
   rulesetFromConfig,

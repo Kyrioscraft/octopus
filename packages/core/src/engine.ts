@@ -13,7 +13,7 @@
  * Equivalent to a transport-agnostic view of Python `chat_service.py` events.
  */
 
-import type { SubagentRegistryEntry } from "./agent.js";
+import type { SubagentRegistryEntry } from "./agent/index.js";
 
 // =============================================================================
 // Standardized event model
