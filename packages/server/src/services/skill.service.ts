@@ -115,13 +115,20 @@ function dbRowToEntry(row: {
 }
 
 /**
- * List all skills (file + user-defined), merged. user-defined overrides
- * same-named file/builtin entries.
+ * List all skills (builtin + file + user-defined), merged. user-defined
+ * overrides same-named file/builtin entries. Builtin skills without a
+ * user-defined copy are marked `installable` so the UI can offer one-click
+ * install from this single list (no separate catalog endpoint).
  */
 export function listAllSkills(userId: string): SkillEntry[] {
   const fileSkills = tagFileSkills(discoverFileSkills(), getBuiltinSkillNames());
   const userSkills = listUserSkills(userId).map(dbRowToEntry);
-  return mergeSkillEntries(fileSkills, userSkills);
+  const merged = mergeSkillEntries(fileSkills, userSkills);
+  const userNames = new Set(userSkills.map((s) => s.name));
+  for (const s of merged) {
+    if (s.origin === "builtin" && !userNames.has(s.name)) s.installable = true;
+  }
+  return merged;
 }
 
 /** Get a single skill's full content. */
@@ -318,45 +325,8 @@ function extractSkillMdFromZip(buf: Buffer): string {
 }
 
 // =============================================================================
-// Builtin skill catalog (install)
+// Builtin skill install
 // =============================================================================
-
-/** A builtin skill spec surfaced for installation in the UI. */
-export interface BuiltinSkillSpec {
-  slug: string;
-  name: string;
-  description: string;
-  /** "installed" if a user-defined override exists; "not_installed" otherwise. */
-  status: "installed" | "not_installed";
-  /** The installed user-defined entry, when status === "installed". */
-  installed_record: SkillEntry | null;
-}
-
-/**
- * List builtin skills (shipped with core) with install status. A builtin is
- * "installed" when a user-defined row with the same name exists (i.e. the user
- * has an editable copy via installBuiltinSkill or manual create).
- */
-export function listBuiltinSkills(userId: string): BuiltinSkillSpec[] {
-  const builtinNames = getBuiltinSkillNames();
-  if (builtinNames.size === 0) return [];
-  // Discover builtin skills' metadata via the same discovery used by listAll.
-  const fileSkills = discoverFileSkills().filter((s) => builtinNames.has(s.name));
-  return fileSkills.map((s) => {
-    const installed = getUserSkill(userId, s.name);
-    const spec: BuiltinSkillSpec = {
-      slug: s.name,
-      name: s.name,
-      description: s.description,
-      status: installed ? "installed" : "not_installed",
-      installed_record: null,
-    };
-    if (installed) {
-      spec.installed_record = dbRowToEntry(installed);
-    }
-    return spec;
-  });
-}
 
 /**
  * Install a builtin skill: read its SKILL.md content, create a user-defined

@@ -98,6 +98,9 @@ export interface Thread {
   agentId: string;
   /** Workspace this thread is bound to (optional for back-compat). */
   workspaceId?: string | null;
+  /** True when the thread has an agent run still executing server-side
+   *  (background continuation — set by GET /threads, optional for back-compat). */
+  running?: boolean;
   createdAt: string;
 }
 
@@ -243,7 +246,11 @@ export type StreamStatus =
   | "finished"
   | "interrupted"
   | "error"
-  | "warning";
+  | "warning"
+  /** /events only: the thread has no active run (client falls back to /history). */
+  | "idle"
+  /** /events only: 10s keepalive, no payload — safe to ignore. */
+  | "heartbeat";
 
 /**
  * One NDJSON record. Use `status` to narrow. Optional fields are kept
@@ -365,6 +372,8 @@ export interface SkillEntry {
   origin: SkillOrigin;
   editable: boolean;
   description: string;
+  /** True for a builtin skill with no user-defined copy yet (one-click install). */
+  installable?: boolean;
 }
 
 /** Skill detail (GET /api/config/skills/:name). */
@@ -406,19 +415,8 @@ export interface McpWriteRequest {
 }
 
 // =============================================================================
-// Config management — builtin skills + subagents
+// Config management — subagents
 // =============================================================================
-
-/** A builtin skill surfaced for installation in the UI. */
-export interface BuiltinSkillSpec {
-  slug: string;
-  name: string;
-  description: string;
-  /** "installed" if a user-defined copy exists; "not_installed" otherwise. */
-  status: "installed" | "not_installed";
-  /** The installed user-defined entry, when status === "installed". */
-  installed_record: SkillEntry | null;
-}
 
 /**
  * Where a subagent entry came from — determines editability.

@@ -1,5 +1,6 @@
 import { TurnEvents } from "../turn/TurnEvents.js";
 import { Markdown } from "../../widgets/Markdown.js";
+import { WorkTimer } from "../WorkTimer.js";
 import type { SubagentEvent } from "../turn/types.js";
 import type { Msg } from "../types.js";
 
@@ -39,6 +40,13 @@ export function MessageBubble({
           tool → reply) instead of the old type-grouped stacking. User messages
           keep the simple bubble. TurnEvents itself handles progressive disclosure
           (long finished turns collapse their head) and per-type visual weight. */}
+      {msg.role === "assistant" && (
+        <WorkTimer
+          startedAtMs={msg.startedAtMs}
+          durationMs={msg.workDurationMs}
+          running={msg.status === "streaming"}
+        />
+      )}
       {msg.role === "assistant" && msg.events && msg.events.length > 0 ? (
         <TurnEvents
           events={msg.events}
@@ -66,19 +74,11 @@ export function MessageBubble({
             msg.content
           ) : msg.content ? (
             <Markdown content={msg.content} />
-          ) : msg.status === "streaming" ? (
-            <span style={{
-              background: "linear-gradient(90deg, var(--gray-700) 0%, var(--gray-700) 40%, var(--gray-300) 45%, var(--gray-200) 50%, var(--gray-300) 55%, var(--gray-700) 60%, var(--gray-700) 100%)",
-              backgroundSize: "200% auto",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-              animation: "waveFlash 2s linear infinite",
-              fontSize: 14, fontWeight: 500, letterSpacing: "0.025em",
-            }}>
-              正在生成回复...
-            </span>
-          ) : ""}
+          ) : (
+            // Empty streaming bubble renders nothing — the WorkTimer at the
+            // top of the turn already signals the busy state.
+            ""
+          )}
         </div>
       )}
 

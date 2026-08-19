@@ -25,4 +25,8 @@ export interface Msg {
   events?: TurnEvent[];
   /** Legacy error hint (rendered outside the timeline). */
   error?: string;
+  /** Turn start timestamp (ms) — drives the live "已工作 Xs" timer while streaming. */
+  startedAtMs?: number;
+  /** Frozen work duration (ms) — from persisted work_duration_ms; shown when the turn ended. */
+  workDurationMs?: number;
 }

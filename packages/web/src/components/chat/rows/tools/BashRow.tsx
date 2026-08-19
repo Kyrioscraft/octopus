@@ -1,6 +1,7 @@
 import type { ToolCardProps } from "./types.js";
 import { ToolCallRow, ToolResultBlock } from "./ToolCallRow.js";
 import { truncate } from "./registry.js";
+import { ShimmerText } from "../../ShimmerText.js";
 
 /**
  * execute / bash / run_shell_command row. Header shows the command (truncated);
@@ -9,13 +10,14 @@ import { truncate } from "./registry.js";
 export function BashRow({ entry }: ToolCardProps) {
   const args = entry.args as { command?: string };
   const command = args.command ?? "";
+  const running = entry.status === "running" || entry.status === "pending";
 
   return (
     <ToolCallRow
       entry={entry}
       header={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          <span style={{ color: "var(--gray-500)" }}>命令</span>
+          {running ? <ShimmerText text="命令" /> : <span style={{ color: "var(--gray-500)" }}>命令</span>}
           <span style={{ color: "var(--gray-400)" }}>|</span>
           <code
             title={command}

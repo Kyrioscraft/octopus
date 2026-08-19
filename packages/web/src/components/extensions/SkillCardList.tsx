@@ -2,28 +2,26 @@ import { useNavigate } from "react-router-dom";
 import { Button, Spin, Empty, Upload, Tooltip, message as antdMessage } from "antd";
 import type { UploadProps } from "antd";
 import { BookOpen, Plus, Upload as UploadIcon } from "lucide-react";
-import { OctopusClient, type SkillEntry, type BuiltinSkillSpec } from "@octopus/tentacle";
+import { OctopusClient, type SkillEntry } from "@octopus/tentacle";
 import { SettingsCard, SettingsRow, SettingsRows, ListToolbar } from "../shared/SettingsCard.js";
 
 const sdk = new OctopusClient();
 
 interface SkillCardListProps {
   skills: SkillEntry[];
-  /** Builtin skills available for installation (status === not_installed). */
-  builtinAvailable: BuiltinSkillSpec[];
   loading: boolean;
   search: string;
   onReload: () => void;
 }
 
 /**
- * Skills tab: settings-style grouped row lists split into "已添加",
- * "内置 / 文件 (read-only)", and "可安装". Supports create, upload
+ * Skills tab: settings-style grouped row lists from the unified skill list,
+ * split by origin into "已添加" (user-defined), "内置 / 文件" (read-only),
+ * and "可安装" (builtin with installable=true). Supports create, upload
  * (.zip/.md), and one-click install of builtin skills.
  */
 export function SkillCardList({
   skills,
-  builtinAvailable,
   loading,
   search,
   onReload,
@@ -34,16 +32,15 @@ export function SkillCardList({
   const filtered = skills.filter(
     (s) => !q || s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q),
   );
-  const filteredBuiltin = builtinAvailable.filter(
-    (b) => !q || b.name.toLowerCase().includes(q) || (b.description ?? "").toLowerCase().includes(q),
-  );
 
-  const owned = filtered.filter((s) => s.origin === "user-defined");
-  const catalog = filtered.filter((s) => s.origin !== "user-defined");
+  const installable = filtered.filter((s) => s.installable);
+  const rest = filtered.filter((s) => !s.installable);
+  const owned = rest.filter((s) => s.origin === "user-defined");
+  const catalog = rest.filter((s) => s.origin !== "user-defined");
 
-  const installBuiltin = async (slug: string) => {
+  const installBuiltin = async (name: string) => {
     try {
-      await sdk.installBuiltinSkill(slug);
+      await sdk.installBuiltinSkill(name);
       antdMessage.success("安装成功");
       onReload();
     } catch (err: any) {
@@ -106,7 +103,7 @@ export function SkillCardList({
         <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
           <Spin />
         </div>
-      ) : filtered.length === 0 && filteredBuiltin.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <Empty description={q ? "无匹配 Skill" : "暂无 Skill"} style={{ marginTop: 60 }} />
       ) : (
         <>
@@ -140,17 +137,17 @@ export function SkillCardList({
               </SettingsRows>
             </SettingsCard>
           )}
-          {filteredBuiltin.length > 0 && (
+          {installable.length > 0 && (
             <SettingsCard title="可安装">
               <SettingsRows>
-                {filteredBuiltin.map((b) => (
+                {installable.map((s) => (
                   <SettingsRow
-                    key={b.slug}
+                    key={s.name}
                     icon={<BookOpen />}
-                    title={b.name}
-                    description={b.description}
+                    title={s.name}
+                    description={s.description}
                   >
-                    <Button size="small" onClick={() => installBuiltin(b.slug)} style={{ borderRadius: 6 }}>
+                    <Button size="small" onClick={() => installBuiltin(s.name)} style={{ borderRadius: 6 }}>
                       安装
                     </Button>
                   </SettingsRow>

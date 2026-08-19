@@ -20,7 +20,6 @@ import {
   updateSkill,
   deleteSkill,
   importSkill,
-  listBuiltinSkills,
   installBuiltinSkill,
   NotEditableError as SkillNotEditable,
 } from "../services/skill.service.js";
@@ -96,6 +95,19 @@ configRouter.get("/skills", getOptionalUser, (c) => {
   return c.json({ skills: listAllSkills(userId) });
 });
 
+// --- Builtin skill install ---
+// NOTE: /skills/:name/install registered before /skills/:name so the extra
+// path segment is matched first.
+configRouter.post("/skills/:name/install", getOptionalUser, (c) => {
+  const userId = c.var.user.sub;
+  try {
+    const skill = installBuiltinSkill(userId, c.req.param("name"));
+    return c.json({ skill }, 201);
+  } catch (err) {
+    return handleError(c, err);
+  }
+});
+
 configRouter.get("/skills/:name", getOptionalUser, (c) => {
   const userId = c.var.user.sub;
   const detail = getSkillDetail(userId, c.req.param("name"));
@@ -151,22 +163,6 @@ configRouter.post("/skills/import", getOptionalUser, async (c) => {
   try {
     const buf = Buffer.from(await file.arrayBuffer());
     const skill = importSkill(userId, file.name || "upload.md", buf);
-    return c.json({ skill }, 201);
-  } catch (err) {
-    return handleError(c, err);
-  }
-});
-
-// --- Builtin skill catalog ---
-configRouter.get("/skills/builtin", getOptionalUser, (c) => {
-  const userId = c.var.user.sub;
-  return c.json({ skills: listBuiltinSkills(userId) });
-});
-
-configRouter.post("/skills/:name/install", getOptionalUser, (c) => {
-  const userId = c.var.user.sub;
-  try {
-    const skill = installBuiltinSkill(userId, c.req.param("name"));
     return c.json({ skill }, 201);
   } catch (err) {
     return handleError(c, err);

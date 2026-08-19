@@ -25,7 +25,6 @@ export {
   type McpServerEntry,
   type SkillWriteRequest,
   type McpWriteRequest,
-  type BuiltinSkillSpec,
   type SubagentOrigin,
   type SubagentEntry,
   type SubagentWriteRequest,

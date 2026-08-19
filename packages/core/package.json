@@ -17,9 +17,9 @@
     "@langchain/langgraph-checkpoint": "^1.1.0",
     "@langchain/openai": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "deepagents": "^1.10.0",
+    "deepagents": "^1.12.4",
     "turndown": "^7.2.0",
-    "zod": "^3.24.0"
+    "zod": "^4.2.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

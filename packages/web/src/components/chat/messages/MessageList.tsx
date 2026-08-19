@@ -1,4 +1,5 @@
 import type { RefObject } from "react";
+import { Loader } from "lucide-react";
 import type { SubagentEvent } from "../turn/types.js";
 import type { Msg } from "../types.js";
 import { MessageBubble } from "./MessageBubble.js";
@@ -32,29 +33,21 @@ export function MessageList({
         {msgs.map((m) => (
           <MessageBubble key={m.id} msg={m} onOpenSubagent={onOpenSubagent} />
         ))}
-        {/* Generating indicator when AI is busy but has no content yet */}
-        {busy && msgs.length > 0 && msgs[msgs.length - 1]?.role !== "assistant" && (
+        {/* Running indicator — always visible at the bottom while busy
+            (zcode-style): a spinning lucide Loader icon, even after the
+            assistant has produced content — the turn is still executing
+            (streaming, tool calls, subagents). */}
+        {busy && msgs.length > 0 && (
           <div style={{
-            display: "flex", alignItems: "center", gap: 8,
-            padding: "0.5rem 0", animation: "fadeInUp 0.4s ease-out",
+            display: "flex", alignItems: "center",
+            // paddingLeft matches the text event's 6px indent (EventRow) so the
+            // loader lines up under the reply text, not the container edge.
+            padding: "0.5rem 0 0.5rem 6px", animation: "fadeInUp 0.4s ease-out",
           }}>
-            <div style={{
-              width: 20, height: 20, borderRadius: "50%",
-              border: "2px solid var(--gray-200)",
-              borderTopColor: "var(--main-color)",
-              animation: "spin 0.8s linear infinite",
-            }} />
-            <span style={{
-              fontSize: 14, fontWeight: 500, letterSpacing: "0.025em",
-              background: "linear-gradient(90deg, var(--gray-700) 0%, var(--gray-700) 40%, var(--gray-300) 45%, var(--gray-200) 50%, var(--gray-300) 55%, var(--gray-700) 60%, var(--gray-700) 100%)",
-              backgroundSize: "200% auto",
-              WebkitBackgroundClip: "text",
-              backgroundClip: "text",
-              color: "transparent",
-              animation: "waveFlash 2s linear infinite",
-            }}>
-              正在生成回复...
-            </span>
+            <Loader
+              size={18}
+              style={{ color: "var(--gray-400)", animation: "spin 0.8s linear infinite" }}
+            />
           </div>
         )}
         <div ref={endRef} />

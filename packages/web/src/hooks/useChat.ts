@@ -17,6 +17,7 @@ import type { Msg } from "../components/chat/types.js";
 import type { AccessMode } from "../components/chat/constants.js";
 import { MODE_ORDER } from "../components/chat/constants.js";
 import { useThemeStore } from "../stores/theme.js";
+import { useChatStore } from "../stores/chat.js";
 
 const sdk = new OctopusClient();
 
@@ -40,9 +41,59 @@ function normalizeHistory(rows: any[]): Msg[] {
       if (tcId) toolResults.set(tcId, m.content);
     }
   }
+  // An interrupted partial (error_type:"interrupted") saves the ACCUMULATED
+  // turn text — which includes raw tool stdout, because live accumulation
+  // can't distinguish tool output from reply text. Rendered as a plain text
+  // event it shows up as a wall of tool output. Instead, fold such content
+  // into the PREVIOUS assistant message's last result-less tool row (the
+  // in-flight tool whose output was captured), and keep only a trailing
+  // non-tool remainder (if any) as the text event.
+  const interruptedPartials = new Set<any>();
+  for (const m of rows) {
+    const em = m.extraMetadata as Record<string, unknown> | undefined;
+    if (m.role === "assistant" && em?.error_type === "interrupted") {
+      interruptedPartials.add(m);
+    }
+  }
   const msgs: Msg[] = [];
   for (const m of rows) {
     if (m.role === "tool") continue;
+    if (interruptedPartials.has(m)) {
+      // Case A: the previous assistant msg's last event is a tool row — the
+      // turn was interrupted at/after that tool call, and the accumulated
+      // "text" is actually the tool's stdout (live accumulation can't tell
+      // them apart). Fold it into that tool row (keep an already-persisted
+      // result if present).
+      const prevAssistant = [...msgs].reverse().find((x) => x.role === "assistant" && x.events?.length);
+      const lastEvent = prevAssistant?.events?.[prevAssistant.events.length - 1];
+      if (lastEvent?.type === "tool") {
+        lastEvent.entry = {
+          ...lastEvent.entry,
+          status: "done",
+          result: lastEvent.entry.result
+            ? lastEvent.entry.result
+            : m.content,
+        };
+        continue; // folded — no separate bubble
+      }
+      // Case B: no assistant row since the last user message — the partial is
+      // this turn's ONLY output and is tool stdout with no surviving tool row
+      // (the AI/tool messages were never persisted). Render as an interrupted
+      // assistant bubble: error status so it reads as "stopped", not a reply.
+      const lastMsg = msgs[msgs.length - 1];
+      if (!lastMsg || lastMsg.role === "user") {
+        msgs.push({
+          id: m.id,
+          role: "assistant",
+          content: m.content,
+          status: "error",
+          error: "对话已中断（部分输出）",
+        } as Msg);
+        continue;
+      }
+      // Case C: previous assistant ended with reasoning/text — genuine
+      // partial reply text; fall through and render normally.
+    }
     const extra = m.extraMetadata as Record<string, unknown> | undefined;
     const addKw = extra?.additional_kwargs as Record<string, unknown> | undefined;
     const reasoning = (addKw?.reasoning_content as string | undefined) ?? "";
@@ -86,6 +137,32 @@ function normalizeHistory(rows: any[]): Msg[] {
     }
     if (m.content) {
       events.push({ id: `${m.id}_tx_${seq++}`, type: "text", text: m.content });
+    }
+    if (m.role === "assistant") {
+      // One persisted TURN spans MULTIPLE assistant rows (each AI message with
+      // tool_calls is stored separately by saveAiMessages). Live rendering
+      // shows one bubble per turn — mirror that: append this row's events to
+      // the current turn bubble instead of creating a new one. This also puts
+      // the persisted work_duration_ms (stamped on the turn's LAST row) on
+      // the turn's single WorkTimer.
+      const lastMsg = msgs[msgs.length - 1];
+      if (lastMsg?.role === "assistant" && lastMsg.status !== "error") {
+        lastMsg.events = [...(lastMsg.events ?? []), ...events];
+        lastMsg.content = [lastMsg.content, m.content].filter(Boolean).join("\n\n");
+        const workDuration = extra?.work_duration_ms as number | undefined;
+        if (workDuration !== undefined) lastMsg.workDurationMs = workDuration;
+        continue;
+      }
+      const workDuration = extra?.work_duration_ms as number | undefined;
+      msgs.push({
+        id: m.id,
+        role: "assistant",
+        content: m.content,
+        ...(events.length > 0 ? { events } : {}),
+        ...(workDuration !== undefined ? { workDurationMs: workDuration } : {}),
+        status: "done",
+      });
+      continue;
     }
     msgs.push({
       id: m.id,
@@ -204,9 +281,25 @@ export function useChat({
 
   // ---- Thread history loading ----
   const load = useCallback(async (tid: string) => {
+    // Detach any in-flight local stream FIRST: switching threads must not let
+    // the old thread's events patch the new thread's message array (the
+    // server-side run continues in the background regardless).
+    detachLocal();
+    const running = useChatStore.getState().runningThreads[tid];
     try {
       const r = await sdk.getThreadHistory(tid);
-      setMsgs(normalizeHistory(r.history ?? []));
+      let rows = r.history ?? [];
+      if (running && rows.length > 0) {
+        // The run is still executing: drop the ENTIRE trailing turn (every row
+        // after the last user message — a turn spans multiple assistant rows)
+        // and let the /events replay stream rebuild the live turn. Dropping
+        // only the last row would leave the turn's earlier rows rendered as a
+        // finished bubble (with a frozen Timer) alongside the replayed one —
+        // the double-Timer bug.
+        const lastUserIdx = rows.map((x: any) => x.role).lastIndexOf("user");
+        rows = lastUserIdx >= 0 ? rows.slice(0, lastUserIdx + 1) : [];
+      }
+      setMsgs(normalizeHistory(rows));
       // Message-level agent inheritance (phase 3): sync the input bar's
       // agent selector with the thread's last user-message agent so a
       // restored session continues where it left off (e.g. plan → approved
@@ -217,6 +310,23 @@ export function useChat({
         setAccessMode(fromMsg);
       }
     } catch { setMsgs([]); }
+    // Re-attach when this thread's run is still executing server-side: replay
+    // the buffered events + live tail, rendered through the same accumulator
+    // path as a regular turn (opencode's hydrate-then-live-tail pattern).
+    // (reattach is defined below doStream — reached via ref to avoid TDZ.)
+    if (running) {
+      reattachRef.current(tid);
+    }
+  }, []);
+
+  /** Abort the local fetch + reset local stream state. The server-side run
+   *  keeps executing (runs are decoupled from connections server-side). */
+  const detachLocal = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    turnAcc.current = null;
+    setBusy(false);
+    setAsk(null);
   }, []);
 
   /** Clear messages (e.g. when starting a new chat via ?thread= cleared). */
@@ -224,15 +334,70 @@ export function useChat({
 
   // ---- Stream consumer ----
   const doStream = useCallback(async (stream: AsyncGenerator<StreamEvent>, tid: string) => {
+    const setThreadRunning = useChatStore.getState().setThreadRunning;
+    /** Freeze the turn's work timer: prefer the server-reported duration
+     *  (meta.duration_ms, includes time before re-attach), else the local
+     *  startedAtMs elapsed. */
+    const freezeTimer = (durationMs?: number) =>
+      setMsgs((prev) => {
+        const c = [...prev];
+        const last = c[c.length - 1];
+        if (last?.role !== "assistant") return prev;
+        const local =
+          last.startedAtMs !== undefined ? Date.now() - last.startedAtMs : undefined;
+        const chosen = durationMs ?? local;
+        c[c.length - 1] = {
+          ...last,
+          ...(chosen !== undefined ? { workDurationMs: chosen } : {}),
+        };
+        return c;
+      });
     try {
       for await (const ev of stream) {
         switch (ev.status) {
-          case "init":
+          case "heartbeat":
+            // /events keepalive — nothing to render.
+            break;
+          case "idle":
+            // /events stream closed with no active run: the run finished
+            // before we attached (or just ended). History already has (or will
+            // have, via listThreads below) the final output — clear running
+            // and settle any still-streaming bubble.
+            setThreadRunning(tid, false);
+            freezeTimer(undefined);
+            setMsgs((prev) => {
+              const c = [...prev];
+              const last = c[c.length - 1];
+              if (last?.role === "assistant" && last.status === "streaming") {
+                c[c.length - 1] = { ...last, status: "done" };
+              }
+              return c;
+            });
+            setBusy(false);
+            listThreads();
+            break;
+          case "init": {
+            // Re-attach calibration: the /events replay header carries the
+            // run's true start time — set it on the streaming bubble so the
+            // WorkTimer continues from the real elapsed time.
+            const runStartedAt = ev.meta?.run_started_at as number | undefined;
+            if (runStartedAt !== undefined) {
+              setMsgs((prev) => {
+                const c = [...prev];
+                const last = c[c.length - 1];
+                if (last?.role === "assistant" && last.status === "streaming") {
+                  c[c.length - 1] = { ...last, startedAtMs: runStartedAt };
+                }
+                return c;
+              });
+            }
             if (!activeThreadId && ev.meta?.thread_id) {
               setActiveThreadId(ev.meta?.thread_id as string);
+              setThreadRunning(ev.meta.thread_id as string, true);
               listThreads();
             }
             break;
+          }
           case "loading":
           case "reasoning": {
             const acc = turnAcc.current;
@@ -265,6 +430,10 @@ export function useChat({
             break;
           }
           case "ask_user_question_required": {
+            // Paused awaiting user input — the turn is STILL ACTIVE (the
+            // server registry keeps it `paused`, /threads reports running).
+            // Keep the running flag so re-entering the thread re-attaches and
+            // restores this ask panel from the replay stream.
             const kind = (ev.kind as AskUserQuestionPayload["kind"] | undefined) ?? "tool_approval";
             const questions = (ev.questions as AskQuestion[] | undefined) ?? [];
             const payload: AskUserQuestionPayload = {
@@ -297,6 +466,9 @@ export function useChat({
             return;
           }
           case "finished": {
+            setThreadRunning(tid, false);
+            const durationMs = ev.meta?.duration_ms as number | undefined;
+            freezeTimer(durationMs);
             const acc = turnAcc.current;
             acc?.finalizeDone();
             const events = acc?.snapshot();
@@ -316,7 +488,31 @@ export function useChat({
             scroll(); // follow only if stuck to the bottom
             break;
           }
+          case "interrupted": {
+            // Explicit stop (server saved partial output + emitted this).
+            setThreadRunning(tid, false);
+            freezeTimer(ev.meta?.duration_ms as number | undefined);
+            const acc = turnAcc.current;
+            acc?.finalizeDone();
+            const events = acc?.snapshot();
+            setMsgs((prev) => {
+              const c = [...prev];
+              const last = c[c.length - 1];
+              if (last?.role === "assistant") {
+                c[c.length - 1] = {
+                  ...last,
+                  status: "done",
+                  ...(events ? { events, content: contentFromEvents(events) } : {}),
+                };
+              }
+              return c;
+            });
+            scroll();
+            break;
+          }
           case "error": {
+            setThreadRunning(tid, false);
+            freezeTimer(undefined);
             const acc = turnAcc.current;
             acc?.finalizeError();
             const events = acc?.snapshot();
@@ -359,13 +555,46 @@ export function useChat({
     } finally { setBusy(false); }
   }, [activeThreadId, listThreads, setActiveThreadId, scroll]);
 
+  // Re-attach to a running thread: append a streaming assistant bubble and
+  // consume the /events replay stream through the shared doStream pipeline.
+  // Reached via ref (load is defined above doStream; same pattern as resolveRef).
+  const reattachRef = useRef<(tid: string) => void>(() => {});
+  const reattach = useCallback(async (tid: string) => {
+    setMsgs((prev) => {
+      // Don't double-append if the last bubble is already a streaming turn.
+      const last = prev[prev.length - 1];
+      if (last?.role === "assistant" && last.status === "streaming") return prev;
+      // startedAtMs intentionally omitted — calibrated from the replay
+      // stream's init chunk (meta.run_started_at) so the timer shows the
+      // run's TRUE elapsed time, not time-since-reattach.
+      return [...prev, { id: `a_reattach_${Date.now()}`, role: "assistant", content: "", status: "streaming", events: [] } as Msg];
+    });
+    setBusy(true);
+    turnAcc.current = new TurnEventAccumulator();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    try {
+      const stream = await sdk.streamThreadEvents(tid, 0, { signal: controller.signal });
+      await doStream(stream, tid);
+    } catch (err: any) {
+      if (err?.name !== "AbortError") setBusy(false);
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
+    }
+  }, [doStream]);
+  reattachRef.current = (tid: string) => { reattach(tid); };
+
   // ---- Send a new user message ----
   const send = useCallback(async (content: string) => {
     const u: Msg = { id: `u_${Date.now()}`, role: "user", content, status: "done" };
-    const a: Msg = { id: `a_${Date.now()}`, role: "assistant", content: "", status: "streaming", events: [] };
+    const a: Msg = {
+      id: `a_${Date.now()}`, role: "assistant", content: "", status: "streaming", events: [],
+      startedAtMs: Date.now(),
+    };
     setMsgs((p) => [...p, u, a]);
     setBusy(true);
     setAsk(null);
+    if (activeThreadId) useChatStore.getState().setThreadRunning(activeThreadId, true);
     // User just sent a message — force follow to the bottom.
     scrollToBottom({ force: true, smooth: true });
     const controller = new AbortController();
@@ -427,6 +656,7 @@ export function useChat({
         return c;
       });
       setAsk(null);
+      useChatStore.getState().setThreadRunning(activeThreadId, true);
       const controller = new AbortController();
       abortRef.current = controller;
       try {
@@ -447,9 +677,17 @@ export function useChat({
   resolveRef.current = resolve;
 
   // ---- Stop the in-flight generation ----
+  // With runs decoupled from connections, stopping requires the explicit
+  // /stop endpoint: aborting the local fetch alone would only detach (the
+  // run would continue in the background).
   const stop = useCallback(() => {
+    const tid = activeThreadId;
     abortRef.current?.abort();
     abortRef.current = null;
+    if (tid) {
+      useChatStore.getState().setThreadRunning(tid, false);
+      sdk.stopThreadRun(tid).catch(() => { /* server may already be done */ });
+    }
     setMsgs((prev) => {
       const c = [...prev];
       const last = c[c.length - 1];
@@ -459,7 +697,7 @@ export function useChat({
       return c;
     });
     setBusy(false);
-  }, []);
+  }, [activeThreadId]);
 
   // ---- Switch access mode (persisted mid-session) ----
   // Updates local state immediately AND writes the new mode to the thread on

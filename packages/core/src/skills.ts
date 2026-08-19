@@ -21,7 +21,7 @@
  * Equivalent to Python `cortex.skills.load`.
  */
 
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { getLogger } from "./logging.js";
 
@@ -134,7 +134,6 @@ function _scanSkillsDir(skillDir: string, source: SkillSource): Map<string, Skil
   // Check for entries in this directory
   let entries: string[];
   try {
-    const { readdirSync } = require("node:fs");
     entries = readdirSync(skillDir);
   } catch {
     return skills;

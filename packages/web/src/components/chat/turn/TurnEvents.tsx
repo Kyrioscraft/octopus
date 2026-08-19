@@ -12,7 +12,7 @@ import {
 import { Collapse, Tooltip } from "antd";
 import {
   CircleX,
-  LoaderCircle,
+  Loader,
   Search,
 } from "lucide-react";
 
@@ -184,11 +184,11 @@ export function ToolGroupBar({ tools, isActive }: { tools: ToolEvent[]; isActive
   if (errored > 0) {
     leadIcon = <CircleX style={{ color: "var(--color-error-500)" }} />;
   } else if (pending > 0) {
-    leadIcon = <LoaderCircle style={{ color: "var(--color-info-700)" }} />;
+    leadIcon = <Loader size={14} style={{ color: "var(--gray-400)", animation: "spin 0.8s linear infinite" }} />;
   } else if (allDone) {
     leadIcon = <Search style={{ fontSize: 13, color: "var(--gray-400)" }} />;
   } else {
-    leadIcon = <LoaderCircle style={{ color: "var(--color-info-700)" }} />;
+    leadIcon = <Loader size={14} style={{ color: "var(--gray-400)", animation: "spin 0.8s linear infinite" }} />;
   }
 
   // Folded chips: up to 3 targets (file name / search term), remainder "+M".

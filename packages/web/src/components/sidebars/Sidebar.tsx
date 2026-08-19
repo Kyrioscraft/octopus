@@ -89,6 +89,7 @@ export function Sidebar() {
   const {
     threads, setThreads, activeThreadId, setActiveThreadId,
     workspaces, setWorkspaces, activeWorkspaceId, setActiveWorkspaceId,
+    runningThreads,
   } = useChatStore();
   const location = useLocation();
   // Derive the active nav key from the current path so it survives refresh.
@@ -150,6 +151,16 @@ export function Sidebar() {
 
   useEffect(() => { loadWorkspaces(); }, [loadWorkspaces]);
   useEffect(() => { loadThreads(); }, [loadThreads]);
+
+  // While any thread has a run executing server-side, poll the thread list so
+  // running indicators (and titles) stay fresh even when the run's events are
+  // being consumed by a detached/reattached stream elsewhere.
+  const anyRunning = Object.keys(runningThreads).length > 0;
+  useEffect(() => {
+    if (!anyRunning) return;
+    const t = setInterval(() => { loadThreads(); }, 5000);
+    return () => clearInterval(t);
+  }, [anyRunning, loadThreads]);
 
   // Auto-select the most-recently-opened workspace on first load if none chosen.
   useEffect(() => {
@@ -487,8 +498,23 @@ export function Sidebar() {
               }
             }}
           >
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
-              {t.title}
+            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, display: "flex", alignItems: "center", gap: 6 }}>
+              {/* Running indicator — thread's agent run is still executing
+                  server-side in the background (zcode-style spinner dot). */}
+              {runningThreads[t.id] && (
+                <span
+                  title="正在运行"
+                  style={{
+                    flexShrink: 0, width: 12, height: 12, borderRadius: "50%",
+                    border: "2px solid var(--main-20)",
+                    borderTopColor: "var(--main-color)",
+                    animation: "spin 0.8s linear infinite",
+                  }}
+                />
+              )}
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {t.title}
+              </span>
             </span>
             {/* Relative timestamp (always visible, kept as muted secondary text) */}
             <span style={{

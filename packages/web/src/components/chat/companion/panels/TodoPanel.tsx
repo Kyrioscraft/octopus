@@ -2,7 +2,7 @@ import { Progress, Tag, Empty } from "antd";
 import {
   CircleCheckBig,
   Clock,
-  LoaderCircle,
+  Loader,
 } from "lucide-react";
 import type { TodoItem, TodoStatus } from "../types.js";
 import type { CompanionPanelProps } from "../types.js";
@@ -105,7 +105,7 @@ export function statusVisual(status: TodoStatus): {
       };
     case "in_progress":
       return {
-        icon: <LoaderCircle />,
+        icon: <Loader size={14} style={{ animation: "spin 0.8s linear infinite" }} />,
         color: "var(--color-info-700)",
         label: "进行中",
       };

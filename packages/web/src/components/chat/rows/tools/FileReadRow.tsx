@@ -1,6 +1,7 @@
 import type { ToolCardProps } from "./types.js";
 import { ToolCallRow, ToolResultBlock } from "./ToolCallRow.js";
 import { basename } from "./registry.js";
+import { ShimmerText } from "../../ShimmerText.js";
 
 /**
  * read_file row. Header shows the file name; body shows the file contents
@@ -11,13 +12,14 @@ export function FileReadRow({ entry }: ToolCardProps) {
   const args = entry.args as { file_path?: string; offset?: number; limit?: number };
   const filePath = args.file_path ?? "";
   const fileName = basename(filePath);
+  const running = entry.status === "running" || entry.status === "pending";
 
   return (
     <ToolCallRow
       entry={entry}
       header={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          <span style={{ color: "var(--gray-500)" }}>读取</span>
+          {running ? <ShimmerText text="读取" /> : <span style={{ color: "var(--gray-500)" }}>读取</span>}
           <span style={{ color: "var(--gray-400)" }}>|</span>
           <code
             title={filePath}

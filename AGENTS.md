@@ -149,3 +149,17 @@ Key env vars (see `core/src/constants.ts` for the full provider registry):
   multi-process writes. Don't assume transactional safety.
 - Vite dev server proxies `/api` to port 9876 — both `server` and `web` must
   run for local development.
+- **`patches/@langchain__core@1.2.1.patch` is load-bearing.** It dedupes
+  callback handlers by reference in `mergeConfigs` / `CallbackManager.addHandler`.
+  Upstream `@langchain/core` adds the SAME `StreamMessagesHandler` instance twice
+  when a handler inherited into a subagent config (via the deepagents `task`
+  tool) is merged again inside the subgraph — every subagent LLM token was
+  streamed twice (UI showed `II'll'll explore explore...`). Do not delete the
+  patch or `pnpm.patchedDependencies` in the root `package.json`; re-verify
+  subagent streaming (0 adjacent duplicate tokens) after any `@langchain/core`
+  upgrade. Upstream fix status: unfixed as of `@langchain/langgraph` 1.4.10 /
+  `@langchain/core` 1.2.1.
+- zod is pinned repo-wide to `^4.2.0` (plus a root `pnpm.overrides.zod`) so
+  pnpm resolves a single `@langchain/langgraph` instance. Mixed zod v3/v4
+  peer resolution previously created duplicate langgraph copies with
+  subtly-different class identities.

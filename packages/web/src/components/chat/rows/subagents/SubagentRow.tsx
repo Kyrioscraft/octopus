@@ -1,5 +1,5 @@
 import {
-  LoaderCircle,
+  Loader,
   Bot,
 } from "lucide-react";
 import { truncate } from "../../../widgets/utils.js";
@@ -40,7 +40,10 @@ export function SubagentRow({
   // Single-slot icon: spinner while streaming, the subagent (Bot) type icon
   // otherwise — dimmed so completion reads as "settled" (mirrors ToolCallRow).
   const leadIcon = streaming ? (
-    <LoaderCircle style={{ color: "var(--color-info-700)" }} />
+    <Loader
+      size={14}
+      style={{ color: "var(--gray-400)", animation: "spin 0.8s linear infinite" }}
+    />
   ) : (
     <Bot style={{ fontSize: 13, color: "var(--gray-400)" }} />
   );

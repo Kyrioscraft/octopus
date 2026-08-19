@@ -648,10 +648,30 @@ export function addMessages(threadId: string, msgs: MessageRow[]): void {
   });
 }
 
+/** Merge keys into an existing message's extraMetadata (used e.g. to stamp
+ *  the turn's work duration after the run finishes). No-op when missing. */
+export function mergeMessageExtra(
+  threadId: string,
+  messageId: string,
+  extra: Record<string, unknown>,
+): void {
+  const row = getDb()
+    .select()
+    .from(schema.messages)
+    .where(eq(schema.messages.id, messageId))
+    .get();
+  if (!row || row.threadId !== threadId) return;
+  const current = (unpackJson(row.extraMetadata) ?? {}) as Record<string, unknown>;
+  getDb()
+    .update(schema.messages)
+    .set({ extraMetadata: packJson({ ...current, ...extra }) })
+    .where(eq(schema.messages.id, messageId))
+    .run();
+}
+
 // =============================================================================
 // User-defined skill config (Phase F — see ARCHITECTURE_PLAN §11)
 // =============================================================================
-
 export function listUserSkills(userId: string): UserSkillRow[] {
   return getDb()
     .select()

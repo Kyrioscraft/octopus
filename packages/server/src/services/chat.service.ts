@@ -21,7 +21,7 @@ import {
   wrapAgentStream,
 } from "@octopus/core";
 import type { SubagentRegistryEntry, AgentEvent } from "@octopus/core";
-import { addMessage, addMessages, getMessages } from "../db/index.js";
+import { addMessage, addMessages, getMessages, mergeMessageExtra } from "../db/index.js";
 import type { MessageRow } from "../db/index.js";
 
 const logger = getLogger("chat.service");
@@ -44,6 +44,12 @@ export interface ChatInput {
   langgraphConfig: Record<string, unknown>;
   /** Model spec for title generation on new threads. */
   modelSpec?: string;
+  /** Signal from the run registry — aborted by an explicit /stop request.
+   *  Client disconnects do NOT abort the run (it continues in background). */
+  abortSignal?: AbortSignal;
+  /** Run start timestamp (run-registry startedAt) — used to compute and
+   *  persist the turn's work duration ("已工作 Xm" indicator). */
+  startedAt?: number;
 }
 
 /** Input for resuming a HITL-interrupted turn. */
@@ -55,7 +61,12 @@ export interface ResumeInput {
   agent: any;
   subagentRegistry: Map<string, SubagentRegistryEntry>;
   langgraphConfig: Record<string, unknown>;
+  /** Signal from the run registry — aborted by an explicit /stop request. */
+  abortSignal?: AbortSignal;
+  /** Run start timestamp — stamps work_duration_ms like streamChat. */
+  startedAt?: number;
 }
+
 
 // =============================================================================
 // Ask-the-user protocol types (mirror @octopus/tentacle — kept local to avoid
@@ -202,6 +213,25 @@ export function savePartialAssistantMessage(
     createdAt: new Date().toISOString(),
   });
   return true;
+}
+
+/**
+ * Stamp the finished turn's work duration (ms since run start) onto the
+ * thread's LAST assistant message's extraMetadata (`work_duration_ms`), so
+ * history reloads can render the frozen "已工作 Xm" indicator. Also returns
+ * the duration so the `finished` chunk can carry it in meta.
+ */
+export function stampWorkDuration(
+  threadId: string,
+  startedAt: number | undefined,
+): number | undefined {
+  if (!startedAt) return undefined;
+  const duration = Date.now() - startedAt;
+  const last = [...getMessages(threadId)].reverse().find((m) => m.role === "assistant");
+  if (last) {
+    mergeMessageExtra(threadId, last.id, { work_duration_ms: duration });
+  }
+  return duration;
 }
 
 // =============================================================================
@@ -518,7 +548,11 @@ function processAgentEvent(
  * generation, and client disconnect. The route owns the ReadableStream; this
  * owns everything that happens inside it.
  */
-export async function streamChat(input: ChatInput, emit: Emit): Promise<void> {
+export async function streamChat(
+  input: ChatInput,
+  emit: Emit,
+  abortSignal?: AbortSignal,
+): Promise<void> {
   let accumulatedContent = "";
   let clientAborted = false;
   const accumulate = (text: string) => { accumulatedContent += text; };
@@ -535,7 +569,11 @@ export async function streamChat(input: ChatInput, emit: Emit): Promise<void> {
     try {
       const eventStream = await input.agent.stream(
         { messages: [{ role: "user", content: input.userMessage }] },
-        { ...input.langgraphConfig, streamMode: ["messages" as const] },
+        {
+          ...input.langgraphConfig,
+          streamMode: ["messages" as const],
+          ...(abortSignal ? { signal: abortSignal } : {}),
+        },
       );
 
       const agentEvents = wrapAgentStream(eventStream, {
@@ -552,13 +590,39 @@ export async function streamChat(input: ChatInput, emit: Emit): Promise<void> {
         streamErr?.constructor?.name === "GraphInterrupt";
 
       if (isClientDisconnect(streamErr)) {
-        clientAborted = true;
-        const saved = savePartialAssistantMessage(input.threadId, accumulatedContent, input.requestId);
-        logger.info(`Client disconnected mid-stream${saved ? " (partial saved)" : ""}`, {
-          thread_id: input.threadId,
-          request_id: input.requestId,
-        });
-        // Swallow — fall through to post-stream path.
+        // Distinguish an explicit /stop (registry AbortController aborted)
+        // from an HTTP-connection cancellation that propagated into the
+        // LangGraph stream (Node/Hono wires the request signal into
+        // agent.stream). Only an explicit stop interrupts the run; a client
+        // disconnect must let the run finish in the background (events keep
+        // flowing into the run registry, persistence + finished still run —
+        // enqueue failures are swallowed by the route's makeRunEmit).
+        if (abortSignal?.aborted) {
+          clientAborted = true;
+          const saved = savePartialAssistantMessage(input.threadId, accumulatedContent, input.requestId);
+          const durationMs = stampWorkDuration(input.threadId, input.startedAt);
+          emit({
+            status: "interrupted",
+            error_message: "对话已中断",
+            meta: {
+              thread_id: input.threadId,
+              partial_saved: saved,
+              ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+            },
+          });
+          logger.info(`Run aborted by stop request${saved ? " (partial saved)" : ""}`, {
+            thread_id: input.threadId,
+            request_id: input.requestId,
+          });
+        } else {
+          logger.info("Client disconnected — run continues in background", {
+            thread_id: input.threadId,
+            request_id: input.requestId,
+          });
+        }
+        // Both fall through to the post-stream path (persist + interrupt
+        // check + finished). For a disconnect the run already completed its
+        // final state in the graph; for a stop the state is what it was.
       } else if (!isInterrupt) {
         const isDeserError =
           streamErr?.message?.includes?.("deserialize") ||
@@ -618,24 +682,47 @@ export async function streamChat(input: ChatInput, emit: Emit): Promise<void> {
 
     // 6. Emit finished (with title for new threads). Interrupted turns don't emit
     //    finished — the turn isn't done — but the title is already persisted above.
+    //    Stamp the work duration onto the last assistant message first (the
+    //    "已工作 Xm" indicator survives history reloads).
+    const durationMs = stampWorkDuration(input.threadId, input.startedAt);
     if (!hasInterrupt) {
       emit({
         status: "finished",
         meta: {
           thread_id: input.threadId,
           ...(newTitle ? { title: newTitle } : {}),
+          ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
         },
       });
     }
   } catch (err) {
     if (isClientDisconnect(err)) {
-      if (accumulatedContent && !clientAborted) {
-        savePartialAssistantMessage(input.threadId, accumulatedContent, input.requestId);
+      if (abortSignal?.aborted) {
+        // Explicit stop — only this path persists partial + notifies.
+        if (accumulatedContent && !clientAborted) {
+          savePartialAssistantMessage(input.threadId, accumulatedContent, input.requestId);
+        }
+        const durationMs = stampWorkDuration(input.threadId, input.startedAt);
+        emit({
+          status: "interrupted",
+          error_message: "对话已中断",
+          meta: {
+            thread_id: input.threadId,
+            ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+          },
+        });
+        logger.info(`Run aborted (outer)`, {
+          thread_id: input.threadId,
+          request_id: input.requestId,
+        });
+      } else {
+        // Connection cancellation reached the outer loop — the run is over
+        // from our perspective; nothing more to do (events were recorded).
+        logger.info("Client disconnected (outer) — run already recorded", {
+          thread_id: input.threadId,
+          request_id: input.requestId,
+        });
       }
-      logger.info(`Client disconnected (outer)`, {
-        thread_id: input.threadId,
-        request_id: input.requestId,
-      });
     } else {
       logger.exception("Agent stream failed", err);
       emit({
@@ -652,7 +739,11 @@ export async function streamChat(input: ChatInput, emit: Emit): Promise<void> {
  * Resume a HITL-interrupted turn. Shares the chunk-translation core with
  * streamChat; differs in entry (Command resume) and has no title generation.
  */
-export async function streamResume(input: ResumeInput, emit: Emit): Promise<void> {
+export async function streamResume(
+  input: ResumeInput,
+  emit: Emit,
+  abortSignal?: AbortSignal,
+): Promise<void> {
   // Step 1: Read pre-state to count interrupted actions.
   let actionCount = 1;
   try {
@@ -696,6 +787,7 @@ export async function streamResume(input: ResumeInput, emit: Emit): Promise<void
       const eventStream = await input.agent.stream(resumeCommand, {
         ...input.langgraphConfig,
         streamMode: ["messages" as const],
+        ...(abortSignal ? { signal: abortSignal } : {}),
       });
 
       const agentEvents = wrapAgentStream(eventStream, {
@@ -712,7 +804,17 @@ export async function streamResume(input: ResumeInput, emit: Emit): Promise<void
         streamErr?.name === "GraphInterrupt" ||
         streamErr?.message?.includes?.("interrupt") ||
         streamErr?.constructor?.name === "GraphInterrupt";
-      if (!isInterrupt) throw streamErr;
+      if (isClientDisconnect(streamErr)) {
+        // Explicit /stop → notify listeners; plain disconnect → the run's
+        // events are already recorded, finish silently.
+        if (abortSignal?.aborted) {
+          emit({
+            status: "interrupted",
+            error_message: "对话已中断",
+            meta: { thread_id: input.threadId },
+          });
+        }
+      } else if (!isInterrupt) throw streamErr;
     }
 
     // Step 4: Persist AI messages.
@@ -730,7 +832,14 @@ export async function streamResume(input: ResumeInput, emit: Emit): Promise<void
     );
 
     if (!hasInterrupt) {
-      emit({ status: "finished", meta: { thread_id: input.threadId } });
+      const durationMs = stampWorkDuration(input.threadId, input.startedAt);
+      emit({
+        status: "finished",
+        meta: {
+          thread_id: input.threadId,
+          ...(durationMs !== undefined ? { duration_ms: durationMs } : {}),
+        },
+      });
     }
   } catch (err) {
     logger.exception("Agent stream failed", err);

@@ -6,7 +6,6 @@ import {
 import {
   OctopusClient,
   type SkillEntry,
-  type BuiltinSkillSpec,
   type McpServerEntry,
   type SubagentEntry,
   type SlashCommandEntry,
@@ -41,7 +40,6 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
   const [search, setSearch] = useState("");
 
   const [skills, setSkills] = useState<SkillEntry[]>([]);
-  const [builtinSkills, setBuiltinSkills] = useState<BuiltinSkillSpec[]>([]);
   const [skillsLoading, setSkillsLoading] = useState(false);
   const [mcp, setMcp] = useState<McpServerEntry[]>([]);
   const [mcpLoading, setMcpLoading] = useState(false);
@@ -53,15 +51,11 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
   const loadSkills = useCallback(async () => {
     setSkillsLoading(true);
     try {
-      const [skillList, builtinList] = await Promise.all([
-        sdk.listSkills(),
-        sdk.listBuiltinSkills(),
-      ]);
-      setSkills(skillList);
-      setBuiltinSkills(builtinList);
+      // Unified list — builtin/file/user-defined in one response, with
+      // `installable` marking not-yet-installed builtins.
+      setSkills(await sdk.listSkills());
     } catch {
       setSkills([]);
-      setBuiltinSkills([]);
     } finally {
       setSkillsLoading(false);
     }
@@ -108,9 +102,6 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
     if (tab === "commands") loadSlashCommands();
   }, [tab, loadSkills, loadMcp, loadSubagents, loadSlashCommands]);
 
-  // Builtin skills available for installation (status === not_installed).
-  const builtinAvailable = builtinSkills.filter((b) => b.status === "not_installed");
-
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Scrollable content: title + search live inside the content area
@@ -137,7 +128,6 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
           {tab === "skills" ? (
             <SkillCardList
               skills={skills}
-              builtinAvailable={builtinAvailable}
               loading={skillsLoading}
               search={search}
               onReload={loadSkills}

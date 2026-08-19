@@ -31,6 +31,17 @@ import {
   type Emit,
   type ResumeRequestBody,
 } from "../services/chat.service.js";
+import {
+  startRun,
+  recordEvent,
+  pauseRun,
+  finishRun,
+  abortRun,
+  getRun,
+  attachListener,
+  isRunning,
+  type RunState,
+} from "../services/run-registry.js";
 import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules } from "../db/index.js";
 import {
   ensureThreadOutputs,
@@ -74,6 +85,30 @@ const encoder = new TextEncoder();
 const makeChunk = (payload: Record<string, unknown>): Uint8Array =>
   encoder.encode(JSON.stringify(payload) + "\n");
 
+/**
+ * Wrap controller.enqueue with the run registry: every chunk is recorded to
+ * the thread's run buffer (so re-attaching clients can replay it) and the
+ * run's status transitions are derived from terminal chunk statuses. An
+ * enqueue failure (client disconnected / switched thread) is swallowed — the
+ * run belongs to the server and keeps going; only the HTTP side is gone.
+ */
+function makeRunEmit(run: RunState, controller: ReadableStreamDefaultController): Emit {
+  return (chunk) => {
+    recordEvent(run, chunk);
+    const status = chunk.status as string | undefined;
+    if (status === "ask_user_question_required") pauseRun(run.threadId);
+    if (status === "finished" || status === "error" || status === "interrupted") {
+      finishRun(run.threadId);
+    }
+    try {
+      controller.enqueue(makeChunk(chunk));
+    } catch {
+      // Client gone — run continues in the background (opencode semantics:
+      // disconnect unsubscribes, it never cancels the run).
+    }
+  };
+}
+
 /** NDJSON stream headers shared by the two streaming endpoints. */
 const NDJSON_HEADERS = {
   "Content-Type": "application/x-ndjson; charset=utf-8",
@@ -92,7 +127,11 @@ chatRouter.get("/threads", getOptionalUser, (c) => {
   // threads; ?workspace_id=unbound lists threads with no workspace.
   const wsId = c.req.query("workspace_id");
   const scope = wsId === "unbound" ? null : wsId || undefined;
-  return c.json({ threads: listUserThreadsByWorkspace(userId, scope) });
+  const threads = listUserThreadsByWorkspace(userId, scope).map((t) => ({
+    ...t,
+    running: isRunning(t.id),
+  }));
+  return c.json({ threads });
 });
 
 // =========================================================================
@@ -351,9 +390,11 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
 
   const stream = new ReadableStream({
     async start(controller) {
-      // The emit callback wraps controller.enqueue in NDJSON encoding. Service
-      // calls emit() with a plain chunk object — transport stays in the route.
-      const emit: Emit = (chunk) => controller.enqueue(makeChunk(chunk));
+      // The run is registered server-side (survives client disconnect). The
+      // emit callback records every chunk to the registry buffer and forwards
+      // to this connection while it's alive.
+      const run = startRun(threadId);
+      const emit = makeRunEmit(run, controller);
       try {
         await streamChat(
           {
@@ -365,11 +406,15 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
             subagentRegistry,
             langgraphConfig,
             modelSpec: config.model,
+            startedAt: run.startedAt,
           },
           emit,
+          run.abort.signal,
         );
       } finally {
-        controller.close();
+        // Same as /agent: a paused (HITL) exit must keep its registry entry.
+        if (getRun(threadId)?.status === "running") finishRun(threadId);
+        try { controller.close(); } catch { /* already closed */ }
       }
     },
   });
@@ -496,7 +541,8 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
 
   const stream = new ReadableStream({
     async start(controller) {
-      const emit: Emit = (chunk) => controller.enqueue(makeChunk(chunk));
+      const run = startRun(threadId);
+      const emit = makeRunEmit(run, controller);
       try {
         await streamResume(
           {
@@ -506,14 +552,138 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
             agent,
             subagentRegistry,
             langgraphConfig,
+            startedAt: run.startedAt,
           },
           emit,
+          run.abort.signal,
         );
       } finally {
-        controller.close();
+        // Only finish a run that is still RUNNING. A turn that ended at a HITL
+        // interrupt is `paused` (set by makeRunEmit on the ask chunk) — the
+        // registry entry must SURVIVE so /threads reports running and a
+        // re-attaching client can restore the ask panel from the replay
+        // buffer. finishRun would erase it and the thread would look done.
+        if (getRun(threadId)?.status === "running") finishRun(threadId);
+        try { controller.close(); } catch { /* already closed */ }
       }
     },
   });
 
   return c.newResponse(stream, { headers: NDJSON_HEADERS });
+});
+
+// =========================================================================
+// GET /api/chat/thread/{id}/events?after=<seq>  (re-attach to a running turn)
+// =========================================================================
+//
+// Re-attachment protocol (opencode's replay-then-live pattern): the client
+// opens this stream when entering a thread whose run is still active. Events
+// with seq > after are replayed from the registry buffer first, then live
+// events tail. A 10s heartbeat keeps intermediaries from killing the idle
+// connection. When the run is already gone, residual buffered events (if the
+// run just finished within the retain window) are replayed followed by a
+// synthetic `idle` chunk so the client knows to fall back to /history.
+
+chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
+  const threadId = c.req.param("id");
+  const after = Number(c.req.query("after") ?? "0") || 0;
+  const run = getRun(threadId);
+
+  const stream = new ReadableStream({
+    start(controller) {
+      let closed = false;
+      const push = (payload: Record<string, unknown>) => {
+        if (closed) return;
+        try {
+          controller.enqueue(makeChunk(payload));
+        } catch {
+          closed = true;
+        }
+      };
+
+      if (!run || run.events.length === 0 && run.status !== "running" && run.status !== "paused") {
+        // No run (never started, or long finished): tell the client it's idle.
+        push({ status: "idle", meta: { thread_id: threadId } });
+        try { controller.close(); } catch { /* */ }
+        return;
+      }
+
+      // Close the replay→live race: register the live listener FIRST and
+      // collect anything it receives into a pending set, then replay the
+      // snapshot, then flush pending entries whose seq wasn't in the snapshot.
+      // Duplicate detection is by seq (monotonic per run).
+      const pending = new Map<number, Record<string, unknown>>();
+      const seenSeqs = new Set<number>();
+      const detach = attachListener(threadId, after, (e) => {
+        if (!seenSeqs.has(e.seq)) pending.set(e.seq, e.chunk);
+      }) ?? (() => {});
+
+      // Replay stream header: tells the re-attaching client when the run
+      // actually started, so the WorkTimer resumes from the true elapsed time
+      // instead of restarting from zero.
+      push({ status: "init", meta: { thread_id: threadId, run_started_at: run.startedAt } });
+
+      // Replay snapshot (events with seq > after).
+      for (const e of run.events) {
+        if (e.seq > after) {
+          seenSeqs.add(e.seq);
+          push(e.chunk);
+        }
+      }
+
+      // If the run already ended (done/paused), the buffer is complete — emit
+      // a synthetic idle and finish. (paused = waiting for user input over
+      // /resume; the client has everything it needs. Close after flushing.)
+      let heartbeat: ReturnType<typeof setInterval> | undefined;
+      const finalize = () => {
+        detach();
+        if (heartbeat) clearInterval(heartbeat);
+        push({ status: "idle", meta: { thread_id: threadId } });
+        try { controller.close(); } catch { /* */ }
+      };
+
+      if (run.status !== "running") {
+        // Flush anything the listener caught during replay, then close.
+        for (const [, chunk] of [...pending.entries()].sort((a, b) => a[0] - b[0])) push(chunk);
+        finalize();
+        return;
+      }
+
+      // Live tail: heartbeat + pending flush loop.
+      heartbeat = setInterval(() => push({ status: "heartbeat" }), 10_000);
+      const flush = setInterval(() => {
+        const entries = [...pending.entries()].sort((a, b) => a[0] - b[0]);
+        for (const [seq, chunk] of entries) {
+          pending.delete(seq);
+          if (seenSeqs.has(seq)) continue;
+          seenSeqs.add(seq);
+          push(chunk);
+          if (chunk.status === "finished" || chunk.status === "error" || chunk.status === "interrupted") {
+            finalize();
+            return;
+          }
+        }
+        if (getRun(threadId)?.status !== "running") {
+          finalize();
+        }
+      }, 100);
+    },
+  });
+
+  return c.newResponse(stream, { headers: NDJSON_HEADERS });
+});
+
+// =========================================================================
+// POST /api/chat/thread/{id}/stop  (explicit stop of a background run)
+// =========================================================================
+//
+// The successor of "abort the fetch to stop the run": with runs decoupled from
+// connections, stopping must be explicit. Aborts the run's AbortController —
+// the streamChat/streamResume loop sees the abort, saves partial output, and
+// emits `interrupted` to any attached listeners.
+
+chatRouter.post("/thread/:id/stop", getOptionalUser, (c) => {
+  const threadId = c.req.param("id");
+  const stopped = abortRun(threadId);
+  return c.json({ success: true, stopped });
 });

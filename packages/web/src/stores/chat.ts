@@ -46,6 +46,11 @@ interface ChatState {
   activeThreadId: string | undefined;
   setThreads: (threads: Thread[]) => void;
   setActiveThreadId: (id: string | undefined) => void;
+  /** Threads with a run still executing server-side (background continuation).
+   *  Mirrors opencode TUI's session_status map: the sidebar reads this to show
+   *  a running indicator; setThreads merges the server's `running` flags. */
+  runningThreads: Record<string, boolean>;
+  setThreadRunning: (id: string, running: boolean) => void;
   /** All known workspaces (recents-ordered). */
   workspaces: Workspace[];
   setWorkspaces: (workspaces: Workspace[]) => void;
@@ -82,8 +87,33 @@ interface ChatState {
 export const useChatStore = create<ChatState>((set) => ({
   threads: [],
   activeThreadId: undefined,
-  setThreads: (threads) => set({ threads }),
+  setThreads: (threads) =>
+    set((state) => {
+      // Merge the server's per-thread `running` flags into the running map.
+      // Threads absent from the fresh list lose their running flag only if
+      // they aren't tracked as running locally... actually the server is the
+      // source of truth for running state — a missing/false flag means the
+      // run ended. Replace the map wholesale, preserving entries for threads
+      // not in this scoped list (other workspaces) that were already running.
+      const next: Record<string, boolean> = {};
+      for (const [id, running] of Object.entries(state.runningThreads)) {
+        if (running) next[id] = running;
+      }
+      for (const t of threads) {
+        if (t.running) next[t.id] = true;
+        else delete next[t.id];
+      }
+      return { threads, runningThreads: next };
+    }),
   setActiveThreadId: (id) => set({ activeThreadId: id }),
+  runningThreads: {},
+  setThreadRunning: (id, running) =>
+    set((state) => {
+      const next = { ...state.runningThreads };
+      if (running) next[id] = true;
+      else delete next[id];
+      return { runningThreads: next };
+    }),
   workspaces: [],
   setWorkspaces: (workspaces) => set({ workspaces }),
   activeWorkspaceId: readActiveWs(),

@@ -1,6 +1,7 @@
 import type { ToolCardProps } from "./types.js";
 import { ToolCallRow, ToolResultBlock, DiffStat } from "./ToolCallRow.js";
 import { basename, countLines } from "./registry.js";
+import { ShimmerText } from "../../ShimmerText.js";
 
 /**
  * write_file row. Header shows the file name + a +N (line count) tag; body
@@ -13,13 +14,14 @@ export function FileWriteRow({ entry }: ToolCardProps) {
   const fileName = basename(filePath);
   const content = args.content ?? "";
   const added = countLines(content);
+  const running = entry.status === "running" || entry.status === "pending";
 
   return (
     <ToolCallRow
       entry={entry}
       header={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          <span style={{ color: "var(--gray-500)" }}>写入</span>
+          {running ? <ShimmerText text="写入" /> : <span style={{ color: "var(--gray-500)" }}>写入</span>}
           <span style={{ color: "var(--gray-400)" }}>|</span>
           <code
             title={filePath}

@@ -33,6 +33,12 @@ export interface SkillEntry extends SkillMetadata {
   editable: boolean;
   /** user-defined entries carry their DB id; file/builtin carry the file path. */
   description: string;
+  /**
+   * True for a builtin skill with no user-defined copy yet — the UI offers a
+   * one-click "install" (creates an editable copy). Unifies the old separate
+   * /skills/builtin catalog into the single /skills list.
+   */
+  installable?: boolean;
 }
 
 /**

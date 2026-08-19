@@ -2,10 +2,10 @@ import { useState, useEffect, type ReactNode } from "react";
 import { Collapse, Tag } from "antd";
 import {
   CircleX,
-  LoaderCircle,
 } from "lucide-react";
 import type { ToolCallEntry } from "./types.js";
 import { getToolIcon, getToolDisplayName } from "./registry.js";
+import { ShimmerText } from "../../ShimmerText.js";
 
 /**
  * Universal skeleton for a single tool-call ROW (lightweight, single-line
@@ -37,26 +37,18 @@ export interface ToolCallRowProps {
 /**
  * Single-slot icon for a tool row.
  *
- * Done → the tool's own type icon, dimmed (gray-400) so completion reads as
- *         "settled" and in-flight spinners stand out by contrast.
- * Running / pending → a spinner (no type icon while in flight).
- * Error → CircleX (failures must pop).
+ * The tool's own type icon is ALWAYS shown (gray-400 while done/settled;
+ * normal color while running — the running state is already signalled by the
+ * shimmer text effect on the tool name, so no spinner here). Error → CircleX
+ * (failures must pop).
  */
 function RowIcon({ name, status }: { name: string; status: ToolCallEntry["status"] }) {
-  switch (status) {
-    case "done":
-      return (
-        <span style={{ color: "var(--gray-400)", display: "inline-flex", alignItems: "center" }}>
-          {getToolIcon(name)}
-        </span>
-      );
-    case "error":
-      return <CircleX style={{ color: "var(--color-error-500)" }} />;
-    case "running":
-    case "pending":
-    default:
-      return <LoaderCircle style={{ color: "var(--color-info-700)" }} />;
-  }
+  if (status === "error") return <CircleX style={{ color: "var(--color-error-500)" }} />;
+  return (
+    <span style={{ color: "var(--gray-400)", display: "inline-flex", alignItems: "center" }}>
+      {getToolIcon(name)}
+    </span>
+  );
 }
 
 export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRowProps) {
@@ -92,7 +84,15 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
       <span style={{ display: "inline-flex", alignItems: "center" }}>
         <RowIcon name={entry.name} status={entry.status} />
       </span>
-      {header ?? <span>{displayName}</span>}
+      {header ?? (
+        // Running/pending: shimmer the tool name so the active row stands out;
+        // done/error: plain label.
+        entry.status === "running" || entry.status === "pending" ? (
+          <ShimmerText text={displayName} />
+        ) : (
+          <span>{displayName}</span>
+        )
+      )}
     </div>
   );
 

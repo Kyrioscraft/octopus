@@ -1,7 +1,6 @@
 import { parseNDJSONStream } from "./stream.js";
 import {
   StreamHttpError,
-  type BuiltinSkillSpec,
   type ChatRequest,
   type FirstRunResponse,
   type GeneralSettingsResponse,
@@ -205,14 +204,6 @@ export class OctopusClient {
     if (!res.ok) throw await this.#httpError(res);
     const data = (await res.json()) as { skill: SkillEntry };
     return data.skill;
-  }
-
-  /** List builtin skills with install status. */
-  async listBuiltinSkills(): Promise<BuiltinSkillSpec[]> {
-    const res = await this.#get<{ skills: BuiltinSkillSpec[] }>(
-      "/api/config/skills/builtin",
-    );
-    return res.skills;
   }
 
   /** Install a builtin skill (creates an editable user-defined copy). */
@@ -537,6 +528,52 @@ export class OctopusClient {
     opts?: StreamCallOptions
   ): Promise<AsyncGenerator<StreamEvent>> {
     return this.streamAgentResume(threadId, { approved, kind: "tool_approval" }, opts ?? {});
+  }
+
+  /**
+   * Re-attach to a running thread's NDJSON event stream (GET /events).
+   *
+   * Replays buffered events with seq > `after`, then tails live events until
+   * the run finishes (a terminal `finished`/`error`/`interrupted`/`idle`
+   * chunk). Use after navigating back into a thread whose run is executing in
+   * the background. `heartbeat` chunks are keepalives — ignore them.
+   */
+  async streamThreadEvents(
+    threadId: string,
+    after = 0,
+    opts: StreamCallOptions = {}
+  ): Promise<AsyncGenerator<StreamEvent>> {
+    const response = await fetch(
+      `${this.#baseUrl}/api/chat/thread/${threadId}/events?after=${after}`,
+      {
+        headers: {
+          ...this.#authHeader(),
+          Accept: "application/x-ndjson",
+        },
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      }
+    );
+
+    if (!response.ok) {
+      throw await this.#streamHttpError(response);
+    }
+
+    if (!response.body) {
+      throw new Error("No response body in stream");
+    }
+
+    return parseNDJSONStream(response.body, opts);
+  }
+
+  /**
+   * Explicitly stop a thread's background run (POST /stop).
+   *
+   * With runs decoupled from connections, aborting the fetch no longer stops
+   * the run — the server aborts its registry AbortController, saves partial
+   * output, and emits `interrupted` to attached listeners.
+   */
+  async stopThreadRun(threadId: string): Promise<void> {
+    await this.#post(`/api/chat/thread/${threadId}/stop`, {});
   }
 
   // =========================================================================

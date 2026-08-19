@@ -37,7 +37,7 @@ const _contextSchema = z.object({
   /** Runtime model override as a `provider:model` spec. */
   model: z.string().optional(),
   /** Runtime model params (temperature, max_tokens, ...) merged into model_settings. */
-  model_params: z.record(z.any()).optional(),
+  model_params: z.record(z.string(), z.any()).optional(),
   /** Tracks the model spec currently in use, to avoid rebuilding on every call. */
   _current_model_spec: z.string().optional(),
 });

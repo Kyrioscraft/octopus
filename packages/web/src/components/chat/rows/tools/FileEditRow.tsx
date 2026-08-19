@@ -5,6 +5,7 @@ import type { ToolCardProps } from "./types.js";
 import { ToolCallRow, DiffStat } from "./ToolCallRow.js";
 import { basename, countLines, inferLanguage } from "./registry.js";
 import { useThemeStore } from "../../../../stores/theme.js";
+import { ShimmerText } from "../../ShimmerText.js";
 
 /**
  * edit_file / replace row — the headline feature. Renders a real unified /
@@ -71,13 +72,14 @@ export function FileEditRow({ entry }: ToolCardProps) {
   // Heuristic: if either side is very long, default to diff-only collapsed
   // view (already the viewer default) and bump surrounding context down.
   const isLarge = added + removed > 200;
+  const running = entry.status === "running" || entry.status === "pending";
 
   return (
     <ToolCallRow
       entry={entry}
       header={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          <span style={{ color: "var(--gray-500)" }}>编辑</span>
+          {running ? <ShimmerText text="编辑" /> : <span style={{ color: "var(--gray-500)" }}>编辑</span>}
           <span style={{ color: "var(--gray-400)" }}>|</span>
           <code
             title={filePath}

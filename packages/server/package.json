@@ -12,7 +12,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
-    "@hono/zod-validator": "^0.4.0",
+    "@hono/zod-validator": "^0.8.0",
     "@langchain/langgraph": "^1.4.0",
     "@node-rs/argon2": "^2.0.0",
     "@octopus/core": "workspace:*",
@@ -23,7 +23,7 @@
     "hono": "^4.7.0",
     "jose": "^5.10.0",
     "uuid": "^11.1.0",
-    "zod": "^3.24.0"
+    "zod": "^4.2.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
