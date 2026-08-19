@@ -426,48 +426,45 @@ export class OctopusClient {
   // =========================================================================
 
   /**
-   * Send a chat message and receive an async iterable of stream events.
+   * Start a new chat turn (subscription model).
    *
-   * Does NOT buffer the entire response — use `for await` to process tokens
-   * as they arrive. Pass an `AbortSignal` via `opts.signal` to let the user
-   * cancel a generation mid-stream; aborting cancels the fetch and stops the
-   * generator (the server sees the disconnect and persists partial output).
-   *
-   * The request body is sent verbatim — backend, tentacle, and frontend all
-   * share the same OpenAI/Anthropic-style `{messages, thread_id, …}` shape.
-   * The server stores the new user turn and reconstructs prior history from
-   * the LangGraph checkpointer keyed by `thread_id`, so callers normally send
-   * only the new user turn.
+   * POST /agent only STARTS the server-side run and returns immediately with
+   * `{threadId, requestId}` (202). The turn's events are observed by
+   * subscribing via `streamThreadEvents(threadId, after)` — which replays
+   * durable events from `after` then tails live. Multiple clients can
+   * subscribe to the same thread independently.
    */
-  async streamAgentChat(
-    body: ChatRequest,
-    opts: StreamCallOptions = {}
-  ): Promise<AsyncGenerator<StreamEvent>> {
+  async startTurn(body: ChatRequest): Promise<{ threadId: string; requestId: string }> {
     const response = await fetch(`${this.#baseUrl}/api/chat/agent`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...this.#authHeader(),
-        Accept: "application/x-ndjson",
       },
       body: JSON.stringify(body),
-      ...(opts.signal ? { signal: opts.signal } : {}),
     });
-
     if (!response.ok) {
       throw await this.#streamHttpError(response);
     }
-
-    if (!response.body) {
-      throw new Error("No response body in stream");
-    }
-
-    return parseNDJSONStream(response.body, opts);
+    return response.json();
   }
 
   /**
-   * Resume a chat after HITL interrupt.
-   * Returns the same async iterable of stream events as `streamAgentChat`.
+   * Convenience composition: start a turn, then subscribe to its events from
+   * seq 0. The replay-then-tail semantics of GET /events make the
+   * POST→subscribe gap lossless.
+   */
+  async streamAgentChat(
+    body: ChatRequest,
+    opts: StreamCallOptions = {}
+  ): Promise<AsyncGenerator<StreamEvent>> {
+    const { threadId } = await this.startTurn(body);
+    return this.streamThreadEvents(threadId, 0, opts);
+  }
+
+  /**
+   * Resume a paused (HITL) turn (subscription model): starts the server-side
+   * resume run and returns immediately; observe via `streamThreadEvents`.
    *
    * Sends a structured resume body. New callers should pass a
    * `ResumeRequestBody` (with `kind` + `decisions`/`answers`); the legacy
@@ -477,31 +474,36 @@ export class OctopusClient {
    * The server normalizes the body into a LangGraph `Command(resume=...)`
    * value (see chat.service.ts::normalizeResumeInput).
    */
-  async streamAgentResume(
+  async resumeTurn(
     threadId: string,
     body: ResumeRequestBody,
-    opts: StreamCallOptions = {}
-  ): Promise<AsyncGenerator<StreamEvent>> {
+  ): Promise<{ threadId: string; requestId: string }> {
     const response = await fetch(`${this.#baseUrl}/api/chat/thread/${threadId}/resume`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         ...this.#authHeader(),
-        Accept: "application/x-ndjson",
       },
       body: JSON.stringify(body),
-      ...(opts.signal ? { signal: opts.signal } : {}),
     });
-
     if (!response.ok) {
       throw await this.#streamHttpError(response);
     }
+    return response.json();
+  }
 
-    if (!response.body) {
-      throw new Error("No response body in stream");
-    }
-
-    return parseNDJSONStream(response.body, opts);
+  /**
+   * Convenience composition: start the resume, then subscribe from seq 0
+   * (replay includes the original turn up to the ask, so the UI restores
+   * context + ask panel before the resumed output continues).
+   */
+  async streamAgentResume(
+    threadId: string,
+    body: ResumeRequestBody,
+    opts: StreamCallOptions = {}
+  ): Promise<AsyncGenerator<StreamEvent>> {
+    await this.resumeTurn(threadId, body);
+    return this.streamThreadEvents(threadId, 0, opts);
   }
 
   /**

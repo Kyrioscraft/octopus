@@ -110,7 +110,14 @@ function persistThreadEvent(threadId: string, seq: number, chunk: Record<string,
  * disconnected / switched thread) is swallowed — the run belongs to the
  * server and keeps going; only the HTTP side is gone.
  */
-function makeRunEmit(run: RunState, controller: ReadableStreamDefaultController): Emit {
+/**
+ * Subscription-model emit: no HTTP response controller — every chunk goes to
+ * the run registry (which persists it durably and fans out to any attached
+ * GET /events listeners). This is the only emit shape since POST /agent
+ * became fire-and-forget (start the run, return immediately, clients observe
+ * via GET /thread/:id/events — opencode's pub/sub model).
+ */
+function makeRunEmit(run: RunState, controller?: ReadableStreamDefaultController): Emit {
   return (chunk) => {
     const seq = recordEvent(run, chunk);
     persistThreadEvent(run.threadId, seq, chunk);
@@ -126,11 +133,13 @@ function makeRunEmit(run: RunState, controller: ReadableStreamDefaultController)
         } catch { /* best-effort */ }
       });
     }
-    try {
-      controller.enqueue(makeChunk({ ...chunk, seq }));
-    } catch {
-      // Client gone — run continues in the background (opencode semantics:
-      // disconnect unsubscribes, it never cancels the run).
+    if (controller) {
+      try {
+        controller.enqueue(makeChunk({ ...chunk, seq }));
+      } catch {
+        // Client gone — run continues in the background (opencode semantics:
+        // disconnect unsubscribes, it never cancels the run).
+      }
     }
   };
 }
@@ -409,38 +418,41 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
     request_id: requestId,
   });
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      // The run is registered server-side (survives client disconnect). The
-      // emit callback records every chunk to the registry buffer and forwards
-      // to this connection while it's alive.
-      const run = startRun(threadId);
-      const emit = makeRunEmit(run, controller);
-      try {
-        await streamChat(
-          {
-            threadId,
-            userMessage,
-            requestId,
-            isNewThread,
-            agent,
-            subagentRegistry,
-            langgraphConfig,
-            modelSpec: config.model,
-            startedAt: run.startedAt,
-          },
-          emit,
-          run.abort.signal,
-        );
-      } finally {
-        // Same as /agent: a paused (HITL) exit must keep its registry entry.
-        if (getRun(threadId)?.status === "running") finishRun(threadId);
-        try { controller.close(); } catch { /* already closed */ }
-      }
-    },
-  });
+  // Subscription model (opencode semantics): POST /agent only STARTS the run
+  // and returns immediately. Every chunk goes to the run registry (durable
+  // persistence + fan-out), and clients observe via GET /thread/:id/events —
+  // which replays from seq 0 then tails live, so nothing between the POST
+  // returning and the client subscribing is lost. Multiple clients (web +
+  // TUI) can subscribe to the same thread independently.
+  const run = startRun(threadId);
+  const emit = makeRunEmit(run);
+  void (async () => {
+    try {
+      await streamChat(
+        {
+          threadId,
+          userMessage,
+          requestId,
+          isNewThread,
+          agent,
+          subagentRegistry,
+          langgraphConfig,
+          modelSpec: config.model,
+          startedAt: run.startedAt,
+        },
+        emit,
+        run.abort.signal,
+      );
+    } catch (err) {
+      logger.exception("Background run failed", err);
+      emit({ type: "turn.error", errorType: "internal", message: (err as Error).message || "未知错误", threadId });
+    } finally {
+      // A paused (HITL) exit must keep its registry entry.
+      if (getRun(threadId)?.status === "running") finishRun(threadId);
+    }
+  })();
 
-  return c.newResponse(stream, { headers: NDJSON_HEADERS });
+  return c.json({ threadId, requestId }, 202);
 });
 
 // =========================================================================
@@ -558,37 +570,39 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
     request_id: requestId,
   });
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const run = startRun(threadId);
-      const emit = makeRunEmit(run, controller);
-      try {
-        await streamResume(
-          {
-            threadId,
-            requestId,
-            resumeBody,
-            agent,
-            subagentRegistry,
-            langgraphConfig,
-            startedAt: run.startedAt,
-          },
-          emit,
-          run.abort.signal,
-        );
-      } finally {
-        // Only finish a run that is still RUNNING. A turn that ended at a HITL
-        // interrupt is `paused` (set by makeRunEmit on the ask chunk) — the
-        // registry entry must SURVIVE so /threads reports running and a
-        // re-attaching client can restore the ask panel from the replay
-        // buffer. finishRun would erase it and the thread would look done.
-        if (getRun(threadId)?.status === "running") finishRun(threadId);
-        try { controller.close(); } catch { /* already closed */ }
-      }
-    },
-  });
+  // Subscription model: resume also only starts the run; clients observe via
+  // GET /thread/:id/events (replay + live tail).
+  const run = startRun(threadId);
+  const emit = makeRunEmit(run);
+  void (async () => {
+    try {
+      await streamResume(
+        {
+          threadId,
+          requestId,
+          resumeBody,
+          agent,
+          subagentRegistry,
+          langgraphConfig,
+          startedAt: run.startedAt,
+        },
+        emit,
+        run.abort.signal,
+      );
+    } catch (err) {
+      logger.exception("Background resume failed", err);
+      emit({ type: "turn.error", errorType: "internal", message: (err as Error).message || "未知错误", threadId });
+    } finally {
+      // Only finish a run that is still RUNNING. A turn that ended at a HITL
+      // interrupt is `paused` (set by makeRunEmit on the ask chunk) — the
+      // registry entry must SURVIVE so /threads reports running and a
+      // re-attaching client can restore the ask panel from the replay
+      // buffer. finishRun would erase it and the thread would look done.
+      if (getRun(threadId)?.status === "running") finishRun(threadId);
+    }
+  })();
 
-  return c.newResponse(stream, { headers: NDJSON_HEADERS });
+  return c.json({ threadId, requestId }, 202);
 });
 
 // =========================================================================
