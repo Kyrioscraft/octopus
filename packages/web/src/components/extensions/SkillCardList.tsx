@@ -16,9 +16,10 @@ interface SkillCardListProps {
 
 /**
  * Skills tab: settings-style grouped row lists from the unified skill list,
- * split by origin into "已添加" (user-defined), "内置 / 文件" (read-only),
- * and "可安装" (builtin with installable=true). Supports create, upload
- * (.zip/.md), and one-click install of builtin skills.
+ * split by origin into "已添加" (user-defined) and "内置 / 文件" (read-only).
+ * Builtin skills are ALWAYS active at runtime — the "复制" action merely
+ * creates an editable user-defined copy (installable=true marks builtins
+ * that don't have a copy yet). Supports create + upload (.zip/.md).
  */
 export function SkillCardList({
   skills,
@@ -33,18 +34,16 @@ export function SkillCardList({
     (s) => !q || s.name.toLowerCase().includes(q) || (s.description ?? "").toLowerCase().includes(q),
   );
 
-  const installable = filtered.filter((s) => s.installable);
-  const rest = filtered.filter((s) => !s.installable);
-  const owned = rest.filter((s) => s.origin === "user-defined");
-  const catalog = rest.filter((s) => s.origin !== "user-defined");
+  const owned = filtered.filter((s) => s.origin === "user-defined");
+  const catalog = filtered.filter((s) => s.origin !== "user-defined");
 
-  const installBuiltin = async (name: string) => {
+  const copyBuiltin = async (name: string) => {
     try {
       await sdk.installBuiltinSkill(name);
-      antdMessage.success("安装成功");
+      antdMessage.success("已创建可编辑副本");
       onReload();
     } catch (err: any) {
-      antdMessage.error(err?.message ?? "安装失败");
+      antdMessage.error(err?.message ?? "复制失败");
     }
   };
 
@@ -132,24 +131,14 @@ export function SkillCardList({
                     title={s.name}
                     description={s.description}
                     onClick={() => navigate(`/extensions/skill/${encodeURIComponent(s.name)}`)}
-                  />
-                ))}
-              </SettingsRows>
-            </SettingsCard>
-          )}
-          {installable.length > 0 && (
-            <SettingsCard title="可安装">
-              <SettingsRows>
-                {installable.map((s) => (
-                  <SettingsRow
-                    key={s.name}
-                    icon={<BookOpen />}
-                    title={s.name}
-                    description={s.description}
                   >
-                    <Button size="small" onClick={() => installBuiltin(s.name)} style={{ borderRadius: 6 }}>
-                      安装
-                    </Button>
+                    {s.installable && (
+                      <Tooltip title="创建可编辑副本（内置 skill 本身始终启用）">
+                        <Button size="small" onClick={() => copyBuiltin(s.name)} style={{ borderRadius: 6 }}>
+                          复制
+                        </Button>
+                      </Tooltip>
+                    )}
                   </SettingsRow>
                 ))}
               </SettingsRows>

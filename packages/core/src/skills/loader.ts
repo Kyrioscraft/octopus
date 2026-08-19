@@ -356,6 +356,23 @@ export interface DiscoveredSkills {
   sourcePaths: SkillSourcePath[];
 }
 
+/**
+ * Resolve the built-in skills directory shipped with the package
+ * (src/skills/builtin/ — compiled assets sit next to this module in
+ * dist/skills/builtin/), or null if absent. Consumers (e.g. the server's
+ * skill service) should use this instead of hardcoding the path.
+ */
+export function getBuiltinSkillsDir(): string | null {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const dir = join(__dirname, "builtin");
+  try {
+    return existsSync(dir) ? dir : null;
+  } catch {
+    return null;
+  }
+}
+
 export function discoverSkillSources(options: {
   cwd: string;
   assistantId?: string;

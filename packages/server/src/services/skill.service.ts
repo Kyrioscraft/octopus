@@ -10,10 +10,8 @@
  */
 
 import { homedir } from "node:os";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { createRequire } from "node:module";
 import AdmZip from "adm-zip";
 import {
   listSkills,
@@ -23,6 +21,7 @@ import {
   buildUserSkillContent,
   loadSkillContent,
   findProjectRoot,
+  getBuiltinSkillsDir,
 } from "@octopus/core";
 import type { SkillEntry } from "@octopus/core";
 import {
@@ -32,36 +31,18 @@ import {
   deleteUserSkill,
 } from "../db/index.js";
 
-// ESM-safe way to locate the @octopus/core package root (for built_in_skills).
-const nodeRequire = createRequire(import.meta.url);
-
 /**
  * Discover file-source skills, replicating the directory set that agent.ts
  * uses (built-in + user .deepagents/.agents/.claude + project equivalents).
- *
- * NOTE: this mirrors agent.ts:490-509 path construction. Kept inline (rather
- * than extracted to core) to satisfy the "minimize existing-code changes"
- * constraint — extracting a shared helper would mean editing agent.ts.
  */
 function discoverFileSkills() {
   const userSkillsDir = join(homedir(), ".deepagents", "agent", "skills");
   const userAgentSkillsDir = join(homedir(), ".agents", "skills");
   const userClaudeSkillsDir = join(homedir(), ".claude", "skills");
 
-  // Built-in skills shipped with core — resolve via the package's dist dir.
-  let builtInSkillsDir: string | null = null;
-  try {
-    const coreDistPath = nodeRequire.resolve("@octopus/core");
-    const coreDir = dirname(coreDistPath);
-    const candidate = join(coreDir, "built_in_skills");
-    builtInSkillsDir = existsSync(candidate) ? candidate : null;
-  } catch {
-    // Fallback: built-ins are optional, discovery degrades gracefully.
-  }
-
   const projectRoot = findProjectRoot();
   return listSkills({
-    builtInSkillsDir,
+    builtInSkillsDir: getBuiltinSkillsDir(),
     userSkillsDir: existsSync(userSkillsDir) ? userSkillsDir : null,
     userAgentSkillsDir: existsSync(userAgentSkillsDir) ? userAgentSkillsDir : null,
     projectSkillsDir: projectRoot ? join(projectRoot, ".deepagents", "skills") : null,
@@ -71,21 +52,9 @@ function discoverFileSkills() {
   });
 }
 
-/** Resolve the built-in skills dir (shipped with core), or null if absent. */
-function resolveBuiltinSkillsDir(): string | null {
-  try {
-    const coreDistPath = nodeRequire.resolve("@octopus/core");
-    const coreDir = dirname(coreDistPath);
-    const candidate = join(coreDir, "built_in_skills");
-    return existsSync(candidate) ? candidate : null;
-  } catch {
-    return null;
-  }
-}
-
 /** Names of built-in skills (shipped with core) — drives the origin tag. */
 function getBuiltinSkillNames(): Set<string> {
-  const dir = resolveBuiltinSkillsDir();
+  const dir = getBuiltinSkillsDir();
   if (!dir) return new Set();
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
@@ -147,7 +116,9 @@ export function getSkillDetail(
   if (found) {
     // loadSkillContent reads the SKILL.md file; safe since path came from discovery.
     const content = loadSkillContent(found.path) ?? "";
-    return { content, origin: "file" };
+    const origin: SkillEntry["origin"] =
+      found.source === "built-in" ? "builtin" : "file";
+    return { content, origin };
   }
   return null;
 }

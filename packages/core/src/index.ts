@@ -76,7 +76,7 @@ export type { Settings } from "./config/settings.js";
 // =============================================================================
 // Skills
 // =============================================================================
-export { listSkills, loadSkillContent, validateSkillName, generateSkillTemplate } from "./skills/loader.js";
+export { listSkills, loadSkillContent, validateSkillName, generateSkillTemplate, getBuiltinSkillsDir } from "./skills/loader.js";
 export type { SkillMetadata, SkillSource, ListSkillsOptions } from "./skills/loader.js";
 
 // =============================================================================
