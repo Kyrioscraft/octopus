@@ -371,9 +371,14 @@ export function useChat({
       };
       acc = null;
     };
+    let trailingAsk: { kind: AskUserQuestionPayload["kind"]; questions: AskUserQuestionPayload["questions"] } | null = null;
     try {
       const stream = await sdk.streamThreadEvents(tid, 0);
       for await (const ev of stream) {
+        // Keep the high-water seq in sync — a later resolve()/send() on this
+        // thread subscribes after it (0 here would replay the whole thread
+        // into the live accumulator: duplicated blocks + re-popped ask).
+        if (ev.seq > lastSeqRef.current) lastSeqRef.current = ev.seq;
         if (ev.type === "turn.started") {
           // Close the previous turn (if any) and open a new one.
           settleTurn({}, (a) => a.finalizeDone());
@@ -419,15 +424,29 @@ export function useChat({
               settleTurn({}, (a) => a.finalizeError());
               break;
             case "ask":
+              trailingAsk = { kind: ev.kind, questions: ev.questions };
               acc.consumeAskReadOnly({ kind: ev.kind, questions: ev.questions, thread_id: tid });
               break;
             default:
+              if (ev.type !== "heartbeat" && ev.type !== "idle") {
+                trailingAsk = null; // content events past the ask → answered elsewhere
+              }
               break; // heartbeat / idle / turn.started handled above
           }
         }
       }
       // Stream ended mid-turn (no terminal event — e.g. run_lost): settle it.
-      settleTurn({}, (a) => a.finalizeDone());
+      // A trailing un-answered ask means the thread is PAUSED server-side
+      // (run registry keeps it): restore the interactive state so the user
+      // can answer — do NOT settle as done (the ask is the live frontier).
+      if (trailingAsk) {
+        // The open turn stays "streaming" — the ask panel + accumulator are
+        // restored by the caller; resolving continues the turn from
+        // lastSeqRef (recorded above), never replaying the pre-ask timeline.
+        turns[turns.length - 1] = { ...((turns[turns.length - 1] as Msg)), events: acc!.snapshot(), content: contentFromEvents(acc!.snapshot()) };
+      } else {
+        settleTurn({}, (a) => a.finalizeDone());
+      }
     } catch {
       // Replay transport failure — signal "no replay" so caller falls back.
       return [];
@@ -450,9 +469,19 @@ export function useChat({
     });
     // If the event log produced no usable assistant turns at all, defer to
     // the full messages-table rendering.
-    return merged.some((t) => t.role === "assistant" && ((t.events?.length ?? 0) > 0 || t.content))
-      ? merged
-      : [];
+    const usable = merged.some((t) => t.role === "assistant" && ((t.events?.length ?? 0) > 0 || t.content));
+    if (usable && trailingAsk) {
+      // Thread is paused at an unanswered ask (run registry keeps it paused).
+      // Restore the interactive state so the user can answer; the last bubble
+      // is left "streaming" and the accumulator stays live so resolve()
+      // continues from lastSeqRef without replaying the pre-ask timeline.
+      const acc2 = acc;
+      if (acc2) turnAcc.current = acc2;
+      setAsk({ ...trailingAsk, thread_id: tid });
+      setBusy(true);
+      useChatStore.getState().setThreadRunning(tid, true);
+    }
+    return usable ? merged : [];
   }, []);
 
   /** Abort the local fetch + reset local stream state. The server-side run
