@@ -27,9 +27,18 @@ import type { SubagentRegistryEntry } from "../agent/index.js";
 export type AgentEvent =
   | { type: "text.delta"; messageId: string; agentNs?: string; delta: string }
   | { type: "reasoning.delta"; messageId: string; agentNs?: string; delta: string }
+  /**
+   * Terminal full-value events (opencode `*.ended` semantics): the ONLY
+   * replayable boundary. Deltas are live-only sugar — persisted streams drop
+   * them at compaction and clients replaying from storage reconstruct state
+   * purely from these terminal events, so live and history rendering run
+   * through the same reducer.
+   */
+  | { type: "text.ended"; messageId: string; agentNs?: string; text: string }
+  | { type: "reasoning.ended"; messageId: string; agentNs?: string; text: string }
   | { type: "tool.started"; toolCallId: string; name: string; agentNs?: string }
-  | { type: "tool.args.delta"; toolCallId: string; index: number; argsDelta: string }
-  | { type: "tool.result"; toolCallId: string; result: string; isError: boolean }
+  | { type: "tool.args.delta"; toolCallId: string; index: number; argsDelta: string; agentNs?: string }
+  | { type: "tool.result"; toolCallId: string; result: string; isError: boolean; agentNs?: string }
   | {
       type: "subagent.started";
       /** task tool_call_id — stable correlation key across started/finished. */

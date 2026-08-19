@@ -263,13 +263,16 @@ export async function* wrapAgentStream(
     announced: Set<string>;
     /** callIds whose args were already forwarded as a complete blob. */
     argsFlushed: Set<string>;
+    /** messageId → accumulated text/reasoning, flushed as *.ended terminal events. */
+    textAcc: Map<string, string>;
+    reasoningAcc: Map<string, string>;
   }
   const agentCtxs = new Map<string, AgentCtx>(); // key: agentNs ?? "main"
   const ctxFor = (ns: string | undefined): AgentCtx => {
     const key = ns ?? "main";
     let c = agentCtxs.get(key);
     if (!c) {
-      c = { messageCounter: 0, indexToId: new Map(), announced: new Set(), argsFlushed: new Set() };
+      c = { messageCounter: 0, indexToId: new Map(), announced: new Set(), argsFlushed: new Set(), textAcc: new Map(), reasoningAcc: new Map() };
       agentCtxs.set(key, c);
     }
     return c;
@@ -278,6 +281,31 @@ export async function* wrapAgentStream(
     const c = ctxFor(ns);
     return ns ? `${ns}#m${c.messageCounter}` : `main#m${c.messageCounter}`;
   };
+  /** Current open messageId per ctx (may have accumulated deltas pending flush). */
+  const openMessage = new Map<string, string>(); // ctxKey → messageId
+  /**
+   * Emit text.ended / reasoning.ended terminal events for the ctx's open
+   * message and close it. Terminal events carry the FULL accumulated value —
+   * they are the replayable boundary (deltas are live-only).
+   */
+  function* flushEnded(ctxKey: string): Generator<AgentEvent> {
+    const mid = openMessage.get(ctxKey);
+    if (mid === undefined) return;
+    openMessage.delete(ctxKey);
+    const c = agentCtxs.get(ctxKey);
+    if (!c) return;
+    const agentNs = ctxKey === "main" ? undefined : ctxKey;
+    const reasoning = c.reasoningAcc.get(mid);
+    if (reasoning !== undefined) {
+      c.reasoningAcc.delete(mid);
+      yield { type: "reasoning.ended", messageId: mid, ...(agentNs ? { agentNs } : {}), text: reasoning };
+    }
+    const text = c.textAcc.get(mid);
+    if (text !== undefined) {
+      c.textAcc.delete(mid);
+      yield { type: "text.ended", messageId: mid, ...(agentNs ? { agentNs } : {}), text };
+    }
+  }
 
   // ---- subagent lifecycle state (same logic as v1, new event shape) -------
   // Track active subagents by the main agent's `task` tool_call_id so we can
@@ -413,9 +441,11 @@ export async function* wrapAgentStream(
                 .join("")
             : "";
       const isError = msg.status === "error" || (typeof msg.status?.error === "string" && !!msg.status.error);
-      yield { type: "tool.result", toolCallId: callId, result: content, isError };
-      // A tool result closes the current AI message; the next AI chunk starts
-      // a new message in this agent context.
+      yield { type: "tool.result", toolCallId: callId, result: content, isError, ...(agentNs ? { agentNs } : {}) };
+      // A tool result closes the current AI message — flush its terminal
+      // *.ended events, then advance so the next AI chunk opens a new message.
+      const ctxKey = agentNs ?? "main";
+      yield* flushEnded(ctxKey);
       ac.messageCounter++;
       ac.indexToId.clear();
       continue;
@@ -438,6 +468,7 @@ export async function* wrapAgentStream(
             toolCallId: tc.id,
             index: 0,
             argsDelta: JSON.stringify(tc.args),
+            ...(agentNs ? { agentNs } : {}),
           };
         }
       }
@@ -461,19 +492,35 @@ export async function* wrapAgentStream(
             yield { type: "tool.started", toolCallId: callId, name, ...(agentNs ? { agentNs } : {}) };
           }
           if (typeof tcc.args === "string" && tcc.args.length > 0) {
-            yield { type: "tool.args.delta", toolCallId: callId, index: idx, argsDelta: tcc.args };
+            yield { type: "tool.args.delta", toolCallId: callId, index: idx, argsDelta: tcc.args, ...(agentNs ? { agentNs } : {}) };
           }
         }
       }
     }
 
     // ---- content deltas ----------------------------------------------------
+    const ctxKey = agentNs ?? "main";
     const messageId = messageIdFor(agentNs);
+    if (openMessage.get(ctxKey) !== undefined && openMessage.get(ctxKey) !== messageId) {
+      // A new AI message began (counter advanced by a tool result elsewhere,
+      // or provider emitted a fresh message id) — close the previous one.
+      yield* flushEnded(ctxKey);
+    }
+    openMessage.set(ctxKey, messageId);
     if (reasoning.length > 0) {
+      ac.reasoningAcc.set(messageId, (ac.reasoningAcc.get(messageId) ?? "") + reasoning);
       yield { type: "reasoning.delta", messageId, ...(agentNs ? { agentNs } : {}), delta: reasoning };
     }
     if (text.length > 0) {
+      ac.textAcc.set(messageId, (ac.textAcc.get(messageId) ?? "") + text);
       yield { type: "text.delta", messageId, ...(agentNs ? { agentNs } : {}), delta: text };
     }
+  }
+
+  // Stream end — flush every ctx's still-open message so the terminal
+  // *.ended events are always emitted (the last AI message has no following
+  // tool result to close it).
+  for (const ctxKey of [...agentCtxs.keys()]) {
+    yield* flushEnded(ctxKey);
   }
 }

@@ -247,9 +247,12 @@ export type StreamEvent =
   | { type: "turn.finished"; seq: number; threadId: string; title?: string; durationMs: number }
   | { type: "turn.error"; seq: number; errorType: string; message: string; threadId?: string }
   | { type: "turn.interrupted"; seq: number; partialSaved: boolean; durationMs: number }
-  // --- content deltas ---
+  // --- content deltas (live-only; terminal *.ended events are the replayable boundary) ---
   | { type: "text.delta"; seq: number; messageId: string; agentNs?: string; delta: string }
   | { type: "reasoning.delta"; seq: number; messageId: string; agentNs?: string; delta: string }
+  // --- terminal full-value events (replayable; reconstruct state without deltas) ---
+  | { type: "text.ended"; seq: number; messageId: string; agentNs?: string; text: string }
+  | { type: "reasoning.ended"; seq: number; messageId: string; agentNs?: string; text: string }
   // --- tool calls (first-class events, keyed by toolCallId) ---
   | { type: "tool.started"; seq: number; toolCallId: string; name: string; agentNs?: string }
   | { type: "tool.args.delta"; seq: number; toolCallId: string; index: number; argsDelta: string; agentNs?: string }
