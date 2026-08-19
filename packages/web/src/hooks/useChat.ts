@@ -317,11 +317,12 @@ export function useChat({
       // semantics: live and history run through the same reducer, so a
       // replayed thread renders identically to how it streamed, including
       // precise interleaving and subagent timelines that the messages-table
-      // approximation cannot reconstruct). normalizeHistory stays as the
-      // fallback for legacy threads whose delta events were compacted
-      // before terminal events existed.
-      const replayed = await replayThreadEvents(tid);
-      setMsgs(replayed.length > 0 ? replayed : normalizeHistory(r.history ?? []));
+      // approximation cannot reconstruct). Per-turn hybrid: pre-upgrade turns
+      // (compacted deltas, no terminal events) fall back to the messages-table
+      // rendering inside the same list.
+      const normalized = normalizeHistory(r.history ?? []);
+      const replayed = await replayThreadEvents(tid, normalized);
+      setMsgs(replayed.length > 0 ? replayed : normalized);
     } catch {
       setMsgs([]);
     }
@@ -332,31 +333,51 @@ export function useChat({
    * event log (GET /thread/:id/events?after=0) through TurnEventAccumulator —
    * the exact same reducer as live streaming. turn.started carries the
    * persisted userMessage, so user bubbles are reconstructed too; each
-   * turn.started opens a fresh accumulator + assistant bubble. Returns [] if
-   * the event log has no renderable turns (legacy pre-terminal-event threads
-   * — caller falls back to the messages-table path).
+   * turn.started opens a fresh accumulator + assistant bubble.
+   *
+   * Per-turn hybrid fallback: turns that finished BEFORE the terminal-event
+   * protocol upgrade replay text-less (their text.delta rows were compacted
+   * with no text.ended to replace them) — those turns fall back to the
+   * messages-table rendering (normalizedRows). Only a turn with real replayed
+   * content uses the event-log timeline.
    */
-  const replayThreadEvents = useCallback(async (tid: string): Promise<Msg[]> => {
+  const replayThreadEvents = useCallback(async (tid: string, normalizedRows: Msg[]): Promise<Msg[]> => {
     let turns: Msg[] = [];
     let acc: TurnEventAccumulator | null = null;
+    /** Settle the current open turn with the given terminal fields. */
+    const settleTurn = (patch: Partial<Msg>, finalize: (a: TurnEventAccumulator) => void) => {
+      if (!acc) return;
+      finalize(acc);
+      const events = acc.snapshot();
+      turns[turns.length - 1] = {
+        ...(turns[turns.length - 1] as Msg),
+        events,
+        content: contentFromEvents(events),
+        status: "done",
+        ...patch,
+      };
+      acc = null;
+    };
     try {
       const stream = await sdk.streamThreadEvents(tid, 0);
       for await (const ev of stream) {
         if (ev.type === "turn.started") {
           // Close the previous turn (if any) and open a new one.
-          if (acc) {
-            turns[turns.length - 1] = {
-              ...(turns[turns.length - 1] as Msg),
-              events: acc.snapshot(),
-              content: contentFromEvents(acc.snapshot()),
-              status: "done",
-            };
-          }
+          settleTurn({}, (a) => a.finalizeDone());
           if (ev.userMessage) {
             turns.push({ id: `u_r_${ev.requestId}`, role: "user", content: ev.userMessage.content, status: "done" } as Msg);
           }
           acc = new TurnEventAccumulator();
-          turns.push({ id: `a_r_${ev.requestId}`, role: "assistant", content: "", status: "streaming", events: [] } as Msg);
+          turns.push({
+            id: `a_r_${ev.requestId}`,
+            role: "assistant",
+            content: "",
+            status: "streaming",
+            events: [],
+            // runStartedAt drives an accurate frozen timer if the turn ends
+            // without a server-reported duration.
+            startedAtMs: ev.runStartedAt,
+          } as Msg);
         } else if (acc) {
           switch (ev.type) {
             case "text.delta":
@@ -371,15 +392,13 @@ export function useChat({
               acc.consume(ev);
               break;
             case "turn.finished":
+              settleTurn({ workDurationMs: ev.durationMs }, (a) => a.finalizeDone());
+              break;
             case "turn.interrupted":
-              acc.finalizeDone();
-              turns[turns.length - 1] = { ...(turns[turns.length - 1] as Msg), events: acc.snapshot(), content: contentFromEvents(acc.snapshot()), status: "done", ...(ev.type === "turn.finished" ? { workDurationMs: ev.durationMs } : {}) };
-              acc = null;
+              settleTurn({ workDurationMs: ev.durationMs }, (a) => a.finalizeDone());
               break;
             case "turn.error":
-              acc.finalizeError();
-              turns[turns.length - 1] = { ...(turns[turns.length - 1] as Msg), events: acc.snapshot(), status: "error" };
-              acc = null;
+              settleTurn({}, (a) => a.finalizeError());
               break;
             case "ask":
               acc.consumeAskReadOnly({ kind: ev.kind, questions: ev.questions, thread_id: tid });
@@ -390,16 +409,32 @@ export function useChat({
         }
       }
       // Stream ended mid-turn (no terminal event — e.g. run_lost): settle it.
-      if (acc) {
-        acc.finalizeDone();
-        turns[turns.length - 1] = { ...(turns[turns.length - 1] as Msg), events: acc.snapshot(), content: contentFromEvents(acc.snapshot()), status: "done" };
-      }
+      settleTurn({}, (a) => a.finalizeDone());
     } catch {
       // Replay transport failure — signal "no replay" so caller falls back.
       return [];
     }
-    // Only counts as a usable replay if at least one turn rendered content.
-    return turns.some((t) => t.role === "assistant" && ((t.events?.length ?? 0) > 0 || t.content)) ? turns : [];
+
+    // ---- Per-turn hybrid merge with the messages-table rendering ----
+    // A replayed assistant turn with no text AND no timeline events came from
+    // a pre-upgrade turn whose deltas were compacted away — restore the
+    // messages-table version (it has the persisted text + tool_calls).
+    const fallbackAssistantTurns = normalizedRows.filter((m) => m.role === "assistant");
+    let fbIdx = 0;
+    const merged = turns.map((t) => {
+      if (t.role !== "assistant") return t;
+      const hasReplay = (t.events?.length ?? 0) > 0 || !!t.content;
+      const fb = fallbackAssistantTurns[fbIdx];
+      fbIdx++;
+      if (hasReplay || !fb) return t;
+      // Keep replay's timing if the fallback lacks it.
+      return { ...fb, startedAtMs: fb.startedAtMs ?? t.startedAtMs, workDurationMs: fb.workDurationMs ?? t.workDurationMs };
+    });
+    // If the event log produced no usable assistant turns at all, defer to
+    // the full messages-table rendering.
+    return merged.some((t) => t.role === "assistant" && ((t.events?.length ?? 0) > 0 || t.content))
+      ? merged
+      : [];
   }, []);
 
   /** Abort the local fetch + reset local stream state. The server-side run
