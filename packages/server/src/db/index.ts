@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { eq, and, asc, desc, isNull, gt, like, inArray, or } from "drizzle-orm";
+import { eq, and, asc, desc, isNull, gt, like, inArray, or, sql } from "drizzle-orm";
 import { getLogger } from "@octopus/core";
 import * as schema from "./schema.js";
 
@@ -1287,6 +1287,22 @@ export function listThreadEvents(
     seq: r.seq,
     event: (unpackJson<Record<string, unknown>>(r.event) ?? {}) as Record<string, unknown>,
   }));
+}
+
+/**
+ * Highest persisted seq for a thread (0 when none). The run registry seeds a
+ * new run's seq from this so seq is globally monotonic PER THREAD across
+ * runs — a per-run reset would collide with already-persisted rows
+ * (PK thread_id+seq insert failures + client `after=` filters eating live
+ * resume events whose seqs overlap the previous run's).
+ */
+export function getMaxThreadEventSeq(threadId: string): number {
+  const row = getDb()
+    .select({ maxSeq: sql<number>`max(${schema.threadEvents.seq})` })
+    .from(schema.threadEvents)
+    .where(eq(schema.threadEvents.threadId, threadId))
+    .get();
+  return row?.maxSeq ?? 0;
 }
 
 /**

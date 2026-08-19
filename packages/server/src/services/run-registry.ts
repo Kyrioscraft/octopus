@@ -14,6 +14,7 @@
  */
 
 import { getLogger } from "@octopus/core";
+import { getMaxThreadEventSeq } from "../db/index.js";
 
 const logger = getLogger("run.registry");
 
@@ -60,7 +61,11 @@ export function startRun(threadId: string): RunState {
     threadId,
     status: "running",
     events: [],
-    nextSeq: 1,
+    // Seed from the durable log so seq is globally monotonic PER THREAD —
+    // a resume's events continue after the original turn's seqs instead of
+    // colliding with them (PK conflicts on persist + client after= filters
+    // eating overlapping live events). Falls back to 1 for a fresh thread.
+    nextSeq: Math.max(1, getMaxThreadEventSeq(threadId) + 1),
     listeners: new Set(),
     abort: new AbortController(),
     startedAt: Date.now(),
