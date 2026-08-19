@@ -126,7 +126,11 @@ function makeRunEmit(run: RunState, controller?: ReadableStreamDefaultController
     // cursor alone (no identity dedup, no gap fill).
     const seq = assignSeq(run);
     persistThreadEvent(run.threadId, seq, chunk);
-    broadcast(run, { seq, chunk });
+    // The wire chunk MUST carry `seq` (same shape as persisted rows) —
+    // clients track their high-water cursor from it to subscribe-after on
+    // resume; a missing seq froze their cursor and replayed post-ask events.
+    const wire = { ...chunk, seq };
+    broadcast(run, { seq, chunk: wire });
     const type = (chunk as { type?: string }).type;
     if (type === "ask") pauseRun(run.threadId);
     if (type === "turn.finished" || type === "turn.error" || type === "turn.interrupted") {
