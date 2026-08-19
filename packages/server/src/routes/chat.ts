@@ -698,6 +698,15 @@ chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
       const finalize = () => {
         detach();
         if (heartbeat) clearInterval(heartbeat);
+        // Drain anything still pending (post-ask trailing events) before the
+        // idle terminator — dropping them would truncate the turn AND desync
+        // the client's cursor (those seqs would replay on the next subscribe).
+        for (const [seq, chunk] of [...pending.entries()].sort((a, b) => a[0] - b[0])) {
+          pending.delete(seq);
+          if (seq <= cursor) continue;
+          cursor = seq;
+          push(chunk);
+        }
         push({ type: "idle", threadId });
         try { controller.close(); } catch { /* */ }
       };

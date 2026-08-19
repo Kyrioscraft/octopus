@@ -382,9 +382,10 @@ export function useChat({
         if (ev.type === "turn.started") {
           // Close the previous turn (if any) and open a new one.
           settleTurn({}, (a) => a.finalizeDone());
-          if (ev.userMessage) {
+          if (ev.userMessage && !ev.synthetic) {
             // Server persists userMessage as a plain string (see core's
-            // BoundaryEvent) — not a ChatMessage object.
+            // BoundaryEvent) — not a ChatMessage object. Synthetic boundary
+            // markers (resume turns) are skipped — not real user bubbles.
             const content = typeof ev.userMessage === "string"
               ? ev.userMessage
               : (ev.userMessage as { content?: string }).content ?? "";
@@ -620,7 +621,14 @@ export function useChat({
               }
             }
             setAsk(payload);
-            return;
+            // Do NOT return here: the deepagents graph may keep streaming
+            // after the ask (agent continues its turn), and the /events
+            // stream stays open until the server sees the run paused. Those
+            // trailing events MUST keep flowing into this loop — both to
+            // render them and to advance lastSeqRef — otherwise the resume
+            // subscription (after=lastSeqRef) would replay them into the
+            // accumulator a second time (the duplicated text/tools bug).
+            break;
           }
           case "turn.finished": {
             setThreadRunning(tid, false);

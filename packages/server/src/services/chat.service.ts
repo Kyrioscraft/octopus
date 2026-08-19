@@ -37,7 +37,7 @@ const logger = getLogger("chat.service");
  * route's run-registry wrapper before enqueue/persist.
  */
 export type BoundaryEvent =
-  | { type: "turn.started"; threadId: string; requestId: string; runStartedAt: number; userMessage?: string }
+  | { type: "turn.started"; threadId: string; requestId: string; runStartedAt: number; userMessage?: string; /** Synthetic boundary marker (resume turns) — clients skip rendering it as a user bubble. */ synthetic?: boolean }
   | { type: "turn.finished"; threadId: string; title?: string; durationMs?: number }
   | { type: "turn.error"; errorType: string; message: string; threadId?: string }
   | { type: "turn.interrupted"; partialSaved: boolean; durationMs?: number }
@@ -755,7 +755,10 @@ export async function streamResume(
       threadId: input.threadId,
       requestId: input.requestId,
       runStartedAt: input.startedAt ?? Date.now(),
+      // Synthetic boundary marker, NOT a real user utterance — clients must
+      // not render it as a user bubble (they skip on synthetic).
       userMessage: initMsg,
+      synthetic: true,
     });
 
     // Step 3: Stream the resumed graph (standardized AgentEvent).
