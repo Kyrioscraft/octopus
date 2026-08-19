@@ -33,15 +33,13 @@ export type { Logger, LogContext } from "./logging.js";
 export { makeGraph, createAgent } from "./agent/index.js";
 export { getCheckpointer, setCheckpointer, clearGraphCache } from "./agent/index.js";
 export { buildChatModel, generateTitle, TITLE_MAX_LENGTH } from "./agent/index.js";
-export { interruptOnForMode } from "./agent/index.js";
 export type { AgentGraph, CompiledAgent, SubagentRegistryEntry, ExternalSubagentSpec } from "./agent/index.js";
 
 // Agent presets (plan/confirm/auto/full) + legacy access-mode aliases
 export { BUILTIN_AGENTS, AGENT_ORDER, DEFAULT_AGENT, GATED_TOOLS } from "./agent/presets.js";
-export { resolveAgentPreset, presetForAccessMode, interruptOnForRuleset } from "./agent/presets.js";
+export { resolveAgentPreset, interruptOnForRuleset } from "./agent/presets.js";
 export type { AgentPreset } from "./agent/presets.js";
-export { DESTRUCTIVE_TOOLS } from "./agent/access-mode.js";
-export type { AccessMode } from "./agent/access-mode.js";
+export { DESTRUCTIVE_TOOLS } from "./agent/presets.js";
 
 // Subagents (builtin data + FS scanner)
 export { BUILTIN_SUBAGENTS, EXPLORE_SUBAGENT, GENERAL_PURPOSE_BUILTIN, READONLY_TOOL_NAMES } from "./agent/subagent-defs.js";

@@ -2,15 +2,11 @@
  * HITL (human-in-the-loop) interrupt configuration.
  *
  * Owns:
- *   - `buildInterruptOn` — the compiled-graph interrupt map (equivalent to
- *     Python `_add_interrupt_on()`), driven by the preset's permission rules.
- *   - `interruptOnForMode` — the runtime `runtime.context` override (moved
- *     here from config/index.ts; it is a runtime concern, not config).
+ * Owns `buildInterruptOn` — the compiled-graph interrupt map (equivalent to
+ * Python `_add_interrupt_on()`), driven by the preset's permission rules.
  */
 
-import type { AccessMode } from "./access-mode.js";
-import { presetForAccessMode } from "./presets.js";
-import { GATED_TOOLS, interruptOnForRuleset } from "./presets.js";
+import { GATED_TOOLS } from "./presets.js";
 import type { Ruleset } from "../safety/permission/types.js";
 import { evaluate } from "../safety/permission/index.js";
 import { shouldInterruptExecute, detectFileWrite } from "../middleware/file_edit_guard.js";
@@ -110,26 +106,4 @@ export function buildInterruptOn(fileWriteRuleset?: Ruleset): Record<string, any
   }
 
   return interruptMap;
-}
-
-/**
- * Compute the runtime `interruptOn` override for a given access mode.
- *
- * The langchain `humanInTheLoopMiddleware` merges its compiled `interruptOn`
- * with `runtime.context` (the latter wins — see hitl.js config assembly), so
- * injecting `{ interruptOn: { <tool>: false } }` into the runtime context
- * auto-approves those tools for the whole run without recompiling the graph.
- *
- * Moved here from config/index.ts — it derives from presets (agent domain),
- * and keeping it in config forced config to import agent modules (cycle).
- *
- * @returns The override object, or `null` to keep the compiled default.
- */
-export function interruptOnForMode(
-  mode: AccessMode,
-): Record<string, boolean> | null {
-  // Phase 2 of the agent migration: derive the override from the preset's
-  // pattern-based permission rules instead of hard-coded tool lists.
-  // Behavior for the four builtin presets is identical to phase 1.
-  return interruptOnForRuleset(presetForAccessMode(mode).permission, GATED_TOOLS);
 }

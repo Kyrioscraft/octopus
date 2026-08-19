@@ -715,7 +715,7 @@ export function useChatSession(deps: UseChatSessionDeps): UseChatSessionReturn {
           messages: [{ role: "user", content: text }],
           thread_id: threadRef.current ?? undefined,
           workspace_id: workspaceIdRef.current ?? undefined,
-          mode: "auto",
+          agent: "auto",
           request_id: `req_${Date.now()}`,
         },
         { signal: abortController.signal },

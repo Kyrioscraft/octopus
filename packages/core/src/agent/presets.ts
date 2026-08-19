@@ -14,13 +14,36 @@
  * tool-name booleans with a pattern-based permission Ruleset.
  */
 
-import type { AccessMode } from "./access-mode.js";
-import { DESTRUCTIVE_TOOLS } from "./access-mode.js";
 import {
   evaluate,
   rulesetFromConfig,
   staticallyDisabledTools,
 } from "../safety/permission/index.js";
+
+// =============================================================================
+// DESTRUCTIVE_TOOLS — relocated from the deleted agent/access-mode.ts (the
+// access-mode mechanism is fully retired; this tool list remains a live
+// dependency of the plan preset).
+// =============================================================================
+
+/**
+ * Tool names with side effects — file writes, subagent/task delegation, and
+ * conversation compaction. The plan agent strips these from the toolset so
+ * it can only research/plan, not modify anything.
+ *
+ * NOTE: `execute` (shell) is deliberately NOT in this set — plan needs Bash
+ * for codebase search; shell file writes are blocked separately by
+ * FileEditGuardMiddleware + the shell_file_write permission rule.
+ */
+export const DESTRUCTIVE_TOOLS = new Set<string>([
+  "write_file",
+  "edit_file",
+  "task",
+  "start_async_task",
+  "update_async_task",
+  "cancel_async_task",
+  "compact_conversation",
+]);
 import type { PermissionConfig, Ruleset } from "../safety/permission/types.js";
 
 // =============================================================================
@@ -284,7 +307,7 @@ export const DEFAULT_AGENT = "confirm";
 /**
  * Resolve an agent name to a preset. Unknown/missing names (including
  * legacy `mode` values from old clients) fall back to `confirm`, matching
- * the previous server-side coercion. AccessMode is structurally compatible
+ * the previous server-side coercion. Legacy mode values are structurally compatible
  * with agent names in phase 1 — every legacy mode IS a builtin agent.
  */
 export function resolveAgentPreset(name: string | undefined): AgentPreset {
@@ -320,9 +343,4 @@ export function interruptOnForRuleset(
     }
   }
   return any ? override : null;
-}
-
-/** Legacy bridge: phase 1 keeps AccessMode as an alias for agent names. */
-export function presetForAccessMode(mode: AccessMode | undefined): AgentPreset {
-  return resolveAgentPreset(mode);
 }

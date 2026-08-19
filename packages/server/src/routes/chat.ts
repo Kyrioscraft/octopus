@@ -14,7 +14,7 @@ import { v4 as uuid } from "uuid";
 import { getOptionalUser } from "../auth/middleware.js";
 import { makeGraph, loadConfig, getLogger, getLogContext, clearGraphCache } from "@octopus/core";
 import { createRipgrepTool, getRipgrepDir } from "@octopus/extension-ripgrep";
-import { type AccessMode, type ExternalSubagentSpec, type SubagentEntry, interruptOnForMode, interruptOnForRuleset, GATED_TOOLS } from "@octopus/core";
+import { type ExternalSubagentSpec, type SubagentEntry, resolveAgentPreset, interruptOnForRuleset, GATED_TOOLS } from "@octopus/core";
 import {
   listUserThreads,
   listUserThreadsByWorkspace,
@@ -201,16 +201,12 @@ chatRouter.put("/thread/:id", getOptionalUser, async (c) => {
 // this is the "switch takes effect at the next approval point" mechanism.
 // The in-flight stream is NOT interrupted.
 //
-// `/thread/:id/agent` is the new canonical path; `/mode` is kept as an alias
-// for older clients.
-
 const patchAgentHandler = async (c: Context) => {
   const threadId = c.req.param("id") as string;
-  const body = await c.req.json<{ agent?: string; mode?: string }>();
-  // New clients send `agent`; legacy clients send `mode` with the same values.
+  const body = await c.req.json<{ agent?: string }>();
   // Validate against the known set; reject unknown values rather than
   // silently coercing, since an agent switch is an explicit user action.
-  const trimmed = (body.agent ?? body.mode)?.trim();
+  const trimmed = body.agent?.trim();
   const agentName =
     trimmed === "plan" || trimmed === "confirm" || trimmed === "auto" || trimmed === "full"
       ? trimmed
@@ -220,10 +216,9 @@ const patchAgentHandler = async (c: Context) => {
   }
   const result = setThreadAccessMode(threadId, agentName);
   if (!result) return c.json({ detail: "会话不存在" }, 404);
-  return c.json({ success: true, agent: result.accessMode, mode: result.accessMode });
+  return c.json({ success: true, agent: result.accessMode });
 };
 
-chatRouter.patch("/thread/:id/mode", getOptionalUser, patchAgentHandler);
 chatRouter.patch("/thread/:id/agent", getOptionalUser, patchAgentHandler);
 
 // =========================================================================
@@ -273,7 +268,7 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
   // New clients send `agent`; legacy clients send `mode` with the same four
   // values (every legacy mode IS a builtin agent in phase 1). Anything missing
   // or unrecognized falls back to "confirm" (the per-step-approval default).
-  const rawAgent = (body.agent ?? body.mode)?.trim();
+  const rawAgent = body.agent?.trim();
   // Message-level agent binding (phase 3): when the client doesn't specify,
   // inherit the thread's last user-message agent (opencode prompt.ts:437
   // semantics) so consecutive turns keep the same agent. Falls back to the
@@ -289,9 +284,9 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
     requestedAgent === "plan" || requestedAgent === "auto" || requestedAgent === "full" || requestedAgent === "confirm"
       ? requestedAgent
       : "confirm";
-  // The DB column is still named access_mode in phase 1 — agent names are
-  // stored verbatim (identical value domain), no migration needed.
-  const accessMode: AccessMode = agentName as AccessMode;
+  // The DB column is still named access_mode (legacy naming, kept for data
+  // compat) — agent names are stored verbatim, no migration needed.
+  const accessMode = agentName;
   if (!threadId) {
     threadId = `thread_${uuid()}`;
     createThread({
@@ -386,7 +381,7 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
   // The preset override is MERGED with the thread's accumulated "always"
   // rules (later wins) so session-level approvals persist across turns.
   const interruptOverride = (() => {
-    const base = interruptOnForMode(accessMode) ?? {};
+    const base = interruptOnForRuleset(resolveAgentPreset(agentName).permission, GATED_TOOLS) ?? {};
     const alwaysOverride =
       interruptOnForRuleset(getThreadPermissionRules(threadId), GATED_TOOLS) ?? {};
     const merged = { ...base, ...alwaysOverride };
@@ -477,11 +472,10 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
   // what makes a mid-run switch take effect at the next approval point: the
   // user can switch to auto/full, and subsequent resumes suppress HITL
   // accordingly. Legacy rows (no access_mode) coerce to "confirm".
-  let accessMode: AccessMode = (() => {
+  let agentName = (() => {
     const m = existingThread?.accessMode;
     return m === "plan" || m === "auto" || m === "full" ? m : "confirm";
   })();
-  let agentName = accessMode as string;
   // Plan approval gate: when the user approves a submitted plan, flip the
   // thread to the confirm agent BEFORE resuming — the resumed turn then runs
   // with the full (write-capable) toolset under per-tool HITL, mirroring
@@ -490,7 +484,6 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
   // so the agent revises.
   if (resumeBody.kind === "plan_approval" && agentName === "plan" && resumeBody.approved !== false) {
     updateThreadAccessMode(threadId, "confirm");
-    accessMode = "confirm";
     agentName = "confirm";
     saveUserMessage(
       threadId,
@@ -523,7 +516,7 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
   // The preset's override is MERGED with the thread's accumulated "always"
   // rules (later wins) so session-level approvals carry across turns.
   const interruptOverride = (() => {
-    const base = interruptOnForMode(accessMode) ?? {};
+    const base = interruptOnForRuleset(resolveAgentPreset(agentName).permission, GATED_TOOLS) ?? {};
     const threadRules = getThreadPermissionRules(threadId);
     const alwaysOverride = interruptOnForRuleset(threadRules, GATED_TOOLS) ?? {};
     const merged = { ...base, ...alwaysOverride };

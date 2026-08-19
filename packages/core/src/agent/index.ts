@@ -8,7 +8,6 @@
  *   - hitl.ts         — HITL interrupt configuration
  *   - assembly.ts     — subagent specs + registry assembly
  *   - presets.ts      — builtin AgentPreset catalog
- *   - access-mode.ts  — legacy AccessMode leaf
  *   - subagent-defs.ts — builtin subagent data (Explore, general-purpose)
  *   - subagents.ts    — subagent FS scanner
  */
@@ -17,6 +16,4 @@ export { createAgent, makeGraph } from "./graph.js";
 export type { AgentGraph, CompiledAgent, SubagentRegistryEntry, ExternalSubagentSpec } from "./graph.js";
 export { getCheckpointer, setCheckpointer, clearGraphCache } from "./kernel.js";
 export { buildChatModel, generateTitle, TITLE_MAX_LENGTH } from "./model.js";
-export { interruptOnForMode } from "./hitl.js";
-export { DESTRUCTIVE_TOOLS } from "./access-mode.js";
-export type { AccessMode } from "./access-mode.js";
+export { DESTRUCTIVE_TOOLS } from "./presets.js";

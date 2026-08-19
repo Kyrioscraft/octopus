@@ -131,8 +131,7 @@ export class OctopusClient {
    * next resume honors it — this is how a mid-run switch takes effect at the
    * next approval point. Returns the stored agent name on success.
    *
-   * The agent is the successor of the access mode; `setThreadMode` below is
-   * the legacy alias kept for older callers.
+   * The agent is the successor of the removed access-mode mechanism.
    */
   async setThreadAgent(
     threadId: string,
@@ -143,18 +142,6 @@ export class OctopusClient {
       { agent },
     );
     return res.agent;
-  }
-
-  /** Legacy alias of setThreadAgent — hits the old /mode endpoint. */
-  async setThreadMode(
-    threadId: string,
-    mode: "plan" | "confirm" | "auto" | "full",
-  ): Promise<string> {
-    const res = await this.#patch<{ mode: string }>(
-      `/api/chat/thread/${threadId}/mode`,
-      { mode },
-    );
-    return res.mode;
   }
 
   // =========================================================================

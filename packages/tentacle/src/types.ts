@@ -72,8 +72,6 @@ export interface ChatRequest {
    *  auto   = HITL suppressed (but FileEditGuard still redirects shell writes).
    *  full   = HITL suppressed AND FileEditGuard bypassed (fully autonomous). */
   agent?: "plan" | "confirm" | "auto" | "full";
-  /** Legacy access-mode field — folded into `agent` server-side. @deprecated */
-  mode?: "plan" | "confirm" | "auto" | "full";
   /** Optional client-generated request id, used for optimistic UI correlation. */
   request_id?: string;
 }

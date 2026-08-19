@@ -16,7 +16,6 @@
 
 import { createDeepAgent } from "deepagents";
 import { type ServerConfig } from "../config/index.js";
-import type { AccessMode } from "./access-mode.js";
 import { resolveAgentPreset } from "./presets.js";
 
 
@@ -128,14 +127,6 @@ export async function makeGraph(
      */
     agent?: string;
     /**
-     * Legacy access mode — kept for backwards compatibility. Every legacy
-     * mode resolves to the same-named builtin agent preset; `agent` wins
-     * when both are given.
-     *
-     * @deprecated use `agent` instead
-     */
-    accessMode?: AccessMode;
-    /**
      * External subagents (file-source + user-defined), already merged by the
      * server. core is a pure library with no DB access, so the server owns
      * discovery/merge and injects the result here. Built-in subagents
@@ -175,7 +166,7 @@ export async function makeGraph(
     .join("|");
   // Unknown agent names fall back to "confirm" inside resolveAgentPreset;
   // mirror that here so both resolve to the same cache entry.
-  const agentName = options?.agent ?? options?.accessMode ?? "confirm";
+  const agentName = options?.agent ?? "confirm";
   const key = cacheKey({
     model: config.model,
     systemPrompt: config.systemPrompt ?? "",
@@ -214,10 +205,8 @@ async function _makeGraphUncached(
      * directory. Falls back to local if sandbox is unconfigured/failed.
      */
     workspace?: { environment?: "local" | "sandbox" };
-    /** Primary agent name — see makeGraph. @deprecated-pair of accessMode */
+    /** Primary agent name — see makeGraph. */
     agent?: string;
-    /** Legacy access mode — every legacy mode is a same-named builtin agent. */
-    accessMode?: AccessMode;
     /** External subagents (file + user-defined), injected by the server. */
     userSubagents?: ExternalSubagentSpec[];
     /** Built-in subagent model overrides (name → model, null = default). */
@@ -302,7 +291,7 @@ async function _makeGraphUncached(
   // removed. The preset is the data-driven successor of the old access-mode
   // switches (see agent/presets.ts); every legacy mode resolves to a preset
   // with identical behavior.
-  const preset = resolveAgentPreset(options?.agent ?? options?.accessMode);
+  const preset = resolveAgentPreset(options?.agent);
   if (preset.disabledTools.size > 0) {
     const before = tools.length;
     for (let i = tools.length - 1; i >= 0; i--) {
@@ -360,7 +349,7 @@ async function _makeGraphUncached(
   //
   // In `full` access mode the guard is bypassed: the user has opted into a
   // fully autonomous agent and accepts that shell commands may write files
-  // directly. accessMode is part of the graph cache key, so `full` compiles
+  // directly. The agent name is part of the graph cache key, so `full` compiles
   // its own graph with the bypass enabled — cache-safe by construction.
   middleware.push(
     new FileEditGuardMiddleware({

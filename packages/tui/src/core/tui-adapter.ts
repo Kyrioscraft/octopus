@@ -135,7 +135,7 @@ export async function executeAgentTask(
       // Use "auto" mode to suppress HITL approvals for read tools;
       // destructive shell writes are still blocked by FileEditGuard.
       // file edits (edit_file/write_file) will trigger HITL regardless.
-      mode: "auto",
+      agent: "auto",
       request_id: `req_${Date.now()}`,
     };
 
