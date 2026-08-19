@@ -33,7 +33,8 @@ import {
 } from "../services/chat.service.js";
 import {
   startRun,
-  recordEvent,
+  assignSeq,
+  broadcast,
   pauseRun,
   finishRun,
   abortRun,
@@ -119,8 +120,13 @@ function persistThreadEvent(threadId: string, seq: number, chunk: Record<string,
  */
 function makeRunEmit(run: RunState, controller?: ReadableStreamDefaultController): Emit {
   return (chunk) => {
-    const seq = recordEvent(run, chunk);
+    // Single write path: assign → PERSIST → broadcast. Persisting before the
+    // fan-out makes the durable log a superset of everything any listener can
+    // receive, so GET /events closes the replay→live race with a monotonic
+    // cursor alone (no identity dedup, no gap fill).
+    const seq = assignSeq(run);
     persistThreadEvent(run.threadId, seq, chunk);
+    broadcast(run, { seq, chunk });
     const type = (chunk as { type?: string }).type;
     if (type === "ask") pauseRun(run.threadId);
     if (type === "turn.finished" || type === "turn.error" || type === "turn.interrupted") {
@@ -635,28 +641,25 @@ chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
         }
       };
 
-      // Durable replay from SQLite (deltas of finished turns were compacted,
-      // so this is cheap). This is the authoritative history.
-      let maxSeq = after;
-      let lastType: string | undefined;
-      const replayed: Array<{ seq: number; chunk: Record<string, unknown> }> = [];
-      try {
-        for (const e of listThreadEvents(threadId, after)) {
-          replayed.push({ seq: e.seq, chunk: e.event });
-          maxSeq = Math.max(maxSeq, e.seq);
-          const t = e.event["type"];
-          if (typeof t === "string") lastType = t;
-        }
-      } catch (err) {
-        logger.exception("Durable event replay failed", err);
-      }
-      for (const e of replayed) push(e.chunk);
-
       const runActive = run !== undefined && (run.status === "running" || run.status === "paused");
+
+      // ---- No live run: pure durable replay, then close ------------------
       if (!runActive) {
-        // No live run. If the durable log ends at a non-terminal state (crash /
-        // restart mid-turn), tell the client the turn was lost so it can mark
-        // the bubble errored instead of hanging.
+        let maxSeq = after;
+        let lastType: string | undefined;
+        try {
+          for (const e of listThreadEvents(threadId, after)) {
+            push(e.event);
+            maxSeq = Math.max(maxSeq, e.seq);
+            const t = e.event["type"];
+            if (typeof t === "string") lastType = t;
+          }
+        } catch (err) {
+          logger.exception("Durable event replay failed", err);
+        }
+        // If the durable log ends at a non-terminal state (crash / restart
+        // mid-turn), tell the client the turn was lost so it can mark the
+        // bubble errored instead of hanging.
         if (lastType && lastType !== "turn.finished" && lastType !== "turn.error" &&
             lastType !== "turn.interrupted" && lastType !== "idle") {
           push({ type: "turn.error", errorType: "run_lost", message: "服务重启导致本轮执行中断", threadId, seq: maxSeq + 1 });
@@ -666,25 +669,30 @@ chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
         return;
       }
 
-      // Live tail: close the replay→live race by registering the listener and
-      // collecting into a pending set; flush entries whose seq wasn't replayed.
+      // ---- Live tail: subscribe FIRST, then snapshot, cursor filter --------
+      // Single-write-path handoff (see makeRunEmit): events are persisted
+      // BEFORE broadcast, so anything the listener delivers between attach and
+      // the snapshot read is already in the snapshot. A monotonic cursor over
+      // seq — advance past everything pushed — drops that overlap exactly
+      // once; no identity set, no gap fill.
       const pending = new Map<number, Record<string, unknown>>();
-      const seenSeqs = new Set<number>(replayed.map((e) => e.seq));
-      const detach = attachListener(threadId, after, (e) => {
-        if (!seenSeqs.has(e.seq)) pending.set(e.seq, e.chunk);
+      const detach = attachListener(threadId, (e) => {
+        if (e.seq > cursor) pending.set(e.seq, e.chunk);
       }) ?? (() => {});
 
-      // Flush anything the replay snapshot missed but the durable writer
-      // already persisted (recordEvent fans out BEFORE the route persisted —
-      // so a listener entry may predate the durable row; pull the gap from db).
+      // Snapshot AFTER the listener is registered.
+      let cursor = after - 1; // push only events with seq > cursor
+      let lastTypeLive: string | undefined;
       try {
-        for (const e of listThreadEvents(threadId, maxSeq)) {
-          if (!seenSeqs.has(e.seq)) {
-            seenSeqs.add(e.seq);
-            pending.set(e.seq, e.event);
-          }
+        for (const e of listThreadEvents(threadId, after)) {
+          push(e.event);
+          cursor = Math.max(cursor, e.seq);
+          const t = e.event["type"];
+
         }
-      } catch { /* best-effort gap fill */ }
+      } catch (err) {
+        logger.exception("Durable event replay failed", err);
+      }
 
       let heartbeat: ReturnType<typeof setInterval> | undefined;
       const finalize = () => {
@@ -696,7 +704,9 @@ chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
 
       if (run!.status !== "running") {
         // paused (HITL) — the replayed log already contains the `ask`; close.
-        for (const [, chunk] of [...pending.entries()].sort((a, b) => a[0] - b[0])) push(chunk);
+        for (const [seq, chunk] of [...pending.entries()].sort((a, b) => a[0] - b[0])) {
+          if (seq > cursor) push(chunk);
+        }
         finalize();
         return;
       }
@@ -706,8 +716,8 @@ chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
         const entries = [...pending.entries()].sort((a, b) => a[0] - b[0]);
         for (const [seq, chunk] of entries) {
           pending.delete(seq);
-          if (seenSeqs.has(seq)) continue;
-          seenSeqs.add(seq);
+          if (seq <= cursor) continue; // already covered by the snapshot
+          cursor = seq;
           push(chunk);
           const t = (chunk as { type?: string }).type;
           if (t === "turn.finished" || t === "turn.error" || t === "turn.interrupted") {
