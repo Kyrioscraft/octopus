@@ -231,6 +231,46 @@ export class TurnEventAccumulator {
         this.curText.text += ev.delta;
         return;
       }
+
+      // ---- terminal full-value events (replayable boundary) --------------
+      // On replay from storage, only these arrive (deltas are compacted
+      // away) — they must be able to reconstruct the timeline standalone.
+      // Live, they arrive AFTER the deltas and normalize the accumulated
+      // value to the authoritative full text (covers any missed deltas).
+      case "reasoning.ended": {
+        if (ev.agentNs) {
+          this.innerConsume(ev.agentNs, ev, (inner) => inner.consume(stripNs(ev)));
+          return;
+        }
+        this.closeText();
+        if (!this.curReasoning) {
+          this.curReasoning = {
+            id: this.nextId("rs"),
+            type: "reasoning",
+            text: "",
+            startedAt: Date.now(),
+          };
+          this.events.push(this.curReasoning);
+        }
+        this.curReasoning.text = ev.text;
+        this.closeReasoning();
+        return;
+      }
+
+      case "text.ended": {
+        if (ev.agentNs) {
+          this.innerConsume(ev.agentNs, ev, (inner) => inner.consume(stripNs(ev)));
+          return;
+        }
+        this.closeReasoning();
+        if (!this.curText) {
+          this.curText = { id: this.nextId("tx"), type: "text", text: "" };
+          this.events.push(this.curText);
+        }
+        this.curText.text = ev.text;
+        this.closeText();
+        return;
+      }
     }
   }
 
