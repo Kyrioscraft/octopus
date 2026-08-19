@@ -2,7 +2,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, isAbsolute } from "node:path";
 import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { eq, and, asc, desc, isNull, gt, like, inArray } from "drizzle-orm";
+import { eq, and, asc, desc, isNull, gt, like, inArray, or } from "drizzle-orm";
 import { getLogger } from "@octopus/core";
 import * as schema from "./schema.js";
 
@@ -1291,12 +1291,18 @@ export function listThreadEvents(
 
 /**
  * Compact a finished turn's delta events: keep lifecycle events
- * (turn.started/finished/error/interrupted, ask, subagent lifecycle) — which
- * the client needs to rebuild the timeline — and drop the high-frequency
- * content deltas (text/reasoning/tool.args) that were already folded into the
- * persisted messages by saveAiMessages. Prevents unbounded table growth.
+ * (turn.started/finished/error/interrupted, ask, subagent lifecycle) AND the
+ * terminal full-value events (text.ended / reasoning.ended / tool.result) —
+ * which the client needs to replay the timeline from storage — and drop the
+ * high-frequency live-only deltas (text.delta / reasoning.delta /
+ * tool.args.delta) whose full values are carried by the terminal events.
+ * Prevents unbounded table growth.
+ *
+ * (Bug fix: the original implementation only matched `text.delta`, so
+ * reasoning.delta and tool.args.delta rows accumulated forever.)
  */
 export function compactThreadEvents(threadId: string): void {
+  const deltaTypes = ['%"type":"text.delta"%', '%"type":"reasoning.delta"%', '%"type":"tool.args.delta"%'];
   getDb()
     .delete(schema.threadEvents)
     .where(
@@ -1310,7 +1316,7 @@ export function compactThreadEvents(threadId: string): void {
             .where(
               and(
                 eq(schema.threadEvents.threadId, threadId),
-                like(schema.threadEvents.event, '%"type":"text.delta"%'),
+                or(...deltaTypes.map((pattern) => like(schema.threadEvents.event, pattern))),
               ),
             ),
         ),

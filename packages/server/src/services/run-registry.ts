@@ -37,6 +37,8 @@ export interface RunState {
   /** Aborts the underlying agent run (explicit stop only). */
   abort: AbortController;
   startedAt: number;
+  /** Set once the buffer overflowed — gates the event_overflow marker to one. */
+  overflowed?: boolean;
 }
 
 /** How long a finished run's buffer is kept for late re-attach/replay (ms). */
@@ -90,9 +92,31 @@ export function recordEvent(state: RunState, chunk: Record<string, unknown>): nu
   const entry: BufferedReader = { seq: state.nextSeq++, chunk };
   state.events.push(entry);
   // Cap the buffer defensively (a runaway run shouldn't grow memory forever).
-  // Keep the last 5000 events; earlier ones are unrecoverable (client falls
-  // back to /history snapshot on gap).
+  // Keep the last 5000 events; earlier ones are still recoverable from the
+  // durable thread_events log, but a live listener attached from seq 0 would
+  // see a gap — mark it once so the client knows to fall back to replay from
+  // storage (or /history) instead of silently missing events.
   if (state.events.length > 5000) {
+    if (!state.overflowed) {
+      state.overflowed = true;
+      const marker: BufferedReader = {
+        seq: state.nextSeq++,
+        chunk: {
+          type: "turn.error",
+          errorType: "event_overflow",
+          message: "事件缓冲溢出，早期事件已从内存移除；请从持久事件日志重放",
+          threadId: state.threadId,
+        },
+      };
+      state.events.push(marker);
+      for (const listener of state.listeners) {
+        try {
+          listener(marker);
+        } catch {
+          state.listeners.delete(listener);
+        }
+      }
+    }
     state.events.splice(0, state.events.length - 5000);
   }
   for (const listener of state.listeners) {
