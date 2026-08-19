@@ -243,7 +243,7 @@ export type StreamEventType = StreamEvent["type"];
 
 export type StreamEvent =
   // --- turn lifecycle (emitted by the chat service layer) ---
-  | { type: "turn.started"; seq: number; threadId: string; requestId: string; runStartedAt: number; userMessage?: ChatMessage }
+  | { type: "turn.started"; seq: number; threadId: string; requestId: string; runStartedAt: number; /** The user's turn text (plain string — matches the server's BoundaryEvent). */ userMessage?: string }
   | { type: "turn.finished"; seq: number; threadId: string; title?: string; durationMs: number }
   | { type: "turn.error"; seq: number; errorType: string; message: string; threadId?: string }
   | { type: "turn.interrupted"; seq: number; partialSaved: boolean; durationMs: number }

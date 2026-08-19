@@ -348,17 +348,26 @@ export function useChat({
   const replayThreadEvents = useCallback(async (tid: string, normalizedRows: Msg[]): Promise<Msg[]> => {
     let turns: Msg[] = [];
     let acc: TurnEventAccumulator | null = null;
-    /** Settle the current open turn with the given terminal fields. */
+    /** Settle the current open turn with the given terminal fields. Falls
+     *  back to wall-clock elapsed (runStartedAt → last event) so the frozen
+     *  timer still shows when the server didn't report a duration
+     *  (turn.error / stream-end / run_lost). */
     const settleTurn = (patch: Partial<Msg>, finalize: (a: TurnEventAccumulator) => void) => {
       if (!acc) return;
       finalize(acc);
       const events = acc.snapshot();
+      const cur = turns[turns.length - 1] as Msg | undefined;
+      const elapsed =
+        patch.workDurationMs === undefined && cur?.startedAtMs !== undefined
+          ? Date.now() - cur.startedAtMs
+          : undefined;
       turns[turns.length - 1] = {
-        ...(turns[turns.length - 1] as Msg),
+        ...(cur as Msg),
         events,
         content: contentFromEvents(events),
         status: "done",
         ...patch,
+        ...(elapsed !== undefined && patch.workDurationMs === undefined ? { workDurationMs: elapsed } : {}),
       };
       acc = null;
     };
@@ -369,7 +378,12 @@ export function useChat({
           // Close the previous turn (if any) and open a new one.
           settleTurn({}, (a) => a.finalizeDone());
           if (ev.userMessage) {
-            turns.push({ id: `u_r_${ev.requestId}`, role: "user", content: ev.userMessage.content, status: "done" } as Msg);
+            // Server persists userMessage as a plain string (see core's
+            // BoundaryEvent) — not a ChatMessage object.
+            const content = typeof ev.userMessage === "string"
+              ? ev.userMessage
+              : (ev.userMessage as { content?: string }).content ?? "";
+            turns.push({ id: `u_r_${ev.requestId}`, role: "user", content, status: "done" } as Msg);
           }
           acc = new TurnEventAccumulator();
           turns.push({
