@@ -241,6 +241,10 @@ export function useChat({
   // Per-turn event accumulator. A fresh one is created at the start of each
   // assistant turn and consumed across all stream chunks.
   const turnAcc = useRef<TurnEventAccumulator | null>(null);
+  /** Last wire-event seq consumed for the active thread — resume subscribes
+   *  after this (re-consuming the pre-ask timeline would duplicate blocks
+   *  and re-pop a resolved ask panel). */
+  const lastSeqRef = useRef<number>(0);
   // resolveRef always points at the latest `resolve` callback. doStream reaches
   // for resolve via this ref to avoid a circular useCallback dependency.
   const resolveRef = useRef<(body: ResumeRequestBody, meta?: { approveForSession?: boolean }) => void>(() => {});
@@ -443,6 +447,9 @@ export function useChat({
     abortRef.current?.abort();
     abortRef.current = null;
     turnAcc.current = null;
+    // Detach happens on thread switch — the next attach/replay starts from
+    // seq 0 for the (possibly different) thread.
+    lastSeqRef.current = 0;
     setBusy(false);
     setAsk(null);
   }, []);
@@ -484,6 +491,9 @@ export function useChat({
       });
     try {
       for await (const ev of stream) {
+        // Track the high-water seq so a resume can subscribe after it
+        // (instead of replaying the whole turn into the same accumulator).
+        if (ev.seq > lastSeqRef.current) lastSeqRef.current = ev.seq;
         // v2 typed protocol: discriminate on `type` (legacy `status`-based
         // chunks no longer exist — server + client switched together).
         switch (ev.type) {
@@ -700,7 +710,10 @@ export function useChat({
           agent: accessMode,
           ...(selectedModel ? { model: selectedModel } : {}),
         },
-        { signal: controller.signal }
+        // Subscribe after the events of earlier turns this client already
+        // rendered — a full replay would pour the whole thread into the new
+        // turn's bubble. (For a brand-new thread lastSeqRef is 0 anyway.)
+        { signal: controller.signal, after: lastSeqRef.current }
       );
       await doStream(stream, activeThreadId ?? "");
     } catch (err: any) {
@@ -750,7 +763,10 @@ export function useChat({
       abortRef.current = controller;
       try {
         await doStream(
-          await sdk.streamAgentResume(activeThreadId, body, { signal: controller.signal }),
+          // Subscribe AFTER the pre-ask events already rendered — re-consuming
+          // them would duplicate tool/text blocks in the same accumulator and
+          // re-pop the just-resolved ask panel.
+          await sdk.streamAgentResume(activeThreadId, body, { signal: controller.signal, after: lastSeqRef.current }),
           activeThreadId
         );
       } catch (err: any) {

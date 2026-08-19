@@ -450,16 +450,19 @@ export class OctopusClient {
   }
 
   /**
-   * Convenience composition: start a turn, then subscribe to its events from
-   * seq 0. The replay-then-tail semantics of GET /events make the
-   * POST→subscribe gap lossless.
+   * Convenience composition: start a turn, then subscribe to its events.
+   * Defaults to a full replay (after=0) for a fresh client; callers that
+   * already rendered earlier turns of the thread pass their last-seen seq so
+   * only the new turn's events stream in (otherwise the whole thread would
+   * replay into the new turn's bubble).
    */
   async streamAgentChat(
     body: ChatRequest,
-    opts: StreamCallOptions = {}
+    opts: StreamCallOptions & { after?: number } = {}
   ): Promise<AsyncGenerator<StreamEvent>> {
+    const { after = 0, ...streamOpts } = opts;
     const { threadId } = await this.startTurn(body);
-    return this.streamThreadEvents(threadId, 0, opts);
+    return this.streamThreadEvents(threadId, after, streamOpts);
   }
 
   /**
@@ -493,17 +496,20 @@ export class OctopusClient {
   }
 
   /**
-   * Convenience composition: start the resume, then subscribe from seq 0
-   * (replay includes the original turn up to the ask, so the UI restores
-   * context + ask panel before the resumed output continues).
+   * Convenience composition: start the resume, then subscribe AFTER the events
+   * the caller has already consumed (default 0 = full replay). Pass the last
+   * seen seq to continue a turn that paused at an ask without re-consuming
+   * the pre-ask timeline (which would duplicate tool/text blocks and re-pop
+   * the ask panel).
    */
   async streamAgentResume(
     threadId: string,
     body: ResumeRequestBody,
-    opts: StreamCallOptions = {}
+    opts: StreamCallOptions & { after?: number } = {}
   ): Promise<AsyncGenerator<StreamEvent>> {
+    const { after = 0, ...streamOpts } = opts;
     await this.resumeTurn(threadId, body);
-    return this.streamThreadEvents(threadId, 0, opts);
+    return this.streamThreadEvents(threadId, after, streamOpts);
   }
 
   /**
