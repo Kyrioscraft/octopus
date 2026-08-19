@@ -134,75 +134,64 @@ export function flushSubagent(callbacks: TuiAdapterCallbacks, tracker: SubagentT
   });
 }
 
-/** Handle a `subagent_started` synthetic chunk (carries the system prompt). */
+/**
+ * v2 `subagent.started` — register the subagent tracker (carries name +
+ * description; system prompt comes from the server's subagent registry).
+ */
 export function handleSubagentStarted(
   state: StreamState,
   callbacks: TuiAdapterCallbacks,
-  agentNs: string,
-  msg: Record<string, unknown>,
+  subagentName: string,
+  ev: Extract<StreamEvent, { type: "subagent.started" }>,
 ): void {
-  const tracker = ensureSubagent(state, callbacks, agentNs);
-  tracker.agentType = agentNs;
-  tracker.description = (msg.description as string) ?? "";
-  tracker.systemPrompt = (msg.system_prompt as string) ?? undefined;
+  const tracker = ensureSubagent(state, callbacks, ev.instanceKey);
+  tracker.agentType = subagentName;
+  tracker.description = ev.description ?? "";
+  tracker.systemPrompt = undefined;
   flushSubagent(callbacks, tracker);
 }
 
 /**
- * Handle a message that originated inside a subagent. Tracks the subagent's
- * tool calls (from AIMessages) and their results (from ToolMessages).
+ * v2 subagent-internal events (carry agentNs) — track the subagent's tool
+ * lifecycle and finish state.
  */
 export function handleSubagentMessage(
   state: StreamState,
   callbacks: TuiAdapterCallbacks,
   agentNs: string,
-  msg: Record<string, unknown>,
-  msgType: string,
-  event: StreamEvent,
+  ev: StreamEvent,
 ): void {
   const tracker = ensureSubagent(state, callbacks, agentNs);
 
-  // AI message carrying tool_calls → register new pending tool executions.
-  if (msgType === "ai" || msgType === "AIMessage") {
-    const toolCalls = msg.tool_calls as Array<Record<string, unknown>> | undefined;
-    if (toolCalls) {
-      for (const tc of toolCalls) {
-        tracker.tools.push({
-          toolName: (tc.name as string) ?? "unknown",
-          args: (tc.args as Record<string, unknown>) ?? {},
-          status: "running",
-          toolCallId: tc.id as string | undefined,
-        });
+  switch (ev.type) {
+    case "tool.started":
+      if (ev.name === "task") break;
+      tracker.tools.push({
+        toolName: ev.name,
+        args: {},
+        status: "running",
+        toolCallId: ev.toolCallId,
+      });
+      flushSubagent(callbacks, tracker);
+      break;
+    case "tool.result": {
+      const pending = [...tracker.tools]
+        .reverse()
+        .find((t) => t.status === "running" && t.toolCallId === ev.toolCallId);
+      if (pending) {
+        pending.status = ev.isError ? "error" : "done";
+        pending.resultSummary = summarizeToolResult(pending.toolName, ev.result);
       }
+      flushSubagent(callbacks, tracker);
+      break;
     }
-    flushSubagent(callbacks, tracker);
-    return;
+    case "subagent.finished":
+      tracker.status = "done";
+      flushSubagent(callbacks, tracker);
+      break;
+    default:
+      break;
   }
-
-  // ToolMessage — match a pending tool execution and mark it done.
-  if (msgType === "tool") {
-    const toolName = (msg.name as string) ?? "";
-    const toolCallId = msg.tool_call_id as string | undefined;
-    const content = extractToken(event.response) ?? "";
-
-    // Find the most recent pending tool that matches (by id or by name).
-    const pending = [...tracker.tools]
-      .reverse()
-      .find(
-        (t) =>
-          t.status === "running" &&
-          ((toolCallId && t.toolCallId === toolCallId) ||
-            (!toolCallId && (!t.toolName || t.toolName === toolName))),
-      );
-    if (pending) {
-      pending.status = "done";
-      pending.resultSummary = summarizeToolResult(pending.toolName, content);
-    }
-    flushSubagent(callbacks, tracker);
-    return;
-  }
-
-  // Other message types (e.g. subagent reasoning) — no tracking needed.
 }
 
 /**
@@ -267,17 +256,13 @@ export function handleMainToolCall(
 export function handleMainToolResult(
   state: StreamState,
   callbacks: TuiAdapterCallbacks,
-  toolName: string,
-  msg: Record<string, unknown>,
-  event: StreamEvent,
+  ev: Extract<StreamEvent, { type: "tool.result" }>,
 ): void {
-  const toolCallId = msg.tool_call_id as string | undefined;
   let entry: MainToolTracker | undefined;
-  if (toolCallId) entry = state.toolMessages.get(toolCallId);
-  if (!entry) { for (const e of state.toolMessages.values()) { if (e.status === "running" && e.toolName === toolName) { entry = e; break; } } }
+  if (ev.toolCallId) entry = state.toolMessages.get(ev.toolCallId);
+  if (!entry) { for (const e of state.toolMessages.values()) { if (e.status === "running") { entry = e; break; } } }
   if (!entry) return;
-  const content = extractToken(event.response) ?? "";
-  const isError = typeof event.error_message === "string" && event.error_message.length > 0;
+  const isError = ev.isError;
   entry.status = isError ? "error" : "done";
   callbacks.updateMessage(entry.messageId, {
     metadata: {
@@ -285,8 +270,8 @@ export function handleMainToolResult(
       toolStatus: entry.status === "error" ? "error" : "done",
       toolArgs: entry.args,
       ...(entry.diffStats ? { diffStats: entry.diffStats } : {}),
-      result: content.slice(0, 200),
-      resultSummary: summarizeToolResult(entry.toolName, content),
+      result: ev.result.slice(0, 200),
+      resultSummary: summarizeToolResult(entry.toolName, ev.result),
     },
   });
 }

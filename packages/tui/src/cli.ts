@@ -230,26 +230,23 @@ async function runNonInteractive(opts: CliOpts): Promise<void> {
       workspace_id: workspaceId,
     });
 
-    let buffer = "";
     for await (const event of stream) {
-      switch (event.status) {
-        case "loading":
-        case "reasoning": {
-          const token = typeof event.response === "string"
-            ? event.response
-            : (event.response as Record<string, unknown>)?.content as string ?? "";
-          process.stdout.write(token);
+      switch (event.type) {
+        case "text.delta":
+        case "reasoning.delta":
+          process.stdout.write(event.delta);
           break;
-        }
-        case "finished":
+        case "turn.finished":
           process.stdout.write("\n");
           break;
-        case "error":
-          console.error(`\nError: ${event.error_message ?? event.message ?? "Unknown error"}`);
+        case "turn.error":
+          console.error(`\nError: ${event.message ?? "Unknown error"}`);
           process.exit(1);
-        case "interrupted":
-          console.error(`\n[HITL] ${event.message ?? "Agent paused"}`);
+        case "turn.interrupted":
+          console.error(`\n[HITL] Agent paused`);
           process.exit(124);
+        default:
+          break;
       }
     }
   } catch (err) {
