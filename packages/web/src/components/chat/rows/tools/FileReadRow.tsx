@@ -8,7 +8,7 @@ import { ShimmerText } from "../../ShimmerText.js";
  * (which arrive as the tool result text, already formatted with line numbers
  * by the deepagents filesystem middleware).
  */
-export function FileReadRow({ entry }: ToolCardProps) {
+export function FileReadRow({ entry, defaultExpanded }: ToolCardProps) {
   const args = entry.args as { file_path?: string; offset?: number; limit?: number };
   const filePath = args.file_path ?? "";
   const fileName = basename(filePath);
@@ -17,6 +17,7 @@ export function FileReadRow({ entry }: ToolCardProps) {
   return (
     <ToolCallRow
       entry={entry}
+      defaultExpanded={defaultExpanded}
       header={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           {running ? <ShimmerText text="读取" /> : <span style={{ color: "var(--gray-500)" }}>读取</span>}

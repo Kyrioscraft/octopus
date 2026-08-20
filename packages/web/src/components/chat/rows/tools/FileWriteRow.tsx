@@ -8,7 +8,7 @@ import { ShimmerText } from "../../ShimmerText.js";
  * shows the full file content (which is the `content` argument — there's no
  * "before" to diff against for a fresh write).
  */
-export function FileWriteRow({ entry }: ToolCardProps) {
+export function FileWriteRow({ entry, defaultExpanded }: ToolCardProps) {
   const args = entry.args as { file_path?: string; content?: string };
   const filePath = args.file_path ?? "";
   const fileName = basename(filePath);
@@ -18,7 +18,8 @@ export function FileWriteRow({ entry }: ToolCardProps) {
 
   return (
     <ToolCallRow
-      entry={entry}
+entry={entry}
+defaultExpanded={defaultExpanded}
       header={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           {running ? <ShimmerText text="写入" /> : <span style={{ color: "var(--gray-500)" }}>写入</span>}
