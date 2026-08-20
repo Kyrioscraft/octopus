@@ -494,8 +494,17 @@ export function useChat({
     setAsk(null);
   }, []);
 
-  /** Clear messages (e.g. when starting a new chat via ?thread= cleared). */
-  const clearMsgs = useCallback(() => setMsgs([]), []);
+  /** Clear messages (e.g. when starting a new chat via ?thread= cleared).
+   *  MUST also reset the local cursor/accumulator — a new thread's seq
+   *  restarts at 1, and a leftover cursor from the previous thread (e.g.
+   *  33850) makes send() subscribe with after=<stale>, so the server-side
+   *  filter drops EVERY event of the new thread (blank live output, only
+   *  the timer running). Same reset as detachLocal. */
+  const clearMsgs = useCallback(() => {
+    setMsgs([]);
+    lastSeqRef.current = 0;
+    turnAcc.current = null;
+  }, []);
 
   // ---- Stream consumer ----
   const doStream = useCallback(async (stream: AsyncGenerator<StreamEvent>, tid: string) => {
