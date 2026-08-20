@@ -289,18 +289,23 @@ export function useChat({
     // server-side run continues in the background regardless).
     detachLocal();
     const running = useChatStore.getState().runningThreads[tid];
-    let agentFromHistory: string | undefined;
     try {
       const r = await sdk.getThreadHistory(tid);
-      // Message-level agent inheritance (phase 3): sync the input bar's
-      // agent selector with the thread's last user-message agent so a
-      // restored session continues where it left off (e.g. plan → approved
-      // → confirm carries into the next turn's default).
-      const lastUser = [...(r.history ?? [])].reverse().find((m) => m.role === "user");
-      const fromMsg = lastUser?.extraMetadata?.agent;
-      agentFromHistory = typeof fromMsg === "string" ? fromMsg : undefined;
-      if (agentFromHistory === "plan" || agentFromHistory === "auto" || agentFromHistory === "full" || agentFromHistory === "confirm") {
-        setAccessMode(agentFromHistory);
+      // Restore the input bar's agent selector. Priority: the thread-level
+      // agent (access_mode — the user's most recent explicit choice via the
+      // selector), then the last user-message agent (message-level binding).
+      // Without the thread field (older servers) or any message, keep the
+      // current value rather than resetting to the default.
+      const isAgent = (v: unknown): v is AccessMode =>
+        v === "plan" || v === "confirm" || v === "auto" || v === "full";
+      if (isAgent(r.agent)) {
+        setAccessMode(r.agent);
+      } else {
+        const lastUser = [...(r.history ?? [])].reverse().find((m) => m.role === "user");
+        const fromMsg = lastUser?.extraMetadata?.agent;
+        if (isAgent(fromMsg)) {
+          setAccessMode(fromMsg);
+        }
       }
 
       if (running) {
@@ -798,7 +803,13 @@ export function useChat({
   // ---- Resolve an ask_user_question_required interrupt ----
   const resolve = useCallback(
     async (body: ResumeRequestBody, meta?: { approveForSession?: boolean }) => {
-      if (!activeThreadId) return;
+      if (!activeThreadId) {
+        // Should not happen while the panel is visible — surface it instead
+        // of silently dropping the user's answer.
+        console.warn("[useChat] resolve called without an active thread; answer dropped", body);
+        setAsk(null);
+        return;
+      }
       if (meta?.approveForSession && body.kind === "tool_approval") {
         const sources = (ask?.questions ?? [])
           .map((q) => q.context?.source)
@@ -824,11 +835,24 @@ export function useChat({
       setMsgs((prev) => {
         const c = [...prev];
         const last = c[c.length - 1];
-        if (last?.role === "assistant" && last.status === "streaming" && resolvedEvents) {
-          c[c.length - 1] = { ...last, events: resolvedEvents, content: contentFromEvents(resolvedEvents) };
+        if (last?.role === "assistant" && resolvedEvents) {
+          // Re-open the LIVE rendering channel: the ask paused the /events
+          // stream, whose `idle` terminator settled this bubble as "done" —
+          // patchEvents() refuses to write into a non-streaming bubble, so
+          // without flipping the status back the resume's events would
+          // consume into the accumulator but never render (blank until the
+          // next full replay). Terminal status is re-settled by the resume's
+          // own turn.finished / turn.error / idle.
+          c[c.length - 1] = {
+            ...last,
+            status: "streaming",
+            events: resolvedEvents,
+            content: contentFromEvents(resolvedEvents),
+          };
         }
         return c;
       });
+      setBusy(true);
       setAsk(null);
       useChatStore.getState().setThreadRunning(activeThreadId, true);
       const controller = new AbortController();
