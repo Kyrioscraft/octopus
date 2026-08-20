@@ -88,20 +88,15 @@ export const useChatStore = create<ChatState>((set) => ({
   threads: [],
   activeThreadId: undefined,
   setThreads: (threads) =>
-    set((state) => {
-      // Merge the server's per-thread `running` flags into the running map.
-      // Threads absent from the fresh list lose their running flag only if
-      // they aren't tracked as running locally... actually the server is the
-      // source of truth for running state — a missing/false flag means the
-      // run ended. Replace the map wholesale, preserving entries for threads
-      // not in this scoped list (other workspaces) that were already running.
+    set(() => {
+      // The SERVER is the source of truth for running state (`running` on each
+      // thread row reflects the live run registry). Replace the map wholesale
+      // from the fresh list — never preserve stale local `true` flags, or a
+      // run that ended while this client was disconnected (server restart,
+      // network drop) leaves the sidebar spinner spinning forever.
       const next: Record<string, boolean> = {};
-      for (const [id, running] of Object.entries(state.runningThreads)) {
-        if (running) next[id] = running;
-      }
       for (const t of threads) {
         if (t.running) next[t.id] = true;
-        else delete next[t.id];
       }
       return { threads, runningThreads: next };
     }),

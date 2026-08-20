@@ -473,15 +473,19 @@ export function useChat({
     // the full messages-table rendering.
     const usable = merged.some((t) => t.role === "assistant" && ((t.events?.length ?? 0) > 0 || t.content));
     if (usable && trailingAsk) {
-      // Thread is paused at an unanswered ask (run registry keeps it paused).
-      // Restore the interactive state so the user can answer; the last bubble
-      // is left "streaming" and the accumulator stays live so resolve()
-      // continues from lastSeqRef without replaying the pre-ask timeline.
+      // Thread is paused at an unanswered ask. Restore the interactive state
+      // so the user can answer; the last bubble is left "streaming" and the
+      // accumulator stays live so resolve() continues from lastSeqRef without
+      // replaying the pre-ask timeline.
+      // NOTE: deliberately NOT marking the thread running — "waiting for user
+      // input" is not "executing". A genuinely paused run is reported by the
+      // server's /threads running flag anyway; marking locally here left a
+      // never-clearing sidebar spinner when the run registry was lost (server
+      // restart) while the durable log still ends at the ask.
       const acc2 = acc;
       if (acc2) turnAcc.current = acc2;
       setAsk({ ...trailingAsk, thread_id: tid });
       setBusy(true);
-      useChatStore.getState().setThreadRunning(tid, true);
     }
     return usable ? merged : [];
   }, []);
@@ -689,6 +693,11 @@ export function useChat({
       }
     } catch (err: any) {
       if (err?.name === "AbortError") return;
+      // Transport failure (server restart / network drop mid-stream). The
+      // run's fate is unknown — clear the local running flag so the sidebar
+      // spinner doesn't spin forever (the next /threads poll or re-entry
+      // re-marks it if the run is genuinely still alive server-side).
+      useChatStore.getState().setThreadRunning(tid, false);
       turnAcc.current?.finalizeError();
       patchEvents();
       setMsgs((prev) => {
