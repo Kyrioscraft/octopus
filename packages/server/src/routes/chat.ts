@@ -42,9 +42,10 @@ import {
   hasActiveRun,
   attachListener,
   isRunning,
+  getSeqHighWater,
   type RunState,
 } from "../services/run-registry.js";
-import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules, insertThreadEvent, listThreadEvents } from "../db/index.js";
+import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules, insertThreadEvent, listThreadEvents, getMaxThreadEventSeq } from "../db/index.js";
 import {
   ensureThreadOutputs,
   resolveAgentCwd,
@@ -211,6 +212,60 @@ chatRouter.get("/thread/:id/history", getOptionalUser, (c) => {
   // the input-bar selector from it, falling back to message-level metadata.
   const thread = getThread(id);
   return c.json({ history, agent: thread?.accessMode });
+});
+
+// =========================================================================
+// GET /api/chat/thread/{id}/messages  (P1 snapshot hydration)
+// =========================================================================
+//
+// One atomic response replacing the replay-from-0 history path: durable
+// events (deltas excluded by construction since P0), the authoritative
+// subscribe-after cursor (maxSeq — covers live volatile seqs too), and the
+// trailing pending-ask (ask in the log with no answer after it = paused
+// thread, including the restart case where the run registry was lost but the
+// interrupt is still answerable via /resume).
+//
+// Interrupt-recovery truth here is the DURABLE LOG (not the run registry):
+// a trailing ask with nothing after it is pending regardless of whether the
+// in-memory registry survived.
+
+chatRouter.get("/thread/:id/messages", getOptionalUser, (c) => {
+  const threadId = c.req.param("id");
+  const thread = getThread(threadId);
+  if (!thread) return c.json({ detail: "会话不存在" }, 404);
+
+  const events = listThreadEvents(threadId, 0).map((e) => e.event);
+  // Stateless cursor: the run registry's assigned-seq high-water covers
+  // volatile seqs (deltas) the durable max knows nothing about.
+  const maxSeq = Math.max(getMaxThreadEventSeq(threadId), getSeqHighWater(threadId));
+
+  // Trailing pending-ask: scan the durable log from the end — the newest ask
+  // with no DURABLE event after it is unanswered. (Volatile seqs can inter-
+  // leave in live space, but an unanswered ask means the run is paused, so no
+  // volatile tail exists; the durable scan is sound.)
+  let pendingAsk: Record<string, unknown> | null = null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const t = events[i]["type"];
+    if (t === "ask.resolved") break; // newest ask was answered
+    if (t === "ask") {
+      pendingAsk = {
+        kind: events[i]["kind"],
+        questions: events[i]["questions"],
+        thread_id: threadId,
+      };
+      break;
+    }
+  }
+
+  return c.json({
+    threadId,
+    events,
+    maxSeq,
+    pendingAsk,
+    running: isRunning(threadId),
+    // Thread-level agent (access_mode) — restored into the input-bar selector.
+    agent: thread.accessMode,
+  });
 });
 
 // =========================================================================

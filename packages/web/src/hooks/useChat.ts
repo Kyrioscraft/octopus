@@ -245,6 +245,10 @@ export function useChat({
    *  after this (re-consuming the pre-ask timeline would duplicate blocks
    *  and re-pop a resolved ask panel). */
   const lastSeqRef = useRef<number>(0);
+  /** Threads mid-hydration (snapshot fetch in flight) — opencode's
+   *  hydratingSessions pattern: guards against stampeding loads on the same
+   *  thread and lets other paths know a snapshot may land late. */
+  const hydratingRef = useRef<Set<string>>(new Set());
   // resolveRef always points at the latest `resolve` callback. doStream reaches
   // for resolve via this ref to avoid a circular useCallback dependency.
   const resolveRef = useRef<(body: ResumeRequestBody, meta?: { approveForSession?: boolean }) => void>(() => {});
@@ -288,79 +292,93 @@ export function useChat({
     // the old thread's events patch the new thread's message array (the
     // server-side run continues in the background regardless).
     detachLocal();
-    const running = useChatStore.getState().runningThreads[tid];
+    hydratingRef.current.add(tid);
     try {
-      const r = await sdk.getThreadHistory(tid);
-      // Restore the input bar's agent selector. Priority: the history
-      // response's thread-level agent (most authoritative), the thread list's
-      // accessMode (from GET /threads — covers empty-history threads), then
-      // the last user-message agent (message-level binding). Without any of
-      // these, keep the current value rather than resetting to the default.
+      // P1 snapshot hydration: ONE atomic response with the durable events,
+      // the server-authoritative cursor (maxSeq — covers live volatile seqs
+      // too, so the client never tracks its own), and the trailing pending
+      // ask. This replaces both the /history + /events?after=0 replay path.
+      const snap = await sdk.getThreadSnapshot(tid);
+      // Restore the input bar's agent selector (snapshot agent is the
+      // thread-level access_mode — most authoritative after an explicit
+      // switch; falls back through thread list → last user-message metadata).
       const isAgent = (v: unknown): v is AccessMode =>
         v === "plan" || v === "confirm" || v === "auto" || v === "full";
       const fromThreadList =
         useChatStore.getState().threads.find((t) => t.id === tid)?.accessMode;
-      const lastUser = [...(r.history ?? [])].reverse().find((m) => m.role === "user");
-      const fromMsg = lastUser?.extraMetadata?.agent;
-      const restored = isAgent(r.agent) ? r.agent
+      const restored = isAgent(snap.agent) ? snap.agent
         : isAgent(fromThreadList) ? fromThreadList
-        : isAgent(fromMsg) ? fromMsg
         : undefined;
       if (restored) setAccessMode(restored);
 
-      if (running) {
-        // The run is still executing: render messages UP TO the current turn
-        // (drop the trailing in-flight turn — the /events replay rebuilds it
-        // below through the same accumulator as a live turn).
-        let rows = r.history ?? [];
-        if (rows.length > 0) {
-          const lastUserIdx = rows.map((x: any) => x.role).lastIndexOf("user");
-          rows = lastUserIdx >= 0 ? rows.slice(0, lastUserIdx + 1) : [];
+      // Messages-table fallback (pre-upgrade turns whose deltas were
+      // compacted with no terminal events to replace them): kept for the
+      // per-turn hybrid merge inside projectSnapshot.
+      let normalized: Msg[] = [];
+      try {
+        const r = await sdk.getThreadHistory(tid);
+        normalized = normalizeHistory(r.history ?? []);
+        if (!restored) {
+          const lastUser = [...(r.history ?? [])].reverse().find((m) => m.role === "user");
+          const fromMsg = lastUser?.extraMetadata?.agent;
+          if (isAgent(fromMsg)) setAccessMode(fromMsg);
         }
-        setMsgs(normalizeHistory(rows));
-        reattachRef.current(tid);
-        return;
+      } catch { /* snapshot alone is enough for the main path */ }
+
+      const { msgs, openAcc } = projectSnapshot(tid, snap.events, normalized);
+      setMsgs(msgs.length > 0 ? msgs : normalized);
+      // Stateless cursor: the SERVER's maxSeq is authoritative (covers
+      // volatile seqs already assigned to the live run). Never trust a
+      // locally accumulated cursor here.
+      lastSeqRef.current = snap.maxSeq;
+
+      if (snap.pendingAsk) {
+        // Paused at an unanswered ask (live OR after a server restart —
+        // recovery truth is the durable log, not the run registry). Restore
+        // the interactive state; resolving continues from maxSeq.
+        if (openAcc) turnAcc.current = openAcc;
+        setAsk({ ...snap.pendingAsk, thread_id: tid });
+        setBusy(true);
       }
 
-      // Finished thread — PRIMARY path is durable event replay (opencode
-      // semantics: live and history run through the same reducer, so a
-      // replayed thread renders identically to how it streamed, including
-      // precise interleaving and subagent timelines that the messages-table
-      // approximation cannot reconstruct). Per-turn hybrid: pre-upgrade turns
-      // (compacted deltas, no terminal events) fall back to the messages-table
-      // rendering inside the same list.
-      const normalized = normalizeHistory(r.history ?? []);
-      const replayed = await replayThreadEvents(tid, normalized);
-      setMsgs(replayed.length > 0 ? replayed : normalized);
+      if (snap.running) {
+        // Live run executing: keep the running flag and tail live events
+        // from the snapshot cursor. The trailing in-flight turn (if any) is
+        // already part of the projected bubbles (openAcc holds it).
+        useChatStore.getState().setThreadRunning(tid, true);
+        setBusy(true);
+        if (openAcc) turnAcc.current = openAcc;
+        reattachRef.current(tid);
+      }
     } catch {
       setMsgs([]);
+    } finally {
+      hydratingRef.current.delete(tid);
     }
   }, []);
 
   /**
-   * Rebuild a finished thread's full message list by replaying its durable
-   * event log (GET /thread/:id/events?after=0) through TurnEventAccumulator —
-   * the exact same reducer as live streaming. turn.started carries the
-   * persisted userMessage, so user bubbles are reconstructed too; each
-   * turn.started opens a fresh accumulator + assistant bubble.
+   * Project a snapshot's durable events into message bubbles — the SAME
+   * per-turn reducer logic live streaming uses (TurnEventAccumulator), so
+   * history renders identically to how the turn streamed. Pure-ish: builds a
+   * fresh turns array; returns the still-open accumulator when the snapshot
+   * ends mid-turn (running or paused-at-ask) so live tailing continues the
+   * same turn instead of opening a duplicate bubble.
    *
-   * Per-turn hybrid fallback: turns that finished BEFORE the terminal-event
-   * protocol upgrade replay text-less (their text.delta rows were compacted
-   * with no text.ended to replace them) — those turns fall back to the
-   * messages-table rendering (normalizedRows). Only a turn with real replayed
-   * content uses the event-log timeline.
+   * Per-turn hybrid fallback: turns with no replayable content (pre-upgrade
+   * compaction) fall back to the messages-table rendering.
    */
-  const replayThreadEvents = useCallback(async (tid: string, normalizedRows: Msg[]): Promise<Msg[]> => {
+  const projectSnapshot = (
+    tid: string,
+    events: StreamEvent[],
+    normalizedRows: Msg[],
+  ): { msgs: Msg[]; openAcc: TurnEventAccumulator | null } => {
     let turns: Msg[] = [];
     let acc: TurnEventAccumulator | null = null;
-    /** Settle the current open turn with the given terminal fields. Falls
-     *  back to wall-clock elapsed (runStartedAt → last event) so the frozen
-     *  timer still shows when the server didn't report a duration
-     *  (turn.error / stream-end / run_lost). */
     const settleTurn = (patch: Partial<Msg>, finalize: (a: TurnEventAccumulator) => void) => {
       if (!acc) return;
       finalize(acc);
-      const events = acc.snapshot();
+      const evs = acc.snapshot();
       const cur = turns[turns.length - 1] as Msg | undefined;
       const elapsed =
         patch.workDurationMs === undefined && cur?.startedAtMs !== undefined
@@ -368,126 +386,87 @@ export function useChat({
           : undefined;
       turns[turns.length - 1] = {
         ...(cur as Msg),
-        events,
-        content: contentFromEvents(events),
+        events: evs,
+        content: contentFromEvents(evs),
         status: "done",
         ...patch,
         ...(elapsed !== undefined && patch.workDurationMs === undefined ? { workDurationMs: elapsed } : {}),
       };
       acc = null;
     };
-    let trailingAsk: { kind: AskUserQuestionPayload["kind"]; questions: AskUserQuestionPayload["questions"] } | null = null;
-    try {
-      const stream = await sdk.streamThreadEvents(tid, 0);
-      for await (const ev of stream) {
-        // Keep the high-water seq in sync — a later resolve()/send() on this
-        // thread subscribes after it (0 here would replay the whole thread
-        // into the live accumulator: duplicated blocks + re-popped ask).
-        // idle/heartbeat are control frames without a persisted seq.
-        if (ev.type !== "idle" && ev.type !== "heartbeat" && ev.seq > lastSeqRef.current) {
-          lastSeqRef.current = ev.seq;
-        }
-        // Any real event past an ask means it was answered (the resume emits
-        // text/tool/turn events after it). Must run BEFORE the switch below —
-        // those are explicit cases that would otherwise leave a stale
-        // trailingAsk, re-popping the ask panel on every thread re-entry.
-        if (ev.type !== "idle" && ev.type !== "heartbeat" && ev.type !== "ask") {
-          trailingAsk = null;
-        }
-        if (ev.type === "turn.started") {
-          // Resume turns carry no userMessage — they CONTINUE the same turn
-          // (server emits turn.started on every resume stream). Only a fresh
-          // turn (or a resume with no open accumulator — replay starting
-          // mid-run) closes the previous turn and opens a new bubble;
-          // otherwise each HITL approval would fragment one turn into N
-          // bubbles = N timers / N first-reasoning blocks.
-          if (ev.userMessage || !acc) {
-            // Close the previous turn (if any) and open a new one.
-            settleTurn({}, (a) => a.finalizeDone());
-            if (ev.userMessage) {
-              // Server persists userMessage as a plain string (see core's
-              // BoundaryEvent) — not a ChatMessage object. Resume turns carry
-              // no userMessage (they continue the same turn), so only fresh
-              // turns produce user bubbles here.
-              const content = typeof ev.userMessage === "string"
-                ? ev.userMessage
-                : (ev.userMessage as { content?: string }).content ?? "";
-              turns.push({ id: `u_r_${ev.requestId}`, role: "user", content, status: "done" } as Msg);
-            }
-            acc = new TurnEventAccumulator();
-            turns.push({
-              id: `a_r_${ev.requestId}`,
-              role: "assistant",
-              content: "",
-              status: "streaming",
-              events: [],
-              // runStartedAt drives an accurate frozen timer if the turn ends
-              // without a server-reported duration.
-              startedAtMs: ev.runStartedAt,
-            } as Msg);
-          } else if (ev.runStartedAt !== undefined) {
-            // Same-turn resume: keep consuming into the open accumulator; just
-            // calibrate the timer with the run's true start time.
-            const cur = turns[turns.length - 1] as Msg | undefined;
-            if (cur?.role === "assistant") turns[turns.length - 1] = { ...cur, startedAtMs: ev.runStartedAt };
+    for (const ev of events) {
+      if (ev.type === "turn.started") {
+        // Resume turns carry no userMessage — they CONTINUE the same turn.
+        // Only a fresh turn (or a snapshot starting mid-run) opens a bubble.
+        if (ev.userMessage || !acc) {
+          settleTurn({}, (a) => a.finalizeDone());
+          if (ev.userMessage) {
+            const content = typeof ev.userMessage === "string"
+              ? ev.userMessage
+              : (ev.userMessage as { content?: string }).content ?? "";
+            turns.push({ id: `u_r_${ev.requestId}`, role: "user", content, status: "done" } as Msg);
           }
-        } else if (acc) {
-          switch (ev.type) {
-            case "text.delta":
-            case "reasoning.delta":
-            case "text.ended":
-            case "reasoning.ended":
-            case "tool.started":
-            case "tool.args.delta":
-            case "tool.result":
-            case "subagent.started":
-            case "subagent.finished":
-              acc.consume(ev);
-              break;
-            case "turn.finished":
-              settleTurn({ workDurationMs: ev.durationMs }, (a) => a.finalizeDone());
-              break;
-            case "turn.interrupted":
-              settleTurn({ workDurationMs: ev.durationMs }, (a) => a.finalizeDone());
-              break;
-            case "turn.error":
-              settleTurn({}, (a) => a.finalizeError());
-              break;
-            case "thread.title.updated":
-              // Metadata event — sidebar refresh handled by the live path /
-              // listThreads; the replay accumulator ignores it.
-              break;
-            case "ask":
-              trailingAsk = { kind: ev.kind, questions: ev.questions };
-              acc.consumeAskReadOnly({ kind: ev.kind, questions: ev.questions, thread_id: tid });
-              break;
-            default:
-              // trailingAsk already cleared above for any non-ask event.
-              break; // heartbeat / idle / turn.started handled above
-          }
+          acc = new TurnEventAccumulator();
+          turns.push({
+            id: `a_r_${ev.requestId}`,
+            role: "assistant",
+            content: "",
+            status: "streaming",
+            events: [],
+            startedAtMs: ev.runStartedAt,
+          } as Msg);
+        } else if (ev.runStartedAt !== undefined) {
+          const cur = turns[turns.length - 1] as Msg | undefined;
+          if (cur?.role === "assistant") turns[turns.length - 1] = { ...cur, startedAtMs: ev.runStartedAt };
+        }
+      } else if (acc) {
+        switch (ev.type) {
+          case "text.delta":
+          case "reasoning.delta":
+          case "text.ended":
+          case "reasoning.ended":
+          case "tool.started":
+          case "tool.args.delta":
+          case "tool.result":
+          case "subagent.started":
+          case "subagent.finished":
+            acc.consume(ev);
+            break;
+          case "turn.finished":
+            settleTurn({ workDurationMs: ev.durationMs }, (a) => a.finalizeDone());
+            break;
+          case "turn.interrupted":
+            settleTurn({ workDurationMs: ev.durationMs }, (a) => a.finalizeDone());
+            break;
+          case "turn.error":
+            settleTurn({}, (a) => a.finalizeError());
+            break;
+          case "thread.title.updated":
+            break; // sidebar metadata — listThreads covers it
+          case "ask":
+            acc.consumeAskReadOnly({ kind: ev.kind, questions: ev.questions, thread_id: tid });
+            break;
+          case "ask.resolved":
+            acc.resolveAsk(ev.resolution);
+            break;
+          default:
+            break;
         }
       }
-      // Stream ended mid-turn (no terminal event — e.g. run_lost): settle it.
-      // A trailing un-answered ask means the thread is PAUSED server-side
-      // (run registry keeps it): restore the interactive state so the user
-      // can answer — do NOT settle as done (the ask is the live frontier).
-      if (trailingAsk) {
-        // The open turn stays "streaming" — the ask panel + accumulator are
-        // restored by the caller; resolving continues the turn from
-        // lastSeqRef (recorded above), never replaying the pre-ask timeline.
-        turns[turns.length - 1] = { ...((turns[turns.length - 1] as Msg)), events: acc!.snapshot(), content: contentFromEvents(acc!.snapshot()) };
-      } else {
-        settleTurn({}, (a) => a.finalizeDone());
-      }
-    } catch {
-      // Replay transport failure — signal "no replay" so caller falls back.
-      return [];
     }
+    // Snapshot ends mid-turn (running / paused-at-ask): keep the turn open —
+    // the caller hands the accumulator to the live tail.
+    if (acc) {
+      const evs = acc.snapshot();
+      const cur = turns[turns.length - 1] as Msg | undefined;
+      if (cur?.role === "assistant") {
+        turns[turns.length - 1] = { ...cur, events: evs, content: contentFromEvents(evs) };
+      }
+      return { msgs: turns, openAcc: acc };
+    }
+    settleTurn({}, (a) => a.finalizeDone());
 
-    // ---- Per-turn hybrid merge with the messages-table rendering ----
-    // A replayed assistant turn with no text AND no timeline events came from
-    // a pre-upgrade turn whose deltas were compacted away — restore the
-    // messages-table version (it has the persisted text + tool_calls).
+    // ---- Per-turn hybrid merge (pre-upgrade turns without terminal events) ----
     const fallbackAssistantTurns = normalizedRows.filter((m) => m.role === "assistant");
     let fbIdx = 0;
     const merged = turns.map((t) => {
@@ -496,29 +475,17 @@ export function useChat({
       const fb = fallbackAssistantTurns[fbIdx];
       fbIdx++;
       if (hasReplay || !fb) return t;
-      // Keep replay's timing if the fallback lacks it.
       return { ...fb, startedAtMs: fb.startedAtMs ?? t.startedAtMs, workDurationMs: fb.workDurationMs ?? t.workDurationMs };
     });
-    // If the event log produced no usable assistant turns at all, defer to
-    // the full messages-table rendering.
     const usable = merged.some((t) => t.role === "assistant" && ((t.events?.length ?? 0) > 0 || t.content));
-    if (usable && trailingAsk) {
-      // Thread is paused at an unanswered ask. Restore the interactive state
-      // so the user can answer; the last bubble is left "streaming" and the
-      // accumulator stays live so resolve() continues from lastSeqRef without
-      // replaying the pre-ask timeline.
-      // NOTE: deliberately NOT marking the thread running — "waiting for user
-      // input" is not "executing". A genuinely paused run is reported by the
-      // server's /threads running flag anyway; marking locally here left a
-      // never-clearing sidebar spinner when the run registry was lost (server
-      // restart) while the durable log still ends at the ask.
-      const acc2 = acc;
-      if (acc2) turnAcc.current = acc2;
-      setAsk({ ...trailingAsk, thread_id: tid });
-      setBusy(true);
-    }
-    return usable ? merged : [];
-  }, []);
+    return { msgs: usable ? merged : [], openAcc: null };
+  };
+
+  /**
+   * @deprecated Removed in P1 — replaced by the snapshot path (load →
+   * projectSnapshot). The durable replay endpoint (/events?after=0) remains
+   * on the server for debugging/audit but is no longer the UI history source.
+   */
 
   /** Abort the local fetch + reset local stream state. The server-side run
    *  keeps executing (runs are decoupled from connections server-side). */
@@ -766,26 +733,27 @@ export function useChat({
     } finally { setBusy(false); }
   }, [activeThreadId, listThreads, setActiveThreadId, scroll]);
 
-  // Re-attach to a running thread: append a streaming assistant bubble and
-  // consume the /events replay stream through the shared doStream pipeline.
-  // Reached via ref (load is defined above doStream; same pattern as resolveRef).
+  // Re-attach to a running thread: P1 — the snapshot (load) already hydrated
+  // everything durable INCLUDING the in-flight turn (openAcc), so this is now
+  // a pure LIVE TAIL from the server cursor. No from-0 replay, no duplicate
+  // bubble (only appended when no streaming bubble exists — e.g. a run whose
+  // turn.started hasn't been observed yet).
   const reattachRef = useRef<(tid: string) => void>(() => {});
   const reattach = useCallback(async (tid: string) => {
     setMsgs((prev) => {
       // Don't double-append if the last bubble is already a streaming turn.
       const last = prev[prev.length - 1];
       if (last?.role === "assistant" && last.status === "streaming") return prev;
-      // startedAtMs intentionally omitted — calibrated from the replay
-      // turn.started event (runStartedAt) so the timer shows the
-      // run's TRUE elapsed time, not time-since-reattach.
       return [...prev, { id: `a_reattach_${Date.now()}`, role: "assistant", content: "", status: "streaming", events: [] } as Msg];
     });
     setBusy(true);
-    turnAcc.current = new TurnEventAccumulator();
+    if (!turnAcc.current) turnAcc.current = new TurnEventAccumulator();
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const stream = await sdk.streamThreadEvents(tid, 0, { signal: controller.signal });
+      // after = lastSeqRef (set to the snapshot's server-authoritative maxSeq
+      // by load) — live events only, never a replay into the hydrated state.
+      const stream = await sdk.streamThreadEvents(tid, lastSeqRef.current, { signal: controller.signal });
       await doStream(stream, tid);
     } catch (err: any) {
       if (err?.name !== "AbortError") setBusy(false);

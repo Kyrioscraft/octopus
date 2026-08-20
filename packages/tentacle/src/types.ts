@@ -122,7 +122,48 @@ export interface MessageRow {
 export interface ThreadHistoryResponse {
   history: MessageRow[];
   /** Thread-level agent (access_mode) — the user's most recent explicit
-   * choice. Absent on older servers; clients fall back to message metadata. */
+   *  choice. Absent on older servers; clients fall back to message metadata. */
+  agent?: "plan" | "confirm" | "auto" | "full";
+}
+
+// =============================================================================
+// Thread snapshot (P1) — GET /thread/:id/messages
+//
+// One atomic hydration response replacing the replay-from-0 history path: the
+// raw durable events (verbatim wire shape, minus volatile deltas — those
+// never persist), plus the server-authoritative resume cursor (`maxSeq`,
+// covering BOTH persisted events and any live volatile seqs already assigned
+// — a stateless cursor: the client doesn't track or trust its own), plus the
+// trailing pending-ask when the thread is paused at an unanswered interrupt.
+// Clients render history by feeding `events` through the same
+// TurnEventAccumulator + projectTurnParts as live streaming, then subscribe
+// to /events?after=maxSeq.
+// =============================================================================
+
+export interface ThreadSnapshotResponse {
+  /** Thread id. */
+  threadId: string;
+  /** All durable events (ascending seq). Deltas excluded by construction. */
+  events: DurableStreamEvent[];
+  /**
+   * Subscribe-after cursor: the highest seq the server has ASSIGNED on this
+   * thread (durable or volatile) at snapshot time. Authoritative — clients
+   * must not advance past it with local state.
+   */
+  maxSeq: number;
+  /** Trailing unanswered ask — restore the ask panel when present. The
+   *  thread is paused server-side (or the run registry was lost to a restart;
+   *  the pending ask in the log is still answerable via /resume). */
+  pendingAsk: {
+    kind: AskKind;
+    questions: AskQuestion[];
+    thread_id: string;
+  } | null;
+  /** Whether the thread has a live run executing right now (true → the
+   *  client should attach a live tail right after hydrating). */
+  running: boolean;
+  /** Thread-level agent (access_mode) — restored into the input-bar
+   *  selector; mirrors GET /history's `agent`. */
   agent?: "plan" | "confirm" | "auto" | "full";
 }
 

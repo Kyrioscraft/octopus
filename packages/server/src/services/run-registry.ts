@@ -114,6 +114,16 @@ export function assignSeq(state: RunState): number {
 }
 
 /**
+ * Highest seq ever assigned on a thread (durable or volatile). This is the
+ * authoritative subscribe-after cursor for snapshot consumers (GET
+ * /thread/:id/messages): volatile seqs never persist, so the durable max
+ * alone could hand out a cursor a live client already consumed past.
+ */
+export function getSeqHighWater(threadId: string): number {
+  return seqHighWater.get(threadId) ?? 0;
+}
+
+/**
  * Fan one persisted event out to the run's live listeners. Listener errors
  * (e.g. a listener's response stream just closed) are caught per-listener and
  * the listener is dropped — a dead listener must never kill the run or the

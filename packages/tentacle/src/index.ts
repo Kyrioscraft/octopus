@@ -20,6 +20,7 @@ export {
   type ControlStreamEvent,
   type Thread,
   type ThreadHistoryResponse,
+  type ThreadSnapshotResponse,
   type ThreadListResponse,
   type User,
   type SkillOrigin,

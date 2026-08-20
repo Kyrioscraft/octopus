@@ -28,6 +28,7 @@ import {
   type Thread,
   type ThreadListResponse,
   type ThreadHistoryResponse,
+  type ThreadSnapshotResponse,
   type User,
   type Workspace,
   type WorkspaceEntry,
@@ -113,6 +114,16 @@ export class OctopusClient {
   /** Get message history for a thread. */
   async getThreadHistory(threadId: string): Promise<ThreadHistoryResponse> {
     return this.#get<ThreadHistoryResponse>(`/api/chat/thread/${threadId}/history`);
+  }
+
+  /**
+   * P1 snapshot hydration: the thread's durable events + authoritative
+   * subscribe-after cursor (`maxSeq`) + trailing pending-ask, in one atomic
+   * response. Render by feeding `events` through the same accumulator +
+   * projection as live streaming, then subscribe to /events?after=maxSeq.
+   */
+  async getThreadSnapshot(threadId: string): Promise<ThreadSnapshotResponse> {
+    return this.#get<ThreadSnapshotResponse>(`/api/chat/thread/${threadId}/messages`);
   }
 
   /** Delete a thread. */
