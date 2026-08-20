@@ -425,6 +425,10 @@ export function useChat({
             case "turn.error":
               settleTurn({}, (a) => a.finalizeError());
               break;
+            case "thread.title.updated":
+              // Metadata event — sidebar refresh handled by the live path /
+              // listThreads; the replay accumulator ignores it.
+              break;
             case "ask":
               trailingAsk = { kind: ev.kind, questions: ev.questions };
               acc.consumeAskReadOnly({ kind: ev.kind, questions: ev.questions, thread_id: tid });
@@ -585,6 +589,13 @@ export function useChat({
               setThreadRunning(ev.threadId, true);
               listThreads();
             }
+            break;
+          }
+          case "thread.title.updated": {
+            // New-thread auto-title landed (background task from the server,
+            // usually seconds into the first turn) — refresh the sidebar list.
+            // The server DB is already updated; listThreads() picks it up.
+            listThreads();
             break;
           }
           case "text.delta":

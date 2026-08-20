@@ -261,16 +261,33 @@ export async function buildChatModel(
 export const TITLE_MAX_LENGTH = 30;
 
 /**
+ * Resolve the model spec for title generation.
+ * Priority: env `OCTOPUS_TITLE_MODEL` > config.json `models.title_model` > null
+ * (caller falls back to the main model spec).
+ * Mirrors opencode's `provider.getSmallModel` semantics.
+ */
+export function getTitleModelSpec(): string | null {
+  const env = process.env["OCTOPUS_TITLE_MODEL"] ?? process.env["DEEPAGENTS_CODE_TITLE_MODEL"];
+  if (env) return env;
+  try {
+    return ModelConfig.load().title_model ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Generate a short conversation title from the user's first message.
  *
  * @param userMessage  The user's first turn text (truncated to 2000 chars internally).
  * @param modelSpec    A `provider:model` spec; resolved via the same config.toml
- *                     rules as the main agent model.
+ *                     rules as the main agent model. Used as fallback when no
+ *                     dedicated title model is configured.
  * @returns The generated title (≤30 chars), or `null` if generation failed.
  */
 export async function generateTitle(
   userMessage: string,
-  modelSpec: string,
+  modelSpec?: string,
 ): Promise<string | null> {
   const titleLogger = getLogger("agent.title");
   // Match the reference: cap the prompt input at 2000 chars.
@@ -280,8 +297,14 @@ export async function generateTitle(
     `根据以下对话内容生成一个简短的标题（最多30个字符，中英文均可），` +
     `不要包含 markdown 标记：\n\n${snippet}`;
 
+  const spec = getTitleModelSpec() ?? modelSpec;
+  if (!spec) {
+    titleLogger.debug("No model spec available for title generation");
+    return null;
+  }
+
   try {
-    const model = await buildChatModel(modelSpec);
+    const model = await buildChatModel(spec);
     const { HumanMessage } = await import("@langchain/core/messages");
     const res = await model.invoke([new HumanMessage(prompt)]);
     const raw: string =

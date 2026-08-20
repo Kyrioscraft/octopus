@@ -43,6 +43,8 @@ export interface ProviderConfig {
 export interface ModelConfigData {
   default_model?: string;
   recent_model?: string;
+  /** Optional small-model spec ("provider:model") for auxiliary tasks (title generation). */
+  title_model?: string;
   providers: Record<string, ProviderConfig>;
 }
 
@@ -110,6 +112,7 @@ export const ModelConfig = {
     const config: ModelConfigData = {
       default_model: models["default"] as string | undefined,
       recent_model: models["recent"] as string | undefined,
+      title_model: models["title_model"] as string | undefined,
       providers: (models["providers"] ?? {}) as Record<string, ProviderConfig>,
     };
 

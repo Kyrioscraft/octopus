@@ -245,6 +245,7 @@ export type StreamEvent =
   // --- turn lifecycle (emitted by the chat service layer) ---
   | { type: "turn.started"; seq: number; threadId: string; requestId: string; runStartedAt: number; /** The user's turn text — present ONLY on fresh turns (POST /agent); resume turns omit it, continuing the same turn without a new user bubble. Plain string — matches the server's BoundaryEvent. */ userMessage?: string }
   | { type: "turn.finished"; seq: number; threadId: string; title?: string; durationMs: number }
+  | { type: "thread.title.updated"; seq: number; threadId: string; title: string }
   | { type: "turn.error"; seq: number; errorType: string; message: string; threadId?: string }
   | { type: "turn.interrupted"; seq: number; partialSaved: boolean; durationMs: number }
   // --- content deltas (live-only; terminal *.ended events are the replayable boundary) ---

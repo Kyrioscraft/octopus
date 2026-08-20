@@ -32,7 +32,7 @@ export type { Logger, LogContext } from "./logging.js";
 // =============================================================================
 export { makeGraph, createAgent } from "./agent/index.js";
 export { getCheckpointer, setCheckpointer, clearGraphCache } from "./agent/index.js";
-export { buildChatModel, generateTitle, TITLE_MAX_LENGTH } from "./agent/index.js";
+export { buildChatModel, generateTitle, getTitleModelSpec, TITLE_MAX_LENGTH } from "./agent/index.js";
 export type { AgentGraph, CompiledAgent, SubagentRegistryEntry, ExternalSubagentSpec } from "./agent/index.js";
 
 // Agent presets (plan/confirm/auto/full) + legacy access-mode aliases
