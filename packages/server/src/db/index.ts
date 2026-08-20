@@ -1306,16 +1306,11 @@ export function getMaxThreadEventSeq(threadId: string): number {
 }
 
 /**
- * Compact a finished turn's delta events: keep lifecycle events
- * (turn.started/finished/error/interrupted, ask, subagent lifecycle) AND the
- * terminal full-value events (text.ended / reasoning.ended / tool.result) —
- * which the client needs to replay the timeline from storage — and drop the
- * high-frequency live-only deltas (text.delta / reasoning.delta /
- * tool.args.delta) whose full values are carried by the terminal events.
- * Prevents unbounded table growth.
- *
- * (Bug fix: the original implementation only matched `text.delta`, so
- * reasoning.delta and tool.args.delta rows accumulated forever.)
+ * Legacy compaction pass — DEPRECATED and no longer called (P0 event
+ * layering): volatile deltas (text.delta / reasoning.delta / tool.args.delta)
+ * are never persisted in the first place, so there is nothing to compact and
+ * no compact/replay race. Kept only for potential one-off cleanup of rows
+ * written by older builds.
  */
 export function compactThreadEvents(threadId: string): void {
   const deltaTypes = ['%"type":"text.delta"%', '%"type":"reasoning.delta"%', '%"type":"tool.args.delta"%'];

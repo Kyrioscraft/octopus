@@ -3,6 +3,7 @@ export { parseNDJSONStream, type ParseOptions } from "./stream.js";
 export {
   StreamHttpError,
   StreamServerError,
+  isDurableEvent,
   type ChatContentPart,
   type ChatMessage,
   type ChatRequest,
@@ -14,6 +15,9 @@ export {
   type StreamCallOptions,
   type StreamEvent,
   type StreamEventType,
+  type DurableStreamEvent,
+  type VolatileStreamEvent,
+  type ControlStreamEvent,
   type Thread,
   type ThreadHistoryResponse,
   type ThreadListResponse,

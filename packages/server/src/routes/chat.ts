@@ -44,7 +44,7 @@ import {
   isRunning,
   type RunState,
 } from "../services/run-registry.js";
-import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules, insertThreadEvent, listThreadEvents, compactThreadEvents } from "../db/index.js";
+import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules, insertThreadEvent, listThreadEvents } from "../db/index.js";
 import {
   ensureThreadOutputs,
   resolveAgentCwd,
@@ -88,6 +88,25 @@ const makeChunk = (payload: Record<string, unknown>): Uint8Array =>
   encoder.encode(JSON.stringify(payload) + "\n");
 
 /**
+ * P0 event layering, server-side predicate (kept local — the server does not
+ * depend on @octopus/tentacle; see chat.service.ts's boundary note): true for
+ * Durable events, false for Volatile deltas (never persisted) and Control
+ * frames (never reach the emit path).
+ */
+function isDurableEvent(chunk: { type?: string }): boolean {
+  switch (chunk.type) {
+    case "text.delta":
+    case "reasoning.delta":
+    case "tool.args.delta":
+    case "idle":
+    case "heartbeat":
+      return false;
+    default:
+      return true;
+  }
+}
+
+/**
  * Persist an event to the durable thread_events log (opencode durable-event
  * pattern). Persistence failures degrade to memory-only — they must never
  * block or kill the live stream.
@@ -121,12 +140,17 @@ function persistThreadEvent(threadId: string, seq: number, chunk: Record<string,
  */
 function makeRunEmit(run: RunState, controller?: ReadableStreamDefaultController): Emit {
   return (chunk) => {
-    // Single write path: assign → PERSIST → broadcast. Persisting before the
-    // fan-out makes the durable log a superset of everything any listener can
-    // receive, so GET /events closes the replay→live race with a monotonic
-    // cursor alone (no identity dedup, no gap fill).
+    // Single write path: assign → PERSIST (durable only) → broadcast.
+    // Layering (P0): Durable events (turn lifecycle, *.ended, tool.started/
+    // result, subagent, ask) are persisted before fan-out so the durable log
+    // is a superset of anything a listener can receive. Volatile deltas
+    // (text.delta / reasoning.delta / tool.args.delta) get a live seq for
+    // transport ordering ONLY and are NEVER persisted — replay reconstructs
+    // from the terminal full-value events, so there is no compact pass and no
+    // compact/replay race. Control events (idle/heartbeat) never reach here.
+    const durable = isDurableEvent(chunk as { type?: string });
     const seq = assignSeq(run);
-    persistThreadEvent(run.threadId, seq, chunk);
+    if (durable) persistThreadEvent(run.threadId, seq, chunk);
     // The wire chunk MUST carry `seq` (same shape as persisted rows) —
     // clients track their high-water cursor from it to subscribe-after on
     // resume; a missing seq froze their cursor and replayed post-ask events.
@@ -136,13 +160,6 @@ function makeRunEmit(run: RunState, controller?: ReadableStreamDefaultController
     if (type === "ask") pauseRun(run.threadId);
     if (type === "turn.finished" || type === "turn.error" || type === "turn.interrupted") {
       finishRun(run.threadId);
-      // Compact the finished turn's delta events asynchronously — the wire
-      // event was persisted above, messages were saved by the service.
-      setImmediate(() => {
-        try {
-          compactThreadEvents(run.threadId);
-        } catch { /* best-effort */ }
-      });
     }
     if (controller) {
       try {
@@ -154,6 +171,7 @@ function makeRunEmit(run: RunState, controller?: ReadableStreamDefaultController
     }
   };
 }
+
 
 /** NDJSON stream headers shared by the two streaming endpoints. */
 const NDJSON_HEADERS = {

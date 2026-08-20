@@ -244,25 +244,40 @@ export interface ResumeRequestBody {
 //   checkpoint-ns first segment, e.g. "tools:<run-id>"). Absent = main agent.
 // =============================================================================
 
-/** Discriminator for StreamEvent. */
+/**
+ * Discriminator for StreamEvent.
+ */
 export type StreamEventType = StreamEvent["type"];
 
-export type StreamEvent =
+// =============================================================================
+// Event layering (P0 protocol).
+//
+//   DurableStreamEvent  — carries a persisted `seq`. This IS the verbatim
+//                         record of what the model did (audit + replay source
+//                         of truth). Never filtered or rewritten by view
+//                         concerns.
+//   VolatileStreamEvent  — high-frequency deltas. Assigned a live seq for
+//                         transport ordering only, NEVER persisted: replay
+//                         reconstructs from the terminal full-value events
+//                         (text.ended / reasoning.ended / tool.result), so
+//                         there is no compact pass and no compact race.
+//   ControlStreamEvent   — transport keepalive/close frames. NO seq ever;
+//                         must not advance any replay cursor.
+// =============================================================================
+
+/** Persisted events — the durable per-thread event log (`thread_events`). */
+export type DurableStreamEvent =
   // --- turn lifecycle (emitted by the chat service layer) ---
   | { type: "turn.started"; seq: number; threadId: string; requestId: string; runStartedAt: number; /** The user's turn text — present ONLY on fresh turns (POST /agent); resume turns omit it, continuing the same turn without a new user bubble. Plain string — matches the server's BoundaryEvent. */ userMessage?: string }
   | { type: "turn.finished"; seq: number; threadId: string; title?: string; durationMs: number }
   | { type: "thread.title.updated"; seq: number; threadId: string; title: string }
   | { type: "turn.error"; seq: number; errorType: string; message: string; threadId?: string }
   | { type: "turn.interrupted"; seq: number; partialSaved: boolean; durationMs: number }
-  // --- content deltas (live-only; terminal *.ended events are the replayable boundary) ---
-  | { type: "text.delta"; seq: number; messageId: string; agentNs?: string; delta: string }
-  | { type: "reasoning.delta"; seq: number; messageId: string; agentNs?: string; delta: string }
   // --- terminal full-value events (replayable; reconstruct state without deltas) ---
   | { type: "text.ended"; seq: number; messageId: string; agentNs?: string; text: string }
   | { type: "reasoning.ended"; seq: number; messageId: string; agentNs?: string; text: string }
   // --- tool calls (first-class events, keyed by toolCallId) ---
   | { type: "tool.started"; seq: number; toolCallId: string; name: string; agentNs?: string }
-  | { type: "tool.args.delta"; seq: number; toolCallId: string; index: number; argsDelta: string; agentNs?: string }
   | { type: "tool.result"; seq: number; toolCallId: string; result: string; isError: boolean; agentNs?: string }
   // --- subagents (explicit lifecycle; no heuristic inference client-side) ---
   | {
@@ -281,12 +296,28 @@ export type StreamEvent =
   // --- HITL ask answer (persisted by POST /resume BEFORE the resumed run's
   //     events) — models ask as a request/response pair so any consumer can
   //     tell an answered ask from a pending one without inference ---
-  | { type: "ask.resolved"; seq: number; kind: AskKind; resolution: ResumeRequestBody }
-  // --- transport control (/events endpoint) ---
-  // Control frames carry NO seq — they are never persisted and must not
-  // advance a client's replay cursor.
-  | { type: "idle"; seq?: number; threadId?: string }
-  | { type: "heartbeat"; seq?: number };
+  | { type: "ask.resolved"; seq: number; kind: AskKind; resolution: ResumeRequestBody };
+
+/** Live-only deltas — never persisted; replay reconstructs from the
+ *  terminal `*.ended` / `tool.result` durable events above. */
+export type VolatileStreamEvent =
+  | { type: "text.delta"; seq: number; messageId: string; agentNs?: string; delta: string }
+  | { type: "reasoning.delta"; seq: number; messageId: string; agentNs?: string; delta: string }
+  | { type: "tool.args.delta"; seq: number; toolCallId: string; index: number; argsDelta: string; agentNs?: string };
+
+/** Transport control (/events endpoint) — NO seq, never persisted, never
+ *  advances a replay cursor. */
+export type ControlStreamEvent =
+  | { type: "idle"; threadId?: string }
+  | { type: "heartbeat" };
+
+export type StreamEvent = DurableStreamEvent | VolatileStreamEvent | ControlStreamEvent;
+
+/** Narrow a wire event to the persisted (replayable) subset. */
+export function isDurableEvent(ev: StreamEvent): ev is DurableStreamEvent {
+  return ev.type !== "idle" && ev.type !== "heartbeat" &&
+    ev.type !== "text.delta" && ev.type !== "reasoning.delta" && ev.type !== "tool.args.delta";
+}
 
 // =============================================================================
 // Errors

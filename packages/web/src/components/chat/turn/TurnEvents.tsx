@@ -3,8 +3,9 @@ import type { TurnEvent, ToolEvent } from "./types.js";
 import { EventRow } from "./EventRow.js";
 import { ToolCallRenderer } from "../rows/tools/ToolCallRenderer.js";
 import { useDisplaySettingsStore } from "../../../stores/display.js";
+import { projectTurnParts } from "./project.js";
+import type { TurnItem } from "./project.js";
 import {
-  isExplorationTool,
   isDisplayedExplorationTool,
   isFileReadTool,
   readonlyToolTarget,
@@ -20,84 +21,10 @@ import {
 /**
  * The ordered timeline of events for one assistant turn.
  *
- * Grouping policy:
- *   - Only **exploration tools** (read_file / list_directory / ls / glob / grep /
- *     search_file_content) are grouped — a contiguous run of them collapses into
- *     one "探索组" summary bar ("探索了 N 个文件" + file-name / search-term chips).
- *   - Every other tool (edit / write / execute / web_search / fetch_url / task /
- *     ask_user_question / …) renders as its own full tool row (via EventRow →
- *     ToolCallRenderer), NOT grouped — so write actions keep their full weight.
- *
- * Within an exploration group, only the *displayed* exploration tools
- * (read_file + grep/glob/search_file_content) are surfaced; list_directory/ls
- * is hidden (it's just a means to an end). See ExplorationCluster.
- *
- * Design references: yuxi's ToolCallsGroupComponent, Cursor/Windsurf's demotion
- * of exploratory read tools, Claude.ai's visual hierarchy.
+ * Grouping/projection lives in project.ts (projectTurnParts — the pure
+ * derived layer shared by live and history rendering); this file is the
+ * presentation layer only.
  */
-
-/** A run of consecutive exploration-tool events, flattened for grouped rendering. */
-export interface ToolGroup {
-  kind: "tool-group";
-  id: string;
-  tools: ToolEvent[];
-}
-/** Anything that isn't an exploration-tool run renders on its own. */
-export interface SingleItem {
-  kind: "single";
-  event: TurnEvent;
-}
-export type TurnItem = ToolGroup | SingleItem;
-
-/**
- * Partition events into groups: only a contiguous run of **exploration tools**
- * merges into one tool-group. Non-exploration tools (write/execute/web/…) each
- * become their own single item → rendered as a full tool row, never grouped.
- *
- * Reasoning follows ZCode's `messageStreamFirstReasoningRowId` semantics: by
- * default only the FIRST reasoning block of the turn is rendered; later
- * interleaved thinking blocks are dropped (not merged) unless
- * `opts.showAllReasoning` is on.
- *
- * Events that are not rendered (ask / non-first reasoning) are filtered out
- * *before* grouping, so they don't fragment a contiguous run of exploration
- * calls.
- */
-export function groupEvents(
-  events: TurnEvent[],
-  opts?: { showAllReasoning?: boolean },
-): TurnItem[] {
-  const items: TurnItem[] = [];
-  let i = 0;
-  let groupSeq = 0;
-  // 只保留会被渲染的事件类型；ask / write_todos 在时间线中不显示。
-  // reasoning 默认仅显示每轮第一个（ZCode messageStreamShowReasoning 语义）。
-  // write_todos 的进度改由输入栏的待办徽章承载（TodoBadge）。
-  const firstReasoningId = events.find((ev) => ev.type === "reasoning")?.id;
-  const visible = events.filter(
-    (ev) =>
-      (ev.type !== "reasoning" || opts?.showAllReasoning || ev.id === firstReasoningId) &&
-      ev.type !== "ask" &&
-      !(ev.type === "tool" && ev.entry.name === "write_todos"),
-  );
-  while (i < visible.length) {
-    const ev = visible[i];
-    if (ev.type === "tool" && isExplorationTool(ev.entry.name)) {
-      // Gather the contiguous run of exploration tools.
-      const tools: ToolEvent[] = [];
-      while (i < visible.length && visible[i].type === "tool" && isExplorationTool((visible[i] as ToolEvent).entry.name)) {
-        tools.push(visible[i] as ToolEvent);
-        i++;
-      }
-      items.push({ kind: "tool-group", id: `tg_${groupSeq++}`, tools });
-    } else {
-      // Non-exploration tool, or a non-tool event → render on its own.
-      items.push({ kind: "single", event: ev });
-      i++;
-    }
-  }
-  return items;
-}
 
 export function TurnEvents({
   events,
@@ -114,7 +41,7 @@ export function TurnEvents({
 }) {
   const showAllReasoning = useDisplaySettingsStore((s) => s.showFullReasoning);
   if (events.length === 0) return null;
-  const items = groupEvents(events, { showAllReasoning });
+  const items = projectTurnParts(events, { showAllReasoning });
 
   return (
     <div

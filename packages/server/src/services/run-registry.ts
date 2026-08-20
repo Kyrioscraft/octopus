@@ -46,6 +46,14 @@ const RETAIN_MS = 30_000;
 const runs = new Map<string, RunState>();
 /** Timers cleaning up finished runs' entries. */
 const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * Highest seq ever ASSIGNED per thread, durable or volatile. Volatile deltas
+ * (P0 layering) get a seq but leave no durable row, so getMaxThreadEventSeq
+ * alone can regress after a volatile-heavy run — seeding nextSeq here keeps
+ * seq strictly monotonic per thread across runs (no collision with a volatile
+ * seq a live client already consumed).
+ */
+const seqHighWater = new Map<string, number>();
 
 /** True when the thread has a run executing or paused at a HITL interrupt. */
 export function hasActiveRun(threadId: string): boolean {
@@ -68,7 +76,9 @@ export function startRun(threadId: string): RunState {
     // a resume's events continue after the original turn's seqs instead of
     // colliding with them (PK conflicts on persist + client after= filters
     // eating overlapping live events). Falls back to 1 for a fresh thread.
-    nextSeq: Math.max(1, getMaxThreadEventSeq(threadId) + 1),
+    // The seq high-water also floors against volatile seqs (deltas are never
+    // persisted — P0 layering — so the durable max alone can regress).
+    nextSeq: Math.max(1, getMaxThreadEventSeq(threadId) + 1, (seqHighWater.get(threadId) ?? 0) + 1),
     listeners: new Set(),
     abort: new AbortController(),
     startedAt: Date.now(),
@@ -97,7 +107,10 @@ export function isRunning(threadId: string): boolean {
  * monotonic cursor alone.
  */
 export function assignSeq(state: RunState): number {
-  return state.nextSeq++;
+  const seq = state.nextSeq++;
+  const cur = seqHighWater.get(state.threadId) ?? 0;
+  if (seq > cur) seqHighWater.set(state.threadId, seq);
+  return seq;
 }
 
 /**
