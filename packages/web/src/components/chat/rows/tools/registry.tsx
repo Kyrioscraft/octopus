@@ -33,9 +33,6 @@ export const TOOL_ICON_MAP: Record<string, ReactNode> = {
   glob: <Search />,
   grep: <Search />,
   search_file_content: <Search />,
-  grep_search: <Search />,
-  rg: <Search />,
-  find: <Search />,
   // Subagent
   task: <Bot />,
   // Web
@@ -67,9 +64,6 @@ export function getToolDisplayName(name: string): string {
     glob: "搜索文件",
     grep: "搜索内容",
     search_file_content: "搜索内容",
-    grep_search: "搜索内容",
-    rg: "搜索内容",
-    find: "查找文件",
     task: "子智能体",
     web_search: "网络搜索",
     fetch_url: "抓取网页",
@@ -121,8 +115,7 @@ export function isReadonlyTool(name: string): boolean {
 /**
  * 「探索类」工具集合 —— 在 UI 时间线里会被分组合并的工具。
  *
- * 包含 read_file + 列出目录(list_directory/ls) + 搜索(grep/glob/
- * search_file_content/grep_search(内置ripgrep)/rg/find)。
+ * 包含 read_file + 列出目录(list_directory/ls) + 搜索(grep/glob/search_file_content)。
  * 注意:web_search/fetch_url 虽然是只读(见 READONLY_TOOLS),但它们独立成卡显示、
  * 不归入探索组(它们的语义是"联网查资料"而非"探索本地代码库")。
  */
@@ -133,9 +126,6 @@ export const EXPLORATION_TOOLS = new Set([
   "glob",
   "grep",
   "search_file_content",
-  "grep_search",
-  "rg",
-  "find",
 ]);
 
 /** 判断一个工具是否属于探索类(会被分组成「探索组」)。 */
@@ -144,64 +134,27 @@ export function isExplorationTool(name: string): boolean {
 }
 
 /**
- * 「搜索/查找」类工具 —— 探索组折叠摘要里"搜索了 X 项"的计数来源。
- * 按用户要求把可能出现的搜索/查找命令都覆盖:grep 系(含内置 ripgrep
- * grep_search、裸 rg)、glob/find 文件查找、ls/list_directory 目录列举。
+ * 探索组里**需要被显示**的工具(用于折叠摘要计数 + 展开 chips)。
+ *
+ * 排除 list_directory/ls —— 列目录只是辅助手段,既不计入"探索了 N 个文件",
+ * 也不在展开的 chips 列表里出现(避免视觉噪音)。read_file 显示为文件名 chip,
+ * grep/glob/search_file_content 显示为搜索词 chip。
  */
-export const SEARCH_TOOLS = new Set([
+export const DISPLAYED_EXPLORATION_TOOLS = new Set([
+  "read_file",
   "glob",
   "grep",
   "search_file_content",
-  "grep_search",
-  "rg",
-  "find",
-  "ls",
-  "list_directory",
 ]);
 
-// ---------------------------------------------------------------------------
-// 调用级分类（含 shell 命令嗅探）
-//
-// agent 常通过 execute/bash 直接跑 ls / grep / rg / find 等命令（而不是调用
-// 对应的 SDK 工具）。这些"命令型搜索"同样属于探索类:归入探索组、计入折叠态
-// 的"搜索了 X 项"。只嗅探命令的第一个词 —— 若命令含 && / ; / | 等操作符则
-// 不归组（无法证明整条命令都是只读探索,保守起见按普通命令工具行显示）。
-// ---------------------------------------------------------------------------
-
-/** Shell 类工具名(execute 及别名)。 */
-const SHELL_TOOL_NAMES = new Set(["execute", "bash", "run_shell_command", "cmd"]);
-
-/** 只读搜索/查找命令的第一个词(rg/grep/ls/find 家族,把可能出现的都覆盖)。 */
-const SEARCH_COMMAND_FIRST =
-  /^(rg|grep|egrep|fgrep|ls|dir|find|locate|ag|ack|where|which)\b/i;
-
-/** 提取 shell 调用的命令首词;含 && / ; / | 等操作符时返回 null(不能证明只读)。 */
-function shellSearchCommand(entry: { name: string; args: Record<string, unknown> }): string | null {
-  if (!SHELL_TOOL_NAMES.has(entry.name)) return null;
-  const cmd = String(entry.args.command ?? entry.args.cmd ?? "").trim();
-  if (!cmd) return null;
-  if (/&&|\|\||[;|>]/.test(cmd)) return null;
-  return SEARCH_COMMAND_FIRST.test(cmd) ? cmd : null;
+/** 判断探索组内的某个工具是否应该被显示(排除列出目录)。 */
+export function isDisplayedExplorationTool(name: string): boolean {
+  return DISPLAYED_EXPLORATION_TOOLS.has(name);
 }
 
-/** 调用级探索判断:探索类工具名,或 shell 跑只读搜索/查找命令。 */
-export function isExplorationCall(entry: {
-  name: string;
-  args: Record<string, unknown>;
-}): boolean {
-  if (EXPLORATION_TOOLS.has(entry.name)) return true;
-  return shellSearchCommand(entry) !== null;
-}
-
-/** 调用级搜索判断(折叠态"搜索了 X 项"计数)。 */
-export function isSearchCall(entry: { name: string; args: Record<string, unknown> }): boolean {
-  if (SEARCH_TOOLS.has(entry.name)) return true;
-  return shellSearchCommand(entry) !== null;
-}
-
-/** 调用级文件读取判断(折叠态"读取了 Y 个文件"计数)。 */
-export function isFileReadCall(entry: { name: string; args: Record<string, unknown> }): boolean {
-  return entry.name === "read_file";
+/** 判断是否为文件读取工具(用于"探索了 N 个文件"的 N 计数)。 */
+export function isFileReadTool(name: string): boolean {
+  return name === "read_file";
 }
 
 /**

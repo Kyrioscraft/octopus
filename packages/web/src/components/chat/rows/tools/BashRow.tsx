@@ -7,15 +7,14 @@ import { ShimmerText } from "../../ShimmerText.js";
  * execute / bash / run_shell_command row. Header shows the command (truncated);
  * body shows the command in full plus the captured output.
  */
-export function BashRow({ entry, defaultExpanded }: ToolCardProps) {
+export function BashRow({ entry }: ToolCardProps) {
   const args = entry.args as { command?: string };
   const command = args.command ?? "";
   const running = entry.status === "running" || entry.status === "pending";
 
   return (
     <ToolCallRow
-entry={entry}
-defaultExpanded={defaultExpanded}
+      entry={entry}
       header={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           {running ? <ShimmerText text="命令" /> : <span style={{ color: "var(--gray-500)" }}>命令</span>}

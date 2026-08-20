@@ -21,7 +21,7 @@ import { ShimmerText } from "../../ShimmerText.js";
  * large edits readable. The viewer memoises the diff internally, so repeated
  * renders during a live stream are cheap.
  */
-export function FileEditRow({ entry, defaultExpanded }: ToolCardProps) {
+export function FileEditRow({ entry }: ToolCardProps) {
   const args = entry.args as {
     file_path?: string;
     old_string?: string;
@@ -76,8 +76,7 @@ export function FileEditRow({ entry, defaultExpanded }: ToolCardProps) {
 
   return (
     <ToolCallRow
-entry={entry}
-defaultExpanded={defaultExpanded}
+      entry={entry}
       header={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
           {running ? <ShimmerText text="编辑" /> : <span style={{ color: "var(--gray-500)" }}>编辑</span>}

@@ -1,5 +1,5 @@
 import type { TurnEvent, ToolEvent } from "./types.js";
-import { isExplorationCall } from "../rows/tools/registry.js";
+import { isExplorationTool } from "../rows/tools/registry.js";
 
 // =============================================================================
 // projectTurnParts — the derived layer (pure function).
@@ -61,11 +61,10 @@ export function projectTurnParts(
   );
   while (i < visible.length) {
     const ev = visible[i];
-    if (ev.type === "tool" && isExplorationCall(ev.entry)) {
-      // Gather the contiguous run of exploration tools (incl. shell search
-      // commands like `ls` / `rg` / `grep` run via execute — see registry).
+    if (ev.type === "tool" && isExplorationTool(ev.entry.name)) {
+      // Gather the contiguous run of exploration tools.
       const tools: ToolEvent[] = [];
-      while (i < visible.length && visible[i].type === "tool" && isExplorationCall((visible[i] as ToolEvent).entry)) {
+      while (i < visible.length && visible[i].type === "tool" && isExplorationTool((visible[i] as ToolEvent).entry.name)) {
         tools.push(visible[i] as ToolEvent);
         i++;
       }

@@ -7,22 +7,10 @@ import assert from "node:assert";
 
 // Minimal stand-in for the web-bundled project.ts (same logic; the package
 // source is ESM-TS compiled by vite — duplicating here keeps the test
-// dependency-free). Keep in sync with turn/project.ts + tools/registry.tsx.
+// dependency-free). Keep in sync with turn/project.ts.
 const EXPLORATION = new Set([
   "read_file", "list_directory", "ls", "glob", "grep", "search_file_content",
-  "grep_search", "rg", "find",
 ]);
-const SHELL = new Set(["execute", "bash", "run_shell_command", "cmd"]);
-const SEARCH_FIRST = /^(rg|grep|egrep|fgrep|ls|dir|find|locate|ag|ack|where|which)\b/i;
-
-function isExplorationCall(entry) {
-  if (EXPLORATION.has(entry.name)) return true;
-  if (SHELL.has(entry.name)) {
-    const cmd = String(entry.args?.command ?? entry.args?.cmd ?? "").trim();
-    if (cmd && !/&&|\|\||[;|>]/.test(cmd) && SEARCH_FIRST.test(cmd)) return true;
-  }
-  return false;
-}
 
 function projectTurnParts(events, opts) {
   const items = [];
@@ -37,9 +25,9 @@ function projectTurnParts(events, opts) {
   );
   while (i < visible.length) {
     const ev = visible[i];
-    if (ev.type === "tool" && isExplorationCall(ev.entry)) {
+    if (ev.type === "tool" && EXPLORATION.has(ev.entry.name)) {
       const tools = [];
-      while (i < visible.length && visible[i].type === "tool" && isExplorationCall(visible[i].entry)) {
+      while (i < visible.length && visible[i].type === "tool" && EXPLORATION.has(visible[i].entry.name)) {
         tools.push(visible[i]);
         i++;
       }

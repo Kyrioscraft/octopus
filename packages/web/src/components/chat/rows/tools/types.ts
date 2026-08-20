@@ -32,7 +32,4 @@ export interface ToolCallEntry {
 /** Props every tool-call row component accepts. */
 export interface ToolCardProps {
   entry: ToolCallEntry;
-  /** Force/initial expanded state (e.g. a turn still streaming opens rows to
-   *  follow). Forwarded down to ToolCallRow. */
-  defaultExpanded?: boolean;
 }

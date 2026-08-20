@@ -37,5 +37,5 @@ export interface ToolCallRendererProps extends ToolCardProps {
  */
 export function ToolCallRenderer({ entry, defaultExpanded }: ToolCallRendererProps) {
   const Renderer = TOOL_RENDERERS[entry.name] ?? DefaultRow;
-  return <Renderer entry={entry} defaultExpanded={defaultExpanded} />;
+  return <Renderer entry={entry} />;
 }
