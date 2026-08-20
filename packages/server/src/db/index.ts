@@ -1253,23 +1253,50 @@ export function deleteUserSlashCommand(userId: string, id: string): void {
 // Thread events — durable event log (replay source for /events)
 // =============================================================================
 
-/** Append one durable event for a thread. Fire-and-forget safe (callers
- *  swallow errors so persistence never blocks the stream). */
-export function insertThreadEvent(
+/**
+ * Append one durable event for a thread, assigning its seq ATOMICALLY with
+ * the insert (P3): `BEGIN IMMEDIATE` + per-thread max(seq)+1 inside the same
+ * transaction. Returns the assigned seq. Volatile events never reach here
+ * (P0 layering — they are not persisted).
+ *
+ * Idempotency (opencode "Replay diverged" semantics): a (threadId, seq)
+ * collision is impossible by construction because the seq is READ and WRITTEN
+ * inside one IMMEDIATE transaction — no two concurrent writers can observe
+ * the same max. A secondary process writing outside this path would get a PK
+ * conflict, surfaced to the caller (persistThreadEvent logs it).
+ */
+export function insertThreadEventAtomic(
   threadId: string,
-  seq: number,
   event: Record<string, unknown>,
-): void {
-  getDb()
-    .insert(schema.threadEvents)
-    .values({
-      threadId,
-      seq,
-      event: JSON.stringify(event),
-      createdAt: new Date().toISOString(),
-    })
-    .onConflictDoNothing()
-    .run();
+  minSeq = 1,
+): number {
+  const db = getDb();
+  db.run(sql`BEGIN IMMEDIATE`);
+  try {
+    const row = db
+      .select({ maxSeq: sql<number>`max(${schema.threadEvents.seq})` })
+      .from(schema.threadEvents)
+      .where(eq(schema.threadEvents.threadId, threadId))
+      .get();
+    // Floor at minSeq: volatile seqs from earlier runs occupy sequence space
+    // without persisting (P0), so the durable max alone could hand out a seq
+    // a live client already consumed. The caller passes the registry's seq
+    // high-water as the floor.
+    const seq = Math.max(minSeq, (row?.maxSeq ?? 0) + 1);
+    db.insert(schema.threadEvents)
+      .values({
+        threadId,
+        seq,
+        event: JSON.stringify({ ...event, seq }),
+        createdAt: new Date().toISOString(),
+      })
+      .run();
+    db.run(sql`COMMIT`);
+    return seq;
+  } catch (err) {
+    try { db.run(sql`ROLLBACK`); } catch { /* already rolled back */ }
+    throw err;
+  }
 }
 
 /** Replay durable events with seq > after for a thread (ascending). */

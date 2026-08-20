@@ -43,9 +43,10 @@ import {
   attachListener,
   isRunning,
   getSeqHighWater,
+  raiseSeqHighWater,
   type RunState,
 } from "../services/run-registry.js";
-import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules, insertThreadEvent, listThreadEvents, getMaxThreadEventSeq } from "../db/index.js";
+import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules, insertThreadEventAtomic, listThreadEvents, getMaxThreadEventSeq } from "../db/index.js";
 import {
   ensureThreadOutputs,
   resolveAgentCwd,
@@ -108,19 +109,35 @@ function isDurableEvent(chunk: { type?: string }): boolean {
 }
 
 /**
- * Persist an event to the durable thread_events log (opencode durable-event
- * pattern). Persistence failures degrade to memory-only — they must never
- * block or kill the live stream.
+ * Push the run's seq watermark above `seq` (used after a durable event's seq
+ * is assigned by the DB — see makeRunEmit) so subsequent volatile seqs stay
+ * above every durable seq and the wire sequence space stays monotonic.
  */
-function persistThreadEvent(threadId: string, seq: number, chunk: Record<string, unknown>): void {
+function bumpSeqWatermark(run: RunState, seq: number): void {
+  while (run.nextSeq <= seq) run.nextSeq = seq + 1;
+  raiseSeqHighWater(run.threadId, seq);
+}
+
+/**
+ * Persist a DURABLE event to the thread_events log, assigning its seq
+ * atomically with the insert (P3: BEGIN IMMEDIATE + max(seq)+1 in one
+ * transaction — the durable seq can never collide or regress, even with
+ * concurrent writers). Persistence failures degrade to memory-only — they
+ * must never block or kill the live stream.
+ */
+function persistThreadEvent(threadId: string, chunk: Record<string, unknown>): number {
   try {
-    insertThreadEvent(threadId, seq, { ...chunk, seq });
+    // minSeq = the registry's assigned-seq high-water: volatile seqs from
+    // earlier runs occupy sequence space without persisting, so the durable
+    // seq must never fall below it (a live client may already have consumed
+    // that seq as a delta).
+    return insertThreadEventAtomic(threadId, chunk, getSeqHighWater(threadId) + 1);
   } catch (err) {
     logger.warn("thread_events persist failed (continuing memory-only)", {
       thread_id: threadId,
-      seq,
       error: String(err).slice(0, 120),
     });
+    return -1;
   }
 }
 
@@ -141,20 +158,28 @@ function persistThreadEvent(threadId: string, seq: number, chunk: Record<string,
  */
 function makeRunEmit(run: RunState, controller?: ReadableStreamDefaultController): Emit {
   return (chunk) => {
-    // Single write path: assign → PERSIST (durable only) → broadcast.
-    // Layering (P0): Durable events (turn lifecycle, *.ended, tool.started/
-    // result, subagent, ask) are persisted before fan-out so the durable log
-    // is a superset of anything a listener can receive. Volatile deltas
-    // (text.delta / reasoning.delta / tool.args.delta) get a live seq for
-    // transport ordering ONLY and are NEVER persisted — replay reconstructs
-    // from the terminal full-value events, so there is no compact pass and no
-    // compact/replay race. Control events (idle/heartbeat) never reach here.
+    // Single write path, P3 form. DURABLE events: the seq is assigned BY THE
+    // DB inside insertThreadEventAtomic (BEGIN IMMEDIATE + max+1), so the
+    // durable log is gap-free in seq space and multi-writer safe; the run's
+    // watermark is then raised above it. VOLATILE deltas: never persisted
+    // (P0 layering — no compact pass, no compact/replay race); they take the
+    // run-registry watermark seq for transport ordering only. The wire chunk
+    // always carries its seq (clients' subscribe-after cursor depends on it).
+    // Control events (idle/heartbeat) never reach the emit path.
     const durable = isDurableEvent(chunk as { type?: string });
-    const seq = assignSeq(run);
-    if (durable) persistThreadEvent(run.threadId, seq, chunk);
-    // The wire chunk MUST carry `seq` (same shape as persisted rows) —
-    // clients track their high-water cursor from it to subscribe-after on
-    // resume; a missing seq froze their cursor and replayed post-ask events.
+    let seq: number;
+    if (durable) {
+      seq = persistThreadEvent(run.threadId, chunk);
+      if (seq < 0) {
+        // Persistence failed — degrade to a registry seq so the stream (and
+        // clients' cursors) still advance; the event is memory-only.
+        seq = assignSeq(run);
+      } else {
+        bumpSeqWatermark(run, seq);
+      }
+    } else {
+      seq = assignSeq(run);
+    }
     const wire = { ...chunk, seq };
     broadcast(run, { seq, chunk: wire });
     const type = (chunk as { type?: string }).type;

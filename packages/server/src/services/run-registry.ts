@@ -123,6 +123,14 @@ export function getSeqHighWater(threadId: string): number {
   return seqHighWater.get(threadId) ?? 0;
 }
 
+/** Raise the seq high-water (P3: the durable seq is assigned by the DB
+ *  transaction — the watermark must track it so subsequent volatile seqs
+ *  stay above every durable seq). No-op when already at/above `seq`. */
+export function raiseSeqHighWater(threadId: string, seq: number): void {
+  const cur = seqHighWater.get(threadId) ?? 0;
+  if (seq > cur) seqHighWater.set(threadId, seq);
+}
+
 /**
  * Fan one persisted event out to the run's live listeners. Listener errors
  * (e.g. a listener's response stream just closed) are caught per-listener and
