@@ -358,6 +358,7 @@ export async function* wrapAgentStream(
       }
     }
     const ac = ctxFor(agentNs);
+    const ctxKey = agentNs ?? "main";
 
     // ---- main-agent task calls → subagent lifecycle -----------------------
     if (!agentNs && type === "ai") {
@@ -444,7 +445,6 @@ export async function* wrapAgentStream(
       yield { type: "tool.result", toolCallId: callId, result: content, isError, ...(agentNs ? { agentNs } : {}) };
       // A tool result closes the current AI message — flush its terminal
       // *.ended events, then advance so the next AI chunk opens a new message.
-      const ctxKey = agentNs ?? "main";
       yield* flushEnded(ctxKey);
       ac.messageCounter++;
       ac.indexToId.clear();
@@ -452,6 +452,15 @@ export async function* wrapAgentStream(
     }
 
     if (type === "ai") {
+      // The AI message is FINAL once it carries tool calls — its text/reasoning
+      // is complete and the tool it requested comes causally AFTER it. Flush the
+      // terminal *.ended events BEFORE announcing the tool so the persisted
+      // (replayable) order matches the live one: text precedes the tool. Without
+      // this, the flush only happened at tool.result / stream end, so compacted
+      // replays rendered text AFTER the exploration/ask components it preceded.
+      if (toolCalls.length > 0 || toolCallChunks.length > 0) {
+        yield* flushEnded(ctxKey);
+      }
       // Complete tool_calls entries (from content blocks or top-level): emit
       // tool.started once per callId, and flush complete args as one delta
       // when nothing was streamed before (non-streaming providers).
@@ -499,7 +508,6 @@ export async function* wrapAgentStream(
     }
 
     // ---- content deltas ----------------------------------------------------
-    const ctxKey = agentNs ?? "main";
     const messageId = messageIdFor(agentNs);
     if (openMessage.get(ctxKey) !== undefined && openMessage.get(ctxKey) !== messageId) {
       // A new AI message began (counter advanced by a tool result elsewhere,
