@@ -608,6 +608,10 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
   const emit = makeRunEmit(run);
   void (async () => {
     try {
+      // Persist the user's answer BEFORE the resumed run's events — ask is a
+      // request/response pair; this lets every consumer (live, replay,
+      // re-attach) tell an answered ask from a pending one without inference.
+      emit({ type: "ask.resolved", kind: resumeBody.kind ?? "discussion", resolution: resumeBody });
       await streamResume(
         {
           threadId,

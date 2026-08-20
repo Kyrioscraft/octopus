@@ -387,30 +387,50 @@ export function useChat({
         if (ev.type !== "idle" && ev.type !== "heartbeat" && ev.seq > lastSeqRef.current) {
           lastSeqRef.current = ev.seq;
         }
+        // Any real event past an ask means it was answered (the resume emits
+        // text/tool/turn events after it). Must run BEFORE the switch below —
+        // those are explicit cases that would otherwise leave a stale
+        // trailingAsk, re-popping the ask panel on every thread re-entry.
+        if (ev.type !== "idle" && ev.type !== "heartbeat" && ev.type !== "ask") {
+          trailingAsk = null;
+        }
         if (ev.type === "turn.started") {
-          // Close the previous turn (if any) and open a new one.
-          settleTurn({}, (a) => a.finalizeDone());
-          if (ev.userMessage) {
-            // Server persists userMessage as a plain string (see core's
-            // BoundaryEvent) — not a ChatMessage object. Resume turns carry
-            // no userMessage (they continue the same turn), so only fresh
-            // turns produce user bubbles here.
-            const content = typeof ev.userMessage === "string"
-              ? ev.userMessage
-              : (ev.userMessage as { content?: string }).content ?? "";
-            turns.push({ id: `u_r_${ev.requestId}`, role: "user", content, status: "done" } as Msg);
+          // Resume turns carry no userMessage — they CONTINUE the same turn
+          // (server emits turn.started on every resume stream). Only a fresh
+          // turn (or a resume with no open accumulator — replay starting
+          // mid-run) closes the previous turn and opens a new bubble;
+          // otherwise each HITL approval would fragment one turn into N
+          // bubbles = N timers / N first-reasoning blocks.
+          if (ev.userMessage || !acc) {
+            // Close the previous turn (if any) and open a new one.
+            settleTurn({}, (a) => a.finalizeDone());
+            if (ev.userMessage) {
+              // Server persists userMessage as a plain string (see core's
+              // BoundaryEvent) — not a ChatMessage object. Resume turns carry
+              // no userMessage (they continue the same turn), so only fresh
+              // turns produce user bubbles here.
+              const content = typeof ev.userMessage === "string"
+                ? ev.userMessage
+                : (ev.userMessage as { content?: string }).content ?? "";
+              turns.push({ id: `u_r_${ev.requestId}`, role: "user", content, status: "done" } as Msg);
+            }
+            acc = new TurnEventAccumulator();
+            turns.push({
+              id: `a_r_${ev.requestId}`,
+              role: "assistant",
+              content: "",
+              status: "streaming",
+              events: [],
+              // runStartedAt drives an accurate frozen timer if the turn ends
+              // without a server-reported duration.
+              startedAtMs: ev.runStartedAt,
+            } as Msg);
+          } else if (ev.runStartedAt !== undefined) {
+            // Same-turn resume: keep consuming into the open accumulator; just
+            // calibrate the timer with the run's true start time.
+            const cur = turns[turns.length - 1] as Msg | undefined;
+            if (cur?.role === "assistant") turns[turns.length - 1] = { ...cur, startedAtMs: ev.runStartedAt };
           }
-          acc = new TurnEventAccumulator();
-          turns.push({
-            id: `a_r_${ev.requestId}`,
-            role: "assistant",
-            content: "",
-            status: "streaming",
-            events: [],
-            // runStartedAt drives an accurate frozen timer if the turn ends
-            // without a server-reported duration.
-            startedAtMs: ev.runStartedAt,
-          } as Msg);
         } else if (acc) {
           switch (ev.type) {
             case "text.delta":
@@ -442,9 +462,7 @@ export function useChat({
               acc.consumeAskReadOnly({ kind: ev.kind, questions: ev.questions, thread_id: tid });
               break;
             default:
-              if (ev.type !== "heartbeat" && ev.type !== "idle") {
-                trailingAsk = null; // content events past the ask → answered elsewhere
-              }
+              // trailingAsk already cleared above for any non-ask event.
               break; // heartbeat / idle / turn.started handled above
           }
         }
@@ -623,6 +641,15 @@ export function useChat({
             turnAcc.current?.consume(ev);
             patchEvents();
             scroll();
+            break;
+          }
+          case "ask.resolved": {
+            // The user's answer, persisted by POST /resume before the resumed
+            // run's events. Clear the panel and mark the timeline ask done —
+            // replayed/live consumers use this instead of inferring.
+            setAsk(null);
+            turnAcc.current?.resolveAsk(ev.resolution);
+            patchEvents();
             break;
           }
           case "ask": {

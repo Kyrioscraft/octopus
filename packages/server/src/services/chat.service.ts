@@ -43,6 +43,9 @@ export type BoundaryEvent =
   | { type: "turn.error"; errorType: string; message: string; threadId?: string }
   | { type: "turn.interrupted"; partialSaved: boolean; durationMs?: number }
   | { type: "ask"; kind: AskKind; questions: AskQuestion[]; thread_id: string }
+  // Persisted by the /resume route BEFORE the resumed run's events — models
+  // ask as a request/response pair (see tentacle StreamEvent "ask.resolved").
+  | { type: "ask.resolved"; kind: AskKind; resolution: ResumeRequestBody }
   | { type: "idle"; threadId?: string }
   | { type: "heartbeat" };
 

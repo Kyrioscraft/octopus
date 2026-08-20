@@ -278,6 +278,10 @@ export type StreamEvent =
   | { type: "subagent.finished"; seq: number; instanceKey: string }
   // --- HITL ask (payload identical to the legacy ask_user_question_required chunk) ---
   | { type: "ask"; seq: number; kind: AskKind; questions: AskQuestion[]; threadId?: string; thread_id?: string }
+  // --- HITL ask answer (persisted by POST /resume BEFORE the resumed run's
+  //     events) — models ask as a request/response pair so any consumer can
+  //     tell an answered ask from a pending one without inference ---
+  | { type: "ask.resolved"; seq: number; kind: AskKind; resolution: ResumeRequestBody }
   // --- transport control (/events endpoint) ---
   // Control frames carry NO seq — they are never persisted and must not
   // advance a client's replay cursor.
