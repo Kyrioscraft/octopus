@@ -39,6 +39,7 @@ import {
   finishRun,
   abortRun,
   getRun,
+  hasActiveRun,
   attachListener,
   isRunning,
   type RunState,
@@ -427,6 +428,13 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
     },
   };
 
+  // One active run per thread: a second client sending while a run is
+  // executing/paused must NOT silently abort it (multi-client safety). The
+  // client should stop or wait first — an explicit /stop clears the slot.
+  if (hasActiveRun(threadId)) {
+    return c.json({ error: "thread_busy", message: "该对话正在执行中，请等待完成或先停止" }, 409);
+  }
+
   logger.info("Stream started", {
     model: modelOverride ?? config.model,
     thread_id: threadId,
@@ -578,6 +586,15 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
     ...(interruptOverride ? { context: { interruptOn: interruptOverride } } : {}),
   };
 
+  // One active run per thread: a paused run IS the expected state here (the
+  // ask this resume answers) — starting the resume supersedes it internally.
+  // But a RUNNING run (another client's send/resume already in flight) must
+  // not be silently aborted — reject instead (multi-client safety).
+  const existingRun = getRun(threadId);
+  if (existingRun?.status === "running") {
+    return c.json({ error: "thread_busy", message: "该对话正在执行中，请等待完成或先停止" }, 409);
+  }
+
   logger.info("Resume started", {
     thread_id: threadId,
     kind: resumeBody.kind,
@@ -671,9 +688,14 @@ chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
         // bubble errored instead of hanging.
         if (lastType && lastType !== "turn.finished" && lastType !== "turn.error" &&
             lastType !== "turn.interrupted" && lastType !== "idle") {
-          push({ type: "turn.error", errorType: "run_lost", message: "服务重启导致本轮执行中断", threadId, seq: maxSeq + 1 });
+          // Synthetic (not persisted) control frame — no seq, same as idle.
+          push({ type: "turn.error", errorType: "run_lost", message: "服务重启导致本轮执行中断", threadId });
         }
-        push({ type: "idle", threadId, seq: maxSeq + 2 });
+        // Control frame: idle closes the replay with NO seq — synthetic seqs
+        // here would inflate a client's cursor past the real durable max and
+        // silently swallow the next run's first events (seq <= cursor is
+        // filtered on both the replay and live paths).
+        push({ type: "idle", threadId });
         try { controller.close(); } catch { /* */ }
         return;
       }

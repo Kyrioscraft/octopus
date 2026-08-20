@@ -383,7 +383,10 @@ export function useChat({
         // Keep the high-water seq in sync — a later resolve()/send() on this
         // thread subscribes after it (0 here would replay the whole thread
         // into the live accumulator: duplicated blocks + re-popped ask).
-        if (ev.seq > lastSeqRef.current) lastSeqRef.current = ev.seq;
+        // idle/heartbeat are control frames without a persisted seq.
+        if (ev.type !== "idle" && ev.type !== "heartbeat" && ev.seq > lastSeqRef.current) {
+          lastSeqRef.current = ev.seq;
+        }
         if (ev.type === "turn.started") {
           // Close the previous turn (if any) and open a new one.
           settleTurn({}, (a) => a.finalizeDone());
@@ -551,7 +554,12 @@ export function useChat({
       for await (const ev of stream) {
         // Track the high-water seq so a resume can subscribe after it
         // (instead of replaying the whole turn into the same accumulator).
-        if (ev.seq > lastSeqRef.current) lastSeqRef.current = ev.seq;
+        // ONLY persisted data events carry a real seq — idle/heartbeat are
+        // connection control frames; absorbing a synthetic seq would inflate
+        // the cursor and silently drop the next run's first events.
+        if (ev.type !== "idle" && ev.type !== "heartbeat" && ev.seq > lastSeqRef.current) {
+          lastSeqRef.current = ev.seq;
+        }
         // v2 typed protocol: discriminate on `type` (legacy `status`-based
         // chunks no longer exist — server + client switched together).
         switch (ev.type) {
@@ -795,6 +803,23 @@ export function useChat({
       await doStream(stream, activeThreadId ?? "");
     } catch (err: any) {
       if (err?.name !== "AbortError") setBusy(false);
+      // 409 thread_busy: another run is active on this thread (possibly from
+      // another client). Roll back the optimistic user/assistant bubbles and
+      // surface the conflict instead of leaving a phantom streaming turn.
+      if (err?.status === 409 || /thread_busy|正在执行/i.test(String(err?.message ?? ""))) {
+        setMsgs((prev) => {
+          // Drop the trailing assistant placeholder we appended; keep the
+          // user's text visible but mark the turn errored with the reason.
+          const c = [...prev];
+          const last = c[c.length - 1];
+          if (last?.role === "assistant" && last.status === "streaming") c.pop();
+          const nowLast = c[c.length - 1];
+          if (nowLast?.role === "assistant") {
+            c[c.length - 1] = { ...nowLast, status: "error", error: err?.message ?? "该对话正在执行中，请等待完成或先停止" };
+          }
+          return c;
+        });
+      }
     } finally {
       if (abortRef.current === controller) abortRef.current = null;
     }

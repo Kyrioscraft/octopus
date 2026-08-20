@@ -47,9 +47,15 @@ const runs = new Map<string, RunState>();
 /** Timers cleaning up finished runs' entries. */
 const cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
+/** True when the thread has a run executing or paused at a HITL interrupt. */
+export function hasActiveRun(threadId: string): boolean {
+  return isRunning(threadId);
+}
+
 export function startRun(threadId: string): RunState {
-  // A previous run on the same thread (shouldn't happen — the UI blocks
-  // concurrent sends) is superseded: abort it and take over.
+  // A previous run on the same thread (shouldn't happen — the routes reject
+  // concurrent sends with 409 thread_busy before reaching here) is superseded:
+  // abort it and take over.
   const prev = runs.get(threadId);
   if (prev) {
     prev.abort.abort();
@@ -132,7 +138,10 @@ export function finishRun(threadId: string): void {
   r.status = "done";
   for (const listener of r.listeners) {
     try {
-      listener({ seq: r.nextSeq, chunk: { type: "idle", threadId } });
+      // Control frame with NO seq: r.nextSeq belongs to the NEXT run's first
+      // real event — stamping it here would inflate live clients' cursors and
+      // make them drop that event once it is actually emitted.
+      listener({ seq: 0, chunk: { type: "idle", threadId } });
     } catch { /* dead listener — dropping below anyway */ }
   }
   r.listeners.clear();
