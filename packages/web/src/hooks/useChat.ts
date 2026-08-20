@@ -481,12 +481,6 @@ export function useChat({
     return { msgs: usable ? merged : [], openAcc: null };
   };
 
-  /**
-   * @deprecated Removed in P1 — replaced by the snapshot path (load →
-   * projectSnapshot). The durable replay endpoint (/events?after=0) remains
-   * on the server for debugging/audit but is no longer the UI history source.
-   */
-
   /** Abort the local fetch + reset local stream state. The server-side run
    *  keeps executing (runs are decoupled from connections server-side). */
   const detachLocal = useCallback(() => {
