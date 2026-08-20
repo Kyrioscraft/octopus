@@ -198,6 +198,24 @@ function safeParse(s: string): Record<string, unknown> {
 }
 
 /**
+ * True when the accumulated args string is a COMPLETE JSON object — i.e. the
+ * tool call's arguments finished streaming. This gates the tool.started
+ * announcement: the row appears exactly once, already carrying its full args
+ * (never a half-filled "(unknown)" state that later corrects itself).
+ * `JSON.parse` succeeding on the whole accumulated buffer is the completeness
+ * proof — a truncated stream leaves dangling braces and fails the parse.
+ */
+function completeArgs(s: string | undefined): boolean {
+  if (!s || s.length === 0) return false;
+  try {
+    const v = JSON.parse(s);
+    return typeof v === "object" && v !== null && !Array.isArray(v);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Normalize a raw tool-call entry into the flat {id, name, args} shape, no
  * matter which wire format it arrives in. This is the streaming equivalent of
  * LangChain's defaultToolCallParser (which only runs when an AIMessage is
@@ -263,8 +281,11 @@ export async function* wrapAgentStream(
     announced: Set<string>;
     /** Non-task callIds allowed to receive streamed args fragments. */
     argsCapable: Set<string>;
-    /** callIds whose args were already forwarded as a complete blob. */
-    argsFlushed: Set<string>;
+    /** callId → deferred tool name. tool.started is NOT emitted on first sight
+     *  of (id, name) — it waits until the args JSON is COMPLETE, then announces
+     *  started + the full args in one atomic sequence, so the UI row never
+     *  renders a half-filled "(unknown)" state that later corrects itself. */
+    pendingName: Map<string, string>;
     /** callId → accumulated args JSON string (both the complete-blob flush and
      *  streamed fragments) — emitted as the replayable full value on
      *  tool.result (P0 layering: deltas never persist, so the terminal event
@@ -279,7 +300,7 @@ export async function* wrapAgentStream(
     const key = ns ?? "main";
     let c = agentCtxs.get(key);
     if (!c) {
-      c = { messageCounter: 0, indexToId: new Map(), announced: new Set(), argsCapable: new Set(), argsFlushed: new Set(), argsAcc: new Map(), textAcc: new Map(), reasoningAcc: new Map() };
+      c = { messageCounter: 0, indexToId: new Map(), announced: new Set(), argsCapable: new Set(), pendingName: new Map(), argsAcc: new Map(), textAcc: new Map(), reasoningAcc: new Map() };
       agentCtxs.set(key, c);
     }
     return c;
@@ -456,6 +477,21 @@ export async function* wrapAgentStream(
       // `name` rides along too when the ToolMessage carries it, so a row can
       // render standalone without pairing back to tool.started.
       const ac = ctxFor(agentNs);
+      // Fallback announce: the provider finished streaming but the accumulated
+      // args never parsed as a complete object (e.g. a no-args tool where the
+      // provider streams nothing). The row must still appear before its
+      // result — with empty args, which IS the correct final state here.
+      if (!ac.announced.has(callId)) {
+        const toolName = ac.pendingName.get(callId) ?? (typeof msg.name === "string" && msg.name.length > 0 ? msg.name : undefined);
+        if (toolName && toolName !== "task") {
+          ac.announced.add(callId);
+          yield { type: "tool.started", toolCallId: callId, name: toolName, ...(agentNs ? { agentNs } : {}) };
+          const pendingArgs = ac.argsAcc.get(callId);
+          if (pendingArgs) {
+            yield { type: "tool.args.delta", toolCallId: callId, index: 0, argsDelta: pendingArgs, ...(agentNs ? { agentNs } : {}) };
+          }
+        }
+      }
       const argsStr = ac.argsAcc.get(callId);
       if (argsStr !== undefined) ac.argsAcc.delete(callId);
       const parsedArgs = argsStr !== undefined ? safeParse(argsStr) : undefined;
@@ -488,37 +524,31 @@ export async function* wrapAgentStream(
       if (toolCalls.length > 0 || toolCallChunks.length > 0) {
         yield* flushEnded(ctxKey);
       }
-      // Complete tool_calls entries (from content blocks or top-level): emit
-      // tool.started once per callId, and flush complete args as one delta
-      // when nothing was streamed before (non-streaming providers).
+      // Complete tool_calls entries (from content blocks or top-level): the
+      // args are already a parsed object — announce immediately (this is the
+      // non-streaming-provider path where no fragments will ever arrive).
+      // tool.started waits for complete args (see pendingName) so a UI row
+      // never renders a half-filled state that later corrects itself.
       for (const tc of toolCalls) {
         if (!tc.id || !tc.name || tc.name === "task") continue;
-        if (!ac.announced.has(tc.id)) {
-          ac.announced.add(tc.id);
-          ac.argsCapable.add(tc.id);
-          yield { type: "tool.started", toolCallId: tc.id, name: tc.name, ...(agentNs ? { agentNs } : {}) };
+        // Complete entries arrive with args already parsed to an object (the
+        // normalizer stringifies legacy encoded forms) — always complete.
+        if (tc.args && Object.keys(tc.args).length > 0) {
+          ac.argsAcc.set(tc.id, (ac.argsAcc.get(tc.id) ?? "") + JSON.stringify(tc.args));
         }
-        if (!ac.argsFlushed.has(tc.id) && tc.args && Object.keys(tc.args).length > 0) {
-          ac.argsFlushed.add(tc.id);
-          // Some providers (legacy function_call form) hand args as an
-          // already-encoded JSON string — pass it through verbatim instead of
-          // double-encoding, so the web-side parsePartialJson yields an object.
-          const raw = typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args);
-          ac.argsAcc.set(tc.id, (ac.argsAcc.get(tc.id) ?? "") + raw);
-          yield {
-            type: "tool.args.delta",
-            toolCallId: tc.id,
-            index: 0,
-            argsDelta: raw,
-            ...(agentNs ? { agentNs } : {}),
-          };
+        if (!ac.announced.has(tc.id)) ac.pendingName.set(tc.id, tc.name);
+        if (!ac.announced.has(tc.id) && completeArgs(ac.argsAcc.get(tc.id))) {
+          ac.announced.add(tc.id);
+          yield { type: "tool.started", toolCallId: tc.id, name: tc.name, ...(agentNs ? { agentNs } : {}) };
+          yield { type: "tool.args.delta", toolCallId: tc.id, index: 0, argsDelta: ac.argsAcc.get(tc.id)!, ...(agentNs ? { agentNs } : {}) };
         }
       }
-      // Streaming fragments: bridge index→callId, emit started on first sight
-      // of (id, name), and forward each args fragment verbatim. For providers
-      // like DeepSeek the FINAL aggregated message never re-carries complete
-      // tool_calls (the only tool_calls entry appears on the FIRST fragment
-      // with EMPTY args) — these fragments are the SOLE source of args.
+      // Streaming fragments: bridge index→callId, defer the announcement until
+      // the accumulated args JSON parses as a complete object, then emit
+      // started + the FULL args as one delta (no per-fragment forwarding — the
+      // row appears exactly once, already correct). For providers like
+      // DeepSeek the final aggregated message never re-carries complete
+      // tool_calls — these fragments are the SOLE source of args.
       for (let i = 0; i < toolCallChunks.length; i++) {
         const tcc = toolCallChunks[i];
         if (!tcc) continue;
@@ -531,20 +561,22 @@ export async function* wrapAgentStream(
           (typeof tcc.id === "string" && tcc.id ? tcc.id : undefined) ?? ac.indexToId.get(idx);
         if (!callId) continue;
         const name = typeof tcc.name === "string" && tcc.name.length > 0 ? tcc.name : undefined;
-        if (name && name !== "task") {
-          if (!ac.announced.has(callId)) {
-            ac.announced.add(callId);
-            ac.argsCapable.add(callId);
-            yield { type: "tool.started", toolCallId: callId, name, ...(agentNs ? { agentNs } : {}) };
-          }
+        if (name && name !== "task" && !ac.announced.has(callId)) {
+          ac.argsCapable.add(callId);
+          ac.pendingName.set(callId, name);
         }
         // Args fragments arrive WITHOUT name/id (keyed by index only) — the
         // OpenAI streaming protocol carries name only on the FIRST fragment.
-        // Forward args for any already-announced call, not just ones whose
-        // fragment re-carries a name.
         if (ac.argsCapable.has(callId) && typeof tcc.args === "string" && tcc.args.length > 0) {
           ac.argsAcc.set(callId, (ac.argsAcc.get(callId) ?? "") + tcc.args);
-          yield { type: "tool.args.delta", toolCallId: callId, index: idx, argsDelta: tcc.args, ...(agentNs ? { agentNs } : {}) };
+          if (!ac.announced.has(callId) && completeArgs(ac.argsAcc.get(callId))) {
+            const toolName = ac.pendingName.get(callId);
+            if (toolName) {
+              ac.announced.add(callId);
+              yield { type: "tool.started", toolCallId: callId, name: toolName, ...(agentNs ? { agentNs } : {}) };
+              yield { type: "tool.args.delta", toolCallId: callId, index: idx, argsDelta: ac.argsAcc.get(callId)!, ...(agentNs ? { agentNs } : {}) };
+            }
+          }
         }
       }
     }
