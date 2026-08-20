@@ -37,7 +37,7 @@ const logger = getLogger("chat.service");
  * route's run-registry wrapper before enqueue/persist.
  */
 export type BoundaryEvent =
-  | { type: "turn.started"; threadId: string; requestId: string; runStartedAt: number; userMessage?: string; /** Synthetic boundary marker (resume turns) — clients skip rendering it as a user bubble. */ synthetic?: boolean }
+  | { type: "turn.started"; threadId: string; requestId: string; runStartedAt: number; /** Fresh turns only (POST /agent); resume turns omit it and continue the same turn without a user bubble. */ userMessage?: string }
   | { type: "turn.finished"; threadId: string; title?: string; durationMs?: number }
   | { type: "turn.error"; errorType: string; message: string; threadId?: string }
   | { type: "turn.interrupted"; partialSaved: boolean; durationMs?: number }
@@ -746,19 +746,14 @@ export async function streamResume(
   });
 
   try {
-    const initMsg =
-      input.resumeBody.kind === "discussion" || input.resumeBody.kind === "clarify"
-        ? `Resume: answers (${input.resumeBody.answers?.length ?? 0})`
-        : `Resume: ${input.resumeBody.approved === false ? "rejected" : "approved"}`;
+    // Resume continues the SAME turn — no synthetic user bubble. The boundary
+    // event carries no userMessage; clients render a user bubble only when
+    // turn.started.userMessage is present (a fresh turn from POST /agent).
     emit({
       type: "turn.started",
       threadId: input.threadId,
       requestId: input.requestId,
       runStartedAt: input.startedAt ?? Date.now(),
-      // Synthetic boundary marker, NOT a real user utterance — clients must
-      // not render it as a user bubble (they skip on synthetic).
-      userMessage: initMsg,
-      synthetic: true,
     });
 
     // Step 3: Stream the resumed graph (standardized AgentEvent).

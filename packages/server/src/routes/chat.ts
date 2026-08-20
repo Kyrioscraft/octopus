@@ -686,13 +686,10 @@ chatRouter.get("/thread/:id/events", getOptionalUser, (c) => {
 
       // Snapshot AFTER the listener is registered.
       let cursor = after - 1; // push only events with seq > cursor
-      let lastTypeLive: string | undefined;
       try {
         for (const e of listThreadEvents(threadId, after)) {
           push(e.event);
           cursor = Math.max(cursor, e.seq);
-          const t = e.event["type"];
-
         }
       } catch (err) {
         logger.exception("Durable event replay failed", err);

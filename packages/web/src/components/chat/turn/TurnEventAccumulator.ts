@@ -36,6 +36,14 @@ export class TurnEventAccumulator {
   private curReasoning: ReasoningEvent | null = null;
   /** Pointer to the currently-accumulating text event, if any. */
   private curText: TextEvent | null = null;
+  /**
+   * The most recently closed (but not yet terminated by its `*.ended` event)
+   * reasoning/text event — a live `*.ended` arriving after an interleaved
+   * close must normalize THAT event (not open a new one), or the turn shows
+   * the deltas AND the full text as two blocks.
+   */
+  private lastClosedReasoning: ReasoningEvent | null = null;
+  private lastClosedText: TextEvent | null = null;
   /** toolCallId → ToolEvent index, for fast result back-fill. */
   private toolIndex = new Map<string, number>();
   /** toolCallId → accumulated args JSON string (parsed lazily per delta). */
@@ -58,6 +66,8 @@ export class TurnEventAccumulator {
     this.events = [];
     this.curReasoning = null;
     this.curText = null;
+    this.lastClosedReasoning = null;
+    this.lastClosedText = null;
     this.toolIndex.clear();
     this.toolArgs.clear();
     this.subagentIndex.clear();
@@ -243,17 +253,24 @@ export class TurnEventAccumulator {
           return;
         }
         this.closeText();
-        if (!this.curReasoning) {
+        // Live: the open (or just-closed by an interleaved event) reasoning
+        // episode is normalized in place to the authoritative full text.
+        // Replay: no deltas arrived, so open a fresh event.
+        const target = this.curReasoning ?? this.lastClosedReasoning;
+        if (target) {
+          target.text = ev.text;
+          if (target.endedAt === undefined) target.endedAt = Date.now();
+          this.lastClosedReasoning = null;
+        } else {
           this.curReasoning = {
             id: this.nextId("rs"),
             type: "reasoning",
-            text: "",
+            text: ev.text,
             startedAt: Date.now(),
           };
           this.events.push(this.curReasoning);
+          this.closeReasoning();
         }
-        this.curReasoning.text = ev.text;
-        this.closeReasoning();
         return;
       }
 
@@ -263,12 +280,16 @@ export class TurnEventAccumulator {
           return;
         }
         this.closeReasoning();
-        if (!this.curText) {
-          this.curText = { id: this.nextId("tx"), type: "text", text: "" };
+        // Same in-place normalization as reasoning.ended — see above.
+        const target = this.curText ?? this.lastClosedText;
+        if (target) {
+          target.text = ev.text;
+          this.lastClosedText = null;
+        } else {
+          this.curText = { id: this.nextId("tx"), type: "text", text: ev.text };
           this.events.push(this.curText);
+          this.closeText();
         }
-        this.curText.text = ev.text;
-        this.closeText();
         return;
       }
     }
@@ -311,14 +332,21 @@ export class TurnEventAccumulator {
     }
   }
 
-  /** Close the currently-open reasoning event (if any). */
+  /** Close the currently-open reasoning event (if any), freezing its duration. */
   private closeReasoning(): void {
-    this.curReasoning = null;
+    if (this.curReasoning) {
+      this.curReasoning.endedAt = Date.now();
+      this.lastClosedReasoning = this.curReasoning;
+      this.curReasoning = null;
+    }
   }
 
   /** Close the currently-open text event (if any). */
   private closeText(): void {
-    this.curText = null;
+    if (this.curText) {
+      this.lastClosedText = this.curText;
+      this.curText = null;
+    }
   }
 
   /**

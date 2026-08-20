@@ -382,10 +382,11 @@ export function useChat({
         if (ev.type === "turn.started") {
           // Close the previous turn (if any) and open a new one.
           settleTurn({}, (a) => a.finalizeDone());
-          if (ev.userMessage && !ev.synthetic) {
+          if (ev.userMessage) {
             // Server persists userMessage as a plain string (see core's
-            // BoundaryEvent) — not a ChatMessage object. Synthetic boundary
-            // markers (resume turns) are skipped — not real user bubbles.
+            // BoundaryEvent) — not a ChatMessage object. Resume turns carry
+            // no userMessage (they continue the same turn), so only fresh
+            // turns produce user bubbles here.
             const content = typeof ev.userMessage === "string"
               ? ev.userMessage
               : (ev.userMessage as { content?: string }).content ?? "";
