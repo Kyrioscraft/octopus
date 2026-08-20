@@ -202,6 +202,12 @@ export class TurnEventAccumulator {
         if (te?.type === "tool") {
           te.entry = {
             ...te.entry,
+            ...(ev.name ? { name: ev.name } : {}),
+            // Authoritative full args from the terminal event — merges over
+            // whatever the (volatile) args deltas accumulated. Live: identical
+            // values, idempotent. Replay (no deltas persisted): the ONLY
+            // source of args, without which every row showed "(unknown)".
+            ...(ev.args ? { args: { ...te.entry.args, ...ev.args } } : {}),
             status: ev.isError ? "error" : "done",
             result: ev.result,
           };

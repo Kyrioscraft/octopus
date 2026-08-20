@@ -38,7 +38,7 @@ export type AgentEvent =
   | { type: "reasoning.ended"; messageId: string; agentNs?: string; text: string }
   | { type: "tool.started"; toolCallId: string; name: string; agentNs?: string }
   | { type: "tool.args.delta"; toolCallId: string; index: number; argsDelta: string; agentNs?: string }
-  | { type: "tool.result"; toolCallId: string; result: string; isError: boolean; agentNs?: string }
+  | { type: "tool.result"; toolCallId: string; result: string; isError: boolean; agentNs?: string; /** Full parsed args — the replayable boundary (args deltas are volatile, never persisted). */ args?: Record<string, unknown>; /** Tool name when the ToolMessage carries it — lets a row render standalone without pairing to tool.started. */ name?: string }
   | {
       type: "subagent.started";
       /** task tool_call_id — stable correlation key across started/finished. */

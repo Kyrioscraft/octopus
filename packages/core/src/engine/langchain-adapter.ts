@@ -265,6 +265,11 @@ export async function* wrapAgentStream(
     argsCapable: Set<string>;
     /** callIds whose args were already forwarded as a complete blob. */
     argsFlushed: Set<string>;
+    /** callId → accumulated args JSON string (both the complete-blob flush and
+     *  streamed fragments) — emitted as the replayable full value on
+     *  tool.result (P0 layering: deltas never persist, so the terminal event
+     *  must carry the args, exactly like text.ended carries the full text). */
+    argsAcc: Map<string, string>;
     /** messageId → accumulated text/reasoning, flushed as *.ended terminal events. */
     textAcc: Map<string, string>;
     reasoningAcc: Map<string, string>;
@@ -274,7 +279,7 @@ export async function* wrapAgentStream(
     const key = ns ?? "main";
     let c = agentCtxs.get(key);
     if (!c) {
-      c = { messageCounter: 0, indexToId: new Map(), announced: new Set(), argsCapable: new Set(), argsFlushed: new Set(), textAcc: new Map(), reasoningAcc: new Map() };
+      c = { messageCounter: 0, indexToId: new Map(), announced: new Set(), argsCapable: new Set(), argsFlushed: new Set(), argsAcc: new Map(), textAcc: new Map(), reasoningAcc: new Map() };
       agentCtxs.set(key, c);
     }
     return c;
@@ -444,7 +449,27 @@ export async function* wrapAgentStream(
                 .join("")
             : "";
       const isError = msg.status === "error" || (typeof msg.status?.error === "string" && !!msg.status.error);
-      yield { type: "tool.result", toolCallId: callId, result: content, isError, ...(agentNs ? { agentNs } : {}) };
+      // Replayable boundary: the tool's FULL args ride on tool.result (the
+      // streamed args deltas are volatile and never persist — P0 layering).
+      // Without this, history replays rebuilt ToolEvents with empty args and
+      // every tool row showed "(unknown)" file names / "(empty)" commands.
+      // `name` rides along too when the ToolMessage carries it, so a row can
+      // render standalone without pairing back to tool.started.
+      const ac = ctxFor(agentNs);
+      const argsStr = ac.argsAcc.get(callId);
+      if (argsStr !== undefined) ac.argsAcc.delete(callId);
+      const parsedArgs = argsStr !== undefined ? safeParse(argsStr) : undefined;
+      const argsOk = parsedArgs !== undefined && parsedArgs !== null && typeof parsedArgs === "object" && !Array.isArray(parsedArgs);
+      const tcName = typeof msg.name === "string" && msg.name.length > 0 ? msg.name : undefined;
+      yield {
+        type: "tool.result",
+        toolCallId: callId,
+        result: content,
+        isError,
+        ...(argsOk ? { args: parsedArgs as Record<string, unknown> } : {}),
+        ...(tcName ? { name: tcName } : {}),
+        ...(agentNs ? { agentNs } : {}),
+      };
       // A tool result closes the current AI message — flush its terminal
       // *.ended events, then advance so the next AI chunk opens a new message.
       yield* flushEnded(ctxKey);
@@ -479,6 +504,7 @@ export async function* wrapAgentStream(
           // already-encoded JSON string — pass it through verbatim instead of
           // double-encoding, so the web-side parsePartialJson yields an object.
           const raw = typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args);
+          ac.argsAcc.set(tc.id, (ac.argsAcc.get(tc.id) ?? "") + raw);
           yield {
             type: "tool.args.delta",
             toolCallId: tc.id,
@@ -517,6 +543,7 @@ export async function* wrapAgentStream(
         // Forward args for any already-announced call, not just ones whose
         // fragment re-carries a name.
         if (ac.argsCapable.has(callId) && typeof tcc.args === "string" && tcc.args.length > 0) {
+          ac.argsAcc.set(callId, (ac.argsAcc.get(callId) ?? "") + tcc.args);
           yield { type: "tool.args.delta", toolCallId: callId, index: idx, argsDelta: tcc.args, ...(agentNs ? { agentNs } : {}) };
         }
       }
