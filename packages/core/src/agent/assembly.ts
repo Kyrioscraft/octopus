@@ -73,6 +73,11 @@ export function assembleSubagentSpecs(
       systemPrompt: sa.systemPrompt,
       // Propagate the binary-content sanitizer — see module header.
       middleware: subagentMiddleware,
+      // Subagent tool calls run WITHOUT HITL interrupts — approval happens
+      // once, at the parent's `task` delegation gate. Without this the SDK
+      // propagates the main graph's interruptOn to every subagent and each
+      // subagent tool call re-prompts.
+      interruptOn: {},
     };
     const whitelist = resolveToolWhitelist(sa.tools, mainTools);
     if (whitelist) spec.tools = whitelist;
@@ -80,12 +85,19 @@ export function assembleSubagentSpecs(
     subagentSpecs.push(spec);
   }
   for (const sa of BUILTIN_SUBAGENTS) {
-    if (sa.injectedBy !== "explicit") continue;
+    // general-purpose (injectedBy === "sdk") is ALSO injected explicitly here:
+    // the SDK's auto-injected copy inherits defaultInterruptOn (HITL gates),
+    // but subagent tool calls must not re-prompt. graph.ts disables the SDK's
+    // auto-injection (generalPurposeAgent: false); this explicit spec — with
+    // interruptOn: {} — shadows it cleanly. User-defined subagents that
+    // shadow a built-in name already won the loop above.
     const spec: Record<string, unknown> = {
       name: sa.name,
       description: sa.description,
       systemPrompt: sa.systemPrompt,
       middleware: subagentMiddleware,
+      // See above — subagents inherit no HITL interrupts.
+      interruptOn: {},
     };
     // Built-in explicit subagents force their own whitelist (Explore is
     // read-only by construction) — the value on the BuiltInSubagent wins.

@@ -184,9 +184,14 @@ chatRouter.get("/threads", getOptionalUser, (c) => {
 // =========================================================================
 
 chatRouter.get("/thread/:id/history", getOptionalUser, (c) => {
-  const history = getThreadHistory(c.req.param("id"));
+  const id = c.req.param("id");
+  const history = getThreadHistory(id);
   if (history === null) return c.json({ detail: "会话不存在" }, 404);
-  return c.json({ history });
+  // Thread-level agent (access_mode column) is the user's most recent explicit
+  // choice (PATCH /agent and every /agent turn update it) — the client restores
+  // the input-bar selector from it, falling back to message-level metadata.
+  const thread = getThread(id);
+  return c.json({ history, agent: thread?.accessMode });
 });
 
 // =========================================================================

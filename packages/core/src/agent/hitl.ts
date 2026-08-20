@@ -76,10 +76,10 @@ export function buildInterruptOn(fileWriteRuleset?: Ruleset): Record<string, any
       allowedDecisions: ["approve", "reject"],
       description: "Allow URL fetch?",
     },
-    task: {
-      allowedDecisions: ["approve", "reject"],
-      description: "Allow task delegation to subagent?",
-    },
+    // NOTE: `task` (subagent delegation) is deliberately NOT gated —
+    // approval moved off delegation entirely; subagents run with
+    // interruptOn: {} (see assembly.ts). Gating `task` would re-introduce a
+    // prompt on every delegation with no additional protection.
     start_async_task: {
       allowedDecisions: ["approve", "reject"],
       description: "Launch, update, or cancel a remote async subagent.",

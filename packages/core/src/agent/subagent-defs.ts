@@ -137,10 +137,11 @@ export const EXPLORE_SUBAGENT: BuiltInSubagent = {
 /**
  * Adapter for the deepagents SDK's general-purpose subagent.
  *
- * The SDK auto-injects general-purpose into the compiled graph (it is the
- * default catch-all subagent). We do NOT re-inject it via createDeepAgent —
- * that would create a duplicate. This entry only exists so the unified
- * registry (and the web UI) can describe it alongside Explore.
+ * The SDK's auto-injection is disabled (generalPurposeAgent: false in
+ * graph.ts); we inject this spec explicitly via createDeepAgent — with
+ * `interruptOn: {}` so its tool calls don't re-trigger HITL approval —
+ * keeping a single instance (no duplicate). This entry also feeds the
+ * unified registry so the web UI can describe it alongside Explore.
  *
  * `tools: undefined` means "inherit all of the main agent's tools", matching
  * the SDK's behavior for general-purpose.

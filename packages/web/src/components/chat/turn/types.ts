@@ -38,8 +38,15 @@ export interface ReasoningEvent extends BaseTurnEvent {
   type: "reasoning";
   /** Accumulated reasoning text. */
   text: string;
-  /** Wall-clock duration of this reasoning span (ms), for the collapse summary. */
+  /** Wall-clock timestamp when this reasoning span started (ms). */
   startedAt: number;
+  /**
+   * Wall-clock timestamp when this reasoning span ended (ms) — frozen by
+   * `closeReasoning()` so the duration stops growing once the episode is
+   * over. Undefined while still streaming (or for historical replays that
+   * lost the timing, where startedAt is 0).
+   */
+  endedAt?: number;
 }
 
 /**

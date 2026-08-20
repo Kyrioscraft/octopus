@@ -103,25 +103,25 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
     }
     if (q.options && q.options.length > 0) {
       const sel = selections[q.question_id];
-      if (Array.isArray(sel)) {
-        // "其他" counts only when the free-text is filled.
-        const concrete = sel.filter((v) => v !== "__other__");
-        if (concrete.length > 0) return true;
-        return sel.includes("__other__") && !!(texts[q.question_id] ?? "").trim();
-      }
-      if (sel === "__other__") return !!(texts[q.question_id] ?? "").trim();
-      return !!sel;
+      if (Array.isArray(sel)) return sel.length > 0 || !!(texts[q.question_id] ?? "").trim();
+      return !!sel || !!(texts[q.question_id] ?? "").trim();
     }
     return !!(texts[q.question_id] ?? "").trim();
   };
 
   /** Build the final ResumeRequestBody from the staged state.
-   *  (`meta.approveForSession` is legacy — "always" now comes through the
-   *  staged approval itself, selected as an option row in the body.) */
-  const buildBody = (meta?: { approveForSession?: boolean }): ResumeRequestBody => {
+   *  `overrides` lets callers inject just-clicked answers (single-select /
+   *  approval click-to-send) that haven't landed in state yet. */
+  const buildBody = (
+    meta?: { approveForSession?: boolean },
+    overrides?: {
+      selections?: Record<string, string | string[]>;
+      approvals?: Record<string, Approval>;
+    },
+  ): ResumeRequestBody => {
     if (payload.kind === "tool_approval") {
       const decisions = payload.questions.map((q) => {
-        const a = approvals[q.question_id];
+        const a = overrides?.approvals?.[q.question_id] ?? approvals[q.question_id];
         if (!a) return { type: "approve" as const };
         if (a.type === "always") {
           return {
@@ -144,31 +144,61 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
       };
     }
     const answers = payload.questions.map((q) => {
-      const rawSel = selections[q.question_id];
+      const rawSel = overrides?.selections?.[q.question_id] ?? selections[q.question_id];
       const txt = texts[q.question_id];
-      // Strip the "其他" sentinel — the free-text IS the answer for it.
-      const sel = Array.isArray(rawSel)
-        ? rawSel.filter((v) => v !== "__other__")
-        : rawSel === "__other__"
-          ? undefined
-          : rawSel;
+      // "其他" is no longer a sentinel selection — the free-text lives in
+      // `text` and IS the answer for it. Deselecting a single-choice row
+      // stages "" — treat it as no selection.
+      const sel = !rawSel || (Array.isArray(rawSel) && rawSel.length === 0) ? undefined : rawSel;
       return {
         question_id: q.question_id,
-        ...(sel !== undefined && (Array.isArray(sel) ? sel.length > 0 : true)
-          ? { selection: sel }
-          : {}),
+        ...(sel !== undefined ? { selection: sel } : {}),
         ...(txt && txt.trim() ? { text: txt.trim() } : {}),
       };
     });
     return { kind: payload.kind, answers };
   };
 
-  /** Submit the whole answer set (called from the last page's primary btn). */
-  const submitAll = (meta?: { approveForSession?: boolean }) => {
-    onResolve(buildBody(meta), meta);
+  /** Submit the whole answer set. `overrides` carries just-clicked answers
+   *  (click-to-send) past the state update that hasn't flushed yet. */
+  const submitAll = (
+    meta?: { approveForSession?: boolean },
+    overrides?: {
+      selections?: Record<string, string | string[]>;
+      approvals?: Record<string, Approval>;
+    },
+  ) => {
+    onResolve(buildBody(meta, overrides), meta);
   };
 
   const canAdvance = isAnswered(current);
+  // Option questions (discussion/clarify with options) always use 提交/忽略 —
+  // on non-last pages 提交 stages the answer and advances.
+  const isOptionQuestion =
+    payload.kind !== "tool_approval" &&
+    payload.kind !== "plan_approval" &&
+    !!current.options?.length;
+
+  /** Advance to next page, or submit everything from the last page. */
+  const advanceOrSubmit = () => {
+    if (isLast) submitAll();
+    else setPage((p) => Math.min(total - 1, p + 1));
+  };
+
+  /** 忽略 — skip the current question (no selection/text) and move on. */
+  const skipCurrent = () => {
+    setSelections((p) => {
+      const next = { ...p };
+      delete next[current.question_id];
+      return next;
+    });
+    setTexts((p) => {
+      const next = { ...p };
+      delete next[current.question_id];
+      return next;
+    });
+    advanceOrSubmit();
+  };
   const sessionAllowed =
     payload.kind === "tool_approval" &&
     !!sessionAllowlist &&
@@ -236,7 +266,9 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         )}
       </div>
 
-      {/* Current question body — only this page is mounted. */}
+      {/* Current question body — only this page is mounted. `onPickOption`
+          is the single-select click-to-send path: the clicked value is both
+          staged and submitted immediately. */}
       <QuestionBody
         key={current.question_id}
         kind={payload.kind}
@@ -247,22 +279,62 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         onSelection={(s) => setSelections((p) => ({ ...p, [current.question_id]: s }))}
         text={texts[current.question_id] ?? ""}
         onText={(t) => setTexts((p) => ({ ...p, [current.question_id]: t }))}
+        onSubmit={advanceOrSubmit}
+        onPickOption={(v) => {
+          setSelections((p) => ({ ...p, [current.question_id]: v }));
+          submitAll(undefined, { selections: { [current.question_id]: v } });
+        }}
+        onPickApproval={(a) => {
+          setApprovals((p) => ({ ...p, [current.question_id]: a }));
+          submitAll(
+            a.type === "always" ? { approveForSession: true } : undefined,
+            { approvals: { [current.question_id]: a } },
+          );
+        }}
         sessionAllowed={sessionAllowed}
       />
 
-      {/* Footer toolbar — primary action only (pagination moved to header).
-          All kinds share the same 下一题/提交 flow now that approvals are
-          staged as option rows in the body (no per-kind button clusters). */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          gap: 8,
-          marginTop: 12,
-        }}
-      >
-        {isLast ? (
+      {/* Footer toolbar — option questions use 提交/忽略; single-select and
+          tool_approval are click-to-send (no footer needed); the remaining
+          kinds keep the 下一题/提交 staging flow. */}
+      {payload.kind !== "tool_approval" && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-end",
+            gap: 8,
+            marginTop: 12,
+          }}
+        >
+        {isOptionQuestion ? (
+          <>
+            <Button
+              size="small"
+              onClick={skipCurrent}
+              style={{ color: "var(--gray-500)", boxShadow: "none" }}
+            >
+              忽略
+            </Button>
+            <Button
+              size="small"
+              icon={<Check />}
+              disabled={!canAdvance}
+              onClick={advanceOrSubmit}
+              style={css(
+                S.mainBase,
+                mainState === "hover" && S.mainHover,
+                mainState === "press" && S.mainPress,
+              )}
+              onMouseEnter={() => setMainState("hover")}
+              onMouseLeave={() => setMainState("base")}
+              onMouseDown={() => setMainState("press")}
+              onMouseUp={() => setMainState("hover")}
+            >
+              提交
+            </Button>
+          </>
+        ) : isLast ? (
           <Button
             size="small"
             icon={<Check />}
@@ -298,7 +370,8 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
             下一题
           </Button>
         )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -350,6 +423,12 @@ interface BodyProps {
   text: string;
   onText: (t: string) => void;
   sessionAllowed: boolean;
+  /** Option questions — advance/submit the current page (Enter key etc.). */
+  onSubmit: () => void;
+  /** Single-select click-to-send: the option the user just clicked. */
+  onPickOption: (value: string) => void;
+  /** tool_approval click-to-send: the decision row the user just clicked. */
+  onPickApproval: (a: { type: "approve" | "always" | "reject" }) => void;
 }
 
 function QuestionBody(p: BodyProps) {
@@ -362,12 +441,12 @@ function QuestionBody(p: BodyProps) {
 
   if (p.kind === "tool_approval") {
     return <ToolApprovalBody {...p} header={QHeader} />;
-  }
-  if (p.kind === "plan_approval") {
+  }  if (p.kind === "plan_approval") {
     return <PlanApprovalBody {...p} />;
   }
   if (p.q.options && p.q.options.length > 0) {
-    return <DiscussionBody {...p} header={QHeader} />;
+    const { onSubmit, onPickOption, ...rest } = p;
+    return <DiscussionBody {...rest} header={QHeader} onSubmit={onSubmit} onPickOption={onPickOption} />;
   }
   return <ClarifyBody {...p} header={QHeader} />;
 }
@@ -382,6 +461,7 @@ function ToolApprovalBody({
   header,
   approval,
   onApproval,
+  onPickApproval,
   sessionAllowed,
 }: BodyProps & { header: React.ReactNode }) {
   const actionReq = q.context?.actionRequests?.[0];
@@ -485,11 +565,13 @@ function ToolApprovalBody({
           {JSON.stringify(actionReq.args, null, 2)}
         </pre>
       )}
-      {/* Decision as option rows — same visual language as the discussion
-          body (radio-style selectable rows) instead of footer buttons. */}
+      {/* Decision as click-to-send option rows — same visual language as the
+          single-select discussion rows. Clicking a row IS the answer; no
+          footer submit needed. */}
       <ApprovalOptionRows
         approval={approval}
         onApproval={onApproval}
+        onPick={onPickApproval}
         sessionAllowed={sessionAllowed}
         allowAlways={allowAlways}
       />
@@ -498,20 +580,19 @@ function ToolApprovalBody({
 }
 
 /**
- * Decision options rendered as selectable rows (radio-style), matching the
- * discussion body's visual language. Replaces the old footer button cluster:
+ * Decision options rendered as click-to-send selectable rows — same visual
+ * language as the single-select discussion body. Clicking a row stages the
+ * decision AND submits immediately (zcode-style):
  *   批准 / 本会话都批准(always) / 拒绝
- * Selecting a row stages the decision; the footer's 提交/下一题 button
- * advances/submits like the discussion flow.
  */
 function ApprovalOptionRows({
   approval,
-  onApproval,
-  sessionAllowed,
+  onPick,
   allowAlways,
 }: {
   approval?: Approval;
   onApproval: (a: Approval) => void;
+  onPick: (a: Approval) => void;
   sessionAllowed: boolean;
   allowAlways: boolean;
 }) {
@@ -523,38 +604,47 @@ function ApprovalOptionRows({
     { value: "reject", label: "拒绝", danger: true },
   ];
   return (
-    <Radio.Group
-      value={approval?.type ?? ""}
-      onChange={(e) => {
-        const v = e.target.value as Approval["type"];
-        onApproval({ type: v });
-      }}
-      style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}
-    >
-      {rows.map((r) => (
-        <Radio key={r.value} value={r.value}>
-          <span
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
+      {rows.map((r) => {
+        const selected = approval?.type === r.value;
+        return (
+          <div
+            key={r.value}
+            onClick={() => onPick({ type: r.value })}
             style={{
-              fontSize: 13,
-              fontWeight: 500,
-              color: r.danger ? "var(--color-error-500)" : "var(--gray-900)",
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "7px 10px",
+              borderRadius: 8,
+              border: `1px solid ${selected ? (r.danger ? "var(--color-error-500)" : "var(--gray-900)") : "var(--gray-150)"}`,
+              background: selected ? "var(--gray-0)" : "transparent",
+              cursor: "pointer",
+              transition: "all 0.15s ease",
             }}
           >
-            {r.label}
-          </span>
-          {r.hint && (
-            <span style={{ color: "var(--gray-400)", marginLeft: 6, fontSize: 12 }}>
-              {r.hint}
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 500,
+                color: r.danger ? "var(--color-error-500)" : "var(--gray-900)",
+              }}
+            >
+              {r.label}
             </span>
-          )}
-          {sessionAllowed && r.value === "approve" && (
-            <span style={{ fontSize: 11, color: "var(--gray-400)", marginLeft: 6 }}>
-              （已在会话白名单，将自动批准）
-            </span>
-          )}
-        </Radio>
-      ))}
-    </Radio.Group>
+            {r.hint && (
+              <span style={{ color: "var(--gray-400)", fontSize: 12, flex: 1 }}>{r.hint}</span>
+            )}
+            {selected && (
+              <Check
+                size={14}
+                style={{ color: r.danger ? "var(--color-error-500)" : "var(--gray-900)" }}
+              />
+            )}
+          </div>
+        );
+      })}
+    </div>
   );
 }
 
@@ -634,24 +724,17 @@ function DiscussionBody({
   text,
   onText,
   header,
-}: BodyProps & { header: React.ReactNode }) {
+  onSubmit,
+  onPickOption,
+}: BodyProps & { header: React.ReactNode; onSubmit: () => void; onPickOption: (v: string) => void }) {
   const multi = !!q.multi_select;
   const options = q.options ?? [];
-  const OTHER = "__other__";
-  // Selection state carries OTHER when the "其他" row is picked; the actual
-  // free-text lives in `text`. Submit (buildBody) strips OTHER and keeps the
-  // text so the agent only sees the typed answer.
-  const sel = selection as string | string[] | undefined;
-  const isOtherSelected = multi
-    ? Array.isArray(sel) && sel.includes(OTHER)
-    : sel === OTHER;
 
-  const pickOther = () => {
-    if (multi) {
-      const cur = Array.isArray(sel) ? sel : [];
-      onSelection(cur.includes(OTHER) ? cur.filter((v) => v !== OTHER) : [...cur, OTHER]);
-    } else {
-      onSelection(OTHER);
+  /** Enter submits, Shift+Enter inserts a newline. */
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      e.preventDefault();
+      onSubmit();
     }
   };
 
@@ -678,62 +761,59 @@ function DiscussionBody({
           ))}
         </Checkbox.Group>
       ) : (
-        <Radio.Group
-          value={(selection as string) ?? ""}
-          onChange={(e) => onSelection(e.target.value as string)}
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          {options.map((opt) => (
-            <Radio key={opt.value} value={opt.value}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--gray-900)" }}>
-                {opt.label}
-              </span>
-              {opt.description && (
-                <span style={{ color: "var(--gray-400)", marginLeft: 6, fontSize: 12 }}>
-                  {opt.description}
+        /* Single-select — no radio buttons, no confirm step: clicking a row
+            IS the answer (zcode-style click-to-send). */
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {options.map((opt) => {
+            const selected = selection === opt.value;
+            return (
+              <div
+                key={opt.value}
+                onClick={() => onPickOption(opt.value)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  padding: "7px 10px",
+                  borderRadius: 8,
+                  border: `1px solid ${selected ? "var(--gray-900)" : "var(--gray-150)"}`,
+                  background: selected ? "var(--gray-0)" : "transparent",
+                  cursor: "pointer",
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: "var(--gray-900)",
+                    flex: 1,
+                  }}
+                >
+                  {opt.label}
                 </span>
-              )}
-            </Radio>
-          ))}
-        </Radio.Group>
-      )}
-      {/* "其他" — an option row WITH an inline input (not a detached
-          textarea below the options). Typing selects the row automatically. */}
-      {q.allow_other && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-start",
-            gap: 8,
-            marginTop: 8,
-            padding: isOtherSelected ? "6px 8px" : 0,
-            borderRadius: 6,
-            border: isOtherSelected ? "1px solid var(--gray-300)" : "1px solid transparent",
-            background: isOtherSelected ? "var(--gray-0)" : "transparent",
-            transition: "all 0.15s ease",
-          }}
-        >
-          {multi ? (
-            <Checkbox checked={isOtherSelected} onChange={pickOther} style={{ marginTop: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--gray-900)" }}>其他…</span>
-            </Checkbox>
-          ) : (
-            <Radio checked={isOtherSelected} onClick={pickOther} style={{ marginTop: 4 }}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--gray-900)" }}>其他…</span>
-            </Radio>
-          )}
-          <TextArea
-            value={text}
-            onChange={(e) => {
-              onText(e.target.value);
-              // Typing implies choosing "其他" — auto-select the row.
-              if (e.target.value && !isOtherSelected) pickOther();
-            }}
-            placeholder="自由输入…"
-            autoSize={{ minRows: 1, maxRows: 4 }}
-            style={{ fontSize: 13, flex: 1, marginTop: 0 }}
-          />
+                {opt.description && (
+                  <span style={{ color: "var(--gray-400)", fontSize: 12 }}>
+                    {opt.description}
+                  </span>
+                )}
+                {selected && <Check size={14} style={{ color: "var(--gray-900)" }} />}
+              </div>
+            );
+          })}
         </div>
+      )}
+      {/* "其他" — a plain textarea with a placeholder, no radio/checkbox and
+          no "其他" wording. Enter submits. */}
+      {q.allow_other && (
+        <TextArea
+          value={text}
+          onChange={(e) => onText(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="或输入其他内容…"
+          autoSize={{ minRows: 1, maxRows: 4 }}
+          style={{ fontSize: 13, marginTop: 8 }}
+        />
       )}
     </div>
   );

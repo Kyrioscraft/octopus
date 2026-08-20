@@ -278,14 +278,15 @@ export const BUILTIN_AGENTS: Record<string, AgentPreset> = {
   full,
 };
 
-/** The tools `_addInterruptOn()` gates — shared by config.ts's bridge. */
+/** The tools `_addInterruptOn()` gates — shared by config.ts's bridge.
+ *  `task` is NOT gated: subagent delegation auto-approves (subagents run
+ *  with empty interruptOn — see assembly.ts). */
 export const GATED_TOOLS: string[] = [
   "execute",
   "write_file",
   "edit_file",
   "web_search",
   "fetch_url",
-  "task",
   "start_async_task",
   "update_async_task",
   "cancel_async_task",

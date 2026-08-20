@@ -261,6 +261,8 @@ export async function* wrapAgentStream(
     indexToId: Map<number, string>;
     /** callIds already announced via tool.started. */
     announced: Set<string>;
+    /** Non-task callIds allowed to receive streamed args fragments. */
+    argsCapable: Set<string>;
     /** callIds whose args were already forwarded as a complete blob. */
     argsFlushed: Set<string>;
     /** messageId → accumulated text/reasoning, flushed as *.ended terminal events. */
@@ -272,7 +274,7 @@ export async function* wrapAgentStream(
     const key = ns ?? "main";
     let c = agentCtxs.get(key);
     if (!c) {
-      c = { messageCounter: 0, indexToId: new Map(), announced: new Set(), argsFlushed: new Set(), textAcc: new Map(), reasoningAcc: new Map() };
+      c = { messageCounter: 0, indexToId: new Map(), announced: new Set(), argsCapable: new Set(), argsFlushed: new Set(), textAcc: new Map(), reasoningAcc: new Map() };
       agentCtxs.set(key, c);
     }
     return c;
@@ -468,21 +470,29 @@ export async function* wrapAgentStream(
         if (!tc.id || !tc.name || tc.name === "task") continue;
         if (!ac.announced.has(tc.id)) {
           ac.announced.add(tc.id);
+          ac.argsCapable.add(tc.id);
           yield { type: "tool.started", toolCallId: tc.id, name: tc.name, ...(agentNs ? { agentNs } : {}) };
         }
         if (!ac.argsFlushed.has(tc.id) && tc.args && Object.keys(tc.args).length > 0) {
           ac.argsFlushed.add(tc.id);
+          // Some providers (legacy function_call form) hand args as an
+          // already-encoded JSON string — pass it through verbatim instead of
+          // double-encoding, so the web-side parsePartialJson yields an object.
+          const raw = typeof tc.args === "string" ? tc.args : JSON.stringify(tc.args);
           yield {
             type: "tool.args.delta",
             toolCallId: tc.id,
             index: 0,
-            argsDelta: JSON.stringify(tc.args),
+            argsDelta: raw,
             ...(agentNs ? { agentNs } : {}),
           };
         }
       }
       // Streaming fragments: bridge index→callId, emit started on first sight
-      // of (id, name), and forward each args fragment verbatim.
+      // of (id, name), and forward each args fragment verbatim. For providers
+      // like DeepSeek the FINAL aggregated message never re-carries complete
+      // tool_calls (the only tool_calls entry appears on the FIRST fragment
+      // with EMPTY args) — these fragments are the SOLE source of args.
       for (let i = 0; i < toolCallChunks.length; i++) {
         const tcc = toolCallChunks[i];
         if (!tcc) continue;
@@ -498,11 +508,16 @@ export async function* wrapAgentStream(
         if (name && name !== "task") {
           if (!ac.announced.has(callId)) {
             ac.announced.add(callId);
+            ac.argsCapable.add(callId);
             yield { type: "tool.started", toolCallId: callId, name, ...(agentNs ? { agentNs } : {}) };
           }
-          if (typeof tcc.args === "string" && tcc.args.length > 0) {
-            yield { type: "tool.args.delta", toolCallId: callId, index: idx, argsDelta: tcc.args, ...(agentNs ? { agentNs } : {}) };
-          }
+        }
+        // Args fragments arrive WITHOUT name/id (keyed by index only) — the
+        // OpenAI streaming protocol carries name only on the FIRST fragment.
+        // Forward args for any already-announced call, not just ones whose
+        // fragment re-carries a name.
+        if (ac.argsCapable.has(callId) && typeof tcc.args === "string" && tcc.args.length > 0) {
+          yield { type: "tool.args.delta", toolCallId: callId, index: idx, argsDelta: tcc.args, ...(agentNs ? { agentNs } : {}) };
         }
       }
     }

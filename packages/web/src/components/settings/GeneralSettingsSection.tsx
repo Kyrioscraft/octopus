@@ -8,12 +8,14 @@ import {
   CircleCheck,
   LogOut,
   Palette,
+  BrainCircuit,
 } from "lucide-react";
 import type { OctopusClient, GeneralSettingsResponse, User } from "@octopus/tentacle";
 import { SandboxSettingsSection } from "./SandboxSettingsSection.js";
 import { SettingsCard as Card } from "../shared/SettingsCard.js";
 import { useThemeStore } from "../../stores/theme.js";
 import type { ThemeMode } from "../../stores/theme.js";
+import { useDisplaySettingsStore } from "../../stores/display.js";
 
 interface Props {
   sdk: OctopusClient;
@@ -228,30 +230,61 @@ function AppearanceCard({
   mode: ThemeMode;
   onChange: (m: ThemeMode) => void;
 }) {
+  // Pure client-side display preference (messageStreamShowReasoning 语义).
+  const showFullReasoning = useDisplaySettingsStore((s) => s.showFullReasoning);
+  const setShowFullReasoning = useDisplaySettingsStore((s) => s.setShowFullReasoning);
   return (
     <Card title="外观">
-      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0" }}>
-        <span style={{ fontSize: 18, color: "var(--main-color)", width: 24, textAlign: "center" }}>
-          <Palette />
-        </span>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-1000)" }}>
-            主题模式
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0" }}>
+          <span style={{ fontSize: 18, color: "var(--main-color)", width: 24, textAlign: "center" }}>
+            <Palette />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-1000)" }}>
+              主题模式
+            </div>
+            <div style={{ fontSize: 12, color: "var(--gray-500)" }}>
+              选择界面配色，或跟随系统
+            </div>
           </div>
-          <div style={{ fontSize: 12, color: "var(--gray-500)" }}>
-            选择界面配色，或跟随系统
-          </div>
+          <Segmented<ThemeMode>
+            size="small"
+            value={mode}
+            onChange={(v) => onChange(v)}
+            options={[
+              { label: "☀ 浅色", value: "light" },
+              { label: "🌙 深色", value: "dark" },
+              { label: "🖥 系统", value: "system" },
+            ]}
+          />
         </div>
-        <Segmented<ThemeMode>
-          size="small"
-          value={mode}
-          onChange={(v) => onChange(v)}
-          options={[
-            { label: "☀ 浅色", value: "light" },
-            { label: "🌙 深色", value: "dark" },
-            { label: "🖥 系统", value: "system" },
-          ]}
-        />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "12px 0",
+            borderTop: "1px solid var(--gray-100)",
+          }}
+        >
+          <span style={{ fontSize: 18, color: "var(--main-color)", width: 24, textAlign: "center" }}>
+            <BrainCircuit />
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-1000)" }}>
+              展示完整思考内容
+            </div>
+            <div style={{ fontSize: 12, color: "var(--gray-500)" }}>
+              在消息流中展示完整的模型思考内容；关闭时每轮仍展示第一次思考
+            </div>
+          </div>
+          <Switch
+            size="small"
+            checked={showFullReasoning}
+            onChange={(v) => setShowFullReasoning(v)}
+          />
+        </div>
       </div>
     </Card>
   );

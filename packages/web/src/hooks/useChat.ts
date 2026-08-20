@@ -291,22 +291,22 @@ export function useChat({
     const running = useChatStore.getState().runningThreads[tid];
     try {
       const r = await sdk.getThreadHistory(tid);
-      // Restore the input bar's agent selector. Priority: the thread-level
-      // agent (access_mode — the user's most recent explicit choice via the
-      // selector), then the last user-message agent (message-level binding).
-      // Without the thread field (older servers) or any message, keep the
-      // current value rather than resetting to the default.
+      // Restore the input bar's agent selector. Priority: the history
+      // response's thread-level agent (most authoritative), the thread list's
+      // accessMode (from GET /threads — covers empty-history threads), then
+      // the last user-message agent (message-level binding). Without any of
+      // these, keep the current value rather than resetting to the default.
       const isAgent = (v: unknown): v is AccessMode =>
         v === "plan" || v === "confirm" || v === "auto" || v === "full";
-      if (isAgent(r.agent)) {
-        setAccessMode(r.agent);
-      } else {
-        const lastUser = [...(r.history ?? [])].reverse().find((m) => m.role === "user");
-        const fromMsg = lastUser?.extraMetadata?.agent;
-        if (isAgent(fromMsg)) {
-          setAccessMode(fromMsg);
-        }
-      }
+      const fromThreadList =
+        useChatStore.getState().threads.find((t) => t.id === tid)?.accessMode;
+      const lastUser = [...(r.history ?? [])].reverse().find((m) => m.role === "user");
+      const fromMsg = lastUser?.extraMetadata?.agent;
+      const restored = isAgent(r.agent) ? r.agent
+        : isAgent(fromThreadList) ? fromThreadList
+        : isAgent(fromMsg) ? fromMsg
+        : undefined;
+      if (restored) setAccessMode(restored);
 
       if (running) {
         // The run is still executing: render messages UP TO the current turn

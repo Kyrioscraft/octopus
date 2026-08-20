@@ -2,6 +2,7 @@ import type { TurnEvent, SubagentEvent } from "./types.js";
 import { ToolCallRenderer } from "../rows/tools/ToolCallRenderer.js";
 import { Markdown } from "../../widgets/Markdown.js";
 import { SubagentRow } from "../rows/subagents/SubagentRow.js";
+import { ReasoningBlock } from "../rows/ReasoningBlock.js";
 
 /**
  * Dispatch a single turn event to its specialized renderer.
@@ -31,8 +32,9 @@ export function EventRow({
 }) {
   switch (event.type) {
     case "reasoning":
-      // 思考内容不在对话回合中显示（仅保留在 events[] 数据中）。
-      return null;
+      // 默认仅渲染每轮第一个思考块（groupEvents 已过滤后续块），
+      // 全量开关见 stores/display.ts（messageStreamShowReasoning 语义）。
+      return <ReasoningBlock event={event} isActive={isActive} />;
 
     case "tool":
       return <ToolCallRenderer entry={event.entry} defaultExpanded={isActive} />;

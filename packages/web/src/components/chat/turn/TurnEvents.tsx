@@ -2,6 +2,7 @@ import { useState } from "react";
 import type { TurnEvent, ToolEvent } from "./types.js";
 import { EventRow } from "./EventRow.js";
 import { ToolCallRenderer } from "../rows/tools/ToolCallRenderer.js";
+import { useDisplaySettingsStore } from "../../../stores/display.js";
 import {
   isExplorationTool,
   isDisplayedExplorationTool,
@@ -53,19 +54,29 @@ export type TurnItem = ToolGroup | SingleItem;
  * merges into one tool-group. Non-exploration tools (write/execute/web/…) each
  * become their own single item → rendered as a full tool row, never grouped.
  *
- * Events that are not rendered (reasoning / ask) are filtered out *before*
- * grouping, so they don't fragment a contiguous run of exploration calls.
+ * Reasoning follows ZCode's `messageStreamFirstReasoningRowId` semantics: by
+ * default only the FIRST reasoning block of the turn is rendered; later
+ * interleaved thinking blocks are dropped (not merged) unless
+ * `opts.showAllReasoning` is on.
+ *
+ * Events that are not rendered (ask / non-first reasoning) are filtered out
+ * *before* grouping, so they don't fragment a contiguous run of exploration
+ * calls.
  */
-export function groupEvents(events: TurnEvent[]): TurnItem[] {
+export function groupEvents(
+  events: TurnEvent[],
+  opts?: { showAllReasoning?: boolean },
+): TurnItem[] {
   const items: TurnItem[] = [];
   let i = 0;
   let groupSeq = 0;
-  // 只保留会被渲染的事件类型；reasoning/ask 在时间线中不显示。
-  // write_todos 也不在时间线显示 —— 它的进度改由输入栏的待办徽章承载
-  // (TodoBadge)，避免占工具行位置。数据仍在 events[] 中供徽章取用。
+  // 只保留会被渲染的事件类型；ask / write_todos 在时间线中不显示。
+  // reasoning 默认仅显示每轮第一个（ZCode messageStreamShowReasoning 语义）。
+  // write_todos 的进度改由输入栏的待办徽章承载（TodoBadge）。
+  const firstReasoningId = events.find((ev) => ev.type === "reasoning")?.id;
   const visible = events.filter(
     (ev) =>
-      ev.type !== "reasoning" &&
+      (ev.type !== "reasoning" || opts?.showAllReasoning || ev.id === firstReasoningId) &&
       ev.type !== "ask" &&
       !(ev.type === "tool" && ev.entry.name === "write_todos"),
   );
@@ -101,8 +112,9 @@ export function TurnEvents({
    *  event lists (inside the side panel) don't need it. */
   onOpenSubagent?: (event: import("./types.js").SubagentEvent) => void;
 }) {
+  const showAllReasoning = useDisplaySettingsStore((s) => s.showFullReasoning);
   if (events.length === 0) return null;
-  const items = groupEvents(events);
+  const items = groupEvents(events, { showAllReasoning });
 
   return (
     <div

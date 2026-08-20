@@ -94,6 +94,9 @@ export interface Thread {
   userId: string;
   title: string;
   agentId: string;
+  /** Thread-level agent (access_mode) — the user's most recent explicit
+   * choice. Present on current servers; optional for back-compat. */
+  accessMode?: "plan" | "confirm" | "auto" | "full";
   /** Workspace this thread is bound to (optional for back-compat). */
   workspaceId?: string | null;
   /** True when the thread has an agent run still executing server-side
@@ -118,6 +121,9 @@ export interface MessageRow {
 
 export interface ThreadHistoryResponse {
   history: MessageRow[];
+  /** Thread-level agent (access_mode) — the user's most recent explicit
+   * choice. Absent on older servers; clients fall back to message metadata. */
+  agent?: "plan" | "confirm" | "auto" | "full";
 }
 
 // =============================================================================

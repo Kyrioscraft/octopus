@@ -470,6 +470,11 @@ async function _makeGraphUncached(
     backend,
     middleware,
     interruptOn,
+    // assembleSubagentSpecs injects ALL built-ins explicitly (including
+    // general-purpose, with interruptOn: {}). Later specs overwrite the SDK's
+    // auto-injected general-purpose in the agents map, so subagent tool calls
+    // don't re-trigger HITL approval (approval happens at the parent's `task`
+    // gate) and no duplicate is created.
     subagents: subagentSpecs.length > 0 ? subagentSpecs : undefined,
     skills: skillSourcePaths.length > 0 ? skillSourcePaths.map(([p]) => p) : undefined,
   });
