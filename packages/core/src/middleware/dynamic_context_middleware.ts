@@ -99,6 +99,8 @@ interface GitSnapshot {
   /** Porcelain status lines, capped at 10. */
   status: string[];
   isRepo: boolean;
+  /** ISO timestamp of when the snapshot was captured (graph build time). */
+  capturedAt: string;
 }
 
 /**
@@ -118,9 +120,9 @@ function _captureGitSnapshot(cwd: string): GitSnapshot {
     const branch = execSync("git rev-parse --abbrev-ref HEAD", opts).toString().trim();
     const raw = execSync("git status --porcelain", opts).toString();
     const status = raw.split("\n").filter((l) => l.trim().length > 0);
-    return { branch, status, isRepo: true };
+    return { branch, status, isRepo: true, capturedAt: new Date().toISOString() };
   } catch {
-    return { status: [], isRepo: false };
+    return { status: [], isRepo: false, capturedAt: "" };
   }
 }
 
@@ -136,7 +138,7 @@ const GIT_STATUS_CAP = 10;
  * string or a content-blocks array. Uses the official `.text` getter when
  * available; falls back to manual extraction.
  */
-function readMessageText(message: unknown): string {
+export function readMessageText(message: unknown): string {
   if (!message || typeof message !== "object") return "";
   const msg = message as { text?: unknown; content?: unknown };
 
@@ -163,7 +165,7 @@ function readMessageText(message: unknown): string {
  * prototype and metadata. Content is written as a plain string for the
  * string-input path, or as a content-blocks array if the caller passes one.
  */
-function withMessageContent<T>(message: T, newContent: string | Array<{ type: string; text: string }>): T {
+export function withMessageContent<T>(message: T, newContent: string | Array<{ type: string; text: string }>): T {
   if (!message || typeof message !== "object") return message;
   return Object.assign(
     Object.create(Object.getPrototypeOf(message)),
@@ -176,24 +178,11 @@ function withMessageContent<T>(message: T, newContent: string | Array<{ type: st
 // Human-message detection
 // =============================================================================
 
-function _isHumanMessage(msg: BaseMessage): boolean {
+export function _isHumanMessage(msg: BaseMessage): boolean {
   return (
     (msg as any).type === "human" ||
     (msg as any)._getType?.() === "human"
   );
-}
-
-/**
- * Find the index of the last HumanMessage in the array. Returns -1 if none.
- * Uses a manual reverse scan for broad Node version compatibility
- * (`Array.findLastIndex` requires Node 18+; the manual loop is universally
- * safe and trivially cheap).
- */
-function _findLastHumanIndex(messages: BaseMessage[]): number {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    if (_isHumanMessage(messages[i])) return i;
-  }
-  return -1;
 }
 
 // =============================================================================
@@ -227,6 +216,9 @@ function _buildEnvironmentBlock(opts: DynamicContextOptions, git: GitSnapshot): 
   ];
   if (git.isRepo) {
     lines.push(`- Is a git repository: yes`);
+    if (git.capturedAt) {
+      lines.push(`- Git snapshot captured at: ${git.capturedAt} (run git commands for fresh state)`);
+    }
     if (git.branch) lines.push(`- Current branch: ${git.branch}`);
     if (git.status.length > 0) {
       const shown = git.status.slice(0, GIT_STATUS_CAP);
@@ -431,30 +423,34 @@ class DynamicContextMiddleware {
       return handler(request);
     }
 
-    const lastHumanIdx = _findLastHumanIndex(messages);
-    if (lastHumanIdx === -1) {
-      return handler(request);
-    }
-
-    const target = messages[lastHumanIdx];
-
-    // Idempotency: skip if this message already carries our sentinel.
-    // The same HumanMessage is seen across multiple model calls within one
-    // turn (tool-call → result → next call); without this check the reminder
-    // would stack on every iteration.
-    const existingText = readMessageText(target);
-    if (existingText.includes(REMINDER_SENTINEL)) {
-      return handler(request);
-    }
-
+    // Deterministic re-injection: inject the reminder into EVERY HumanMessage
+    // missing our sentinel — not just the last one. The injection lives only
+    // in the request copy (never written back to the checkpoint), so on the
+    // next turn the historical messages come back un-injected. If we only
+    // tagged the *latest* human message, that message would revert to its
+    // un-injected form on the following turn, diverging from the previously
+    // cached prefix at that point and invalidating everything after it
+    // (observed as ~1% cache hit). Re-deriving the injection for all human
+    // messages each call keeps the request prefix byte-identical across
+    // turns, which is what OpenAI automatic prefix caching (and Anthropic's
+    // cache) requires. Same pattern as Claude Code, where system-reminders
+    // persist in the stored history.
     const reminder = buildSystemReminder(this.opts, this.git);
-    const rewritten = _injectReminder(target, reminder);
-
     const newMessages = [...messages];
-    newMessages[lastHumanIdx] = rewritten;
+    let injectedCount = 0;
+    for (let i = 0; i < newMessages.length; i++) {
+      const msg = newMessages[i];
+      if (!_isHumanMessage(msg)) continue;
+      if (readMessageText(msg).includes(REMINDER_SENTINEL)) continue;
+      newMessages[i] = _injectReminder(msg, reminder);
+      injectedCount++;
+    }
+    if (injectedCount === 0) {
+      return handler(request);
+    }
 
     logger.debug(
-      `Injected system-reminder into HumanMessage at index ${lastHumanIdx} ` +
+      `Injected system-reminder into ${injectedCount} HumanMessage(s) ` +
         `(cwd=${this.opts.cwd}, agent=${this.opts.agentName})`,
     );
 

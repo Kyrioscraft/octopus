@@ -28,17 +28,23 @@
  *   message before appending, so it never stacks across turns.
  *
  * Placed after `FilesystemPolicyMiddleware` and before `LocalContextMiddleware`
- * in the stack (agent.ts ~line 640). The hint lands in the system message
- * *before* the SDK's `CacheBreakpointMiddleware` tags it, so it participates
- * in caching (stable text → cache-friendly).
+ * in the stack (agent.ts ~line 640).
+ *
+ * ## Cache strategy (v2 — tool-result append)
+ *
+ * The hint is appended to the read tool's OWN result (a new ToolMessage at the
+ * conversation tail, persisted in the checkpoint). An earlier version
+ * prepended the hint to the last HumanMessage from wrapModelCall — but that
+ * message sits mid-history once tool results follow it, the injection never
+ * persisted to the checkpoint, and the hint text varied per call (file
+ * counts/paths), so every model call rewrote the cached prefix mid-stream and
+ * cache hit collapsed to ~1%. Tail-appends to new messages never rewrite
+ * history — see filesystem_empty_result.ts for the same pattern.
  */
 
+import { AIMessage, ToolMessage } from "@langchain/core/messages";
 import type { BaseMessage } from "@langchain/core/messages";
 import { getLogger } from "../logging.js";
-import {
-  readSystemMessageText,
-  withSystemMessageText,
-} from "./system_message_utils.js";
 
 const logger = getLogger("middleware.read_budget");
 
@@ -203,71 +209,81 @@ function _buildHint(analysis: ReadAnalysis): string | null {
   return null;
 }
 
-// Marker used to detect idempotent re-append across turns.
-const HINT_MARKER = "[hint]";
+/**
+ * Append the hint to the tool result (a NEW ToolMessage at the tail of the
+ * conversation). Tail-only appends are prompt-cache friendly: they never
+ * rewrite history, and the ToolMessage persists in the checkpoint, so the
+ * hint stays visible on every subsequent call without re-derivation.
+ */
+function _appendHintToResult(result: any, hint: string): any {
+  if (!(result instanceof ToolMessage)) return result;
+  const content = result.content;
+  if (typeof content === "string") {
+    result.content = `${content}\n\n${hint}`;
+  } else if (Array.isArray(content)) {
+    const last = content[content.length - 1];
+    if (last && typeof last === "object" && last.type === "text" && typeof last.text === "string") {
+      last.text = `${last.text}\n\n${hint}`;
+    } else {
+      content.push({ type: "text", text: hint });
+    }
+  }
+  return result;
+}
 
 // =============================================================================
 // Middleware
 // =============================================================================
 
-/**
- * Appends the hint to the system message content (handles both string and
- * content-block-array forms — see system_message_utils.ts).
- *
- * If the content already contains a `[hint]` line, the existing hint is
- * replaced (not duplicated) so the text stays stable across turns — important
- * for prompt-cache friendliness.
- */
-function _appendHint(content: string, hint: string): string {
-  // Remove any pre-existing hint block (from a prior turn in the same
-  // model-call chain) to avoid stacking.
-  const cleaned = content.replace(
-    /\n*\[hint\][^\n]*(\n\[[^\]]*\][^\n]*)*$/,
-    "",
-  );
-  return `${cleaned}\n\n${hint}`;
+interface ToolCallRequest {
+  toolCall: { id?: string; name: string; args?: Record<string, unknown> };
+  state?: Record<string, unknown>;
+  runtime?: Record<string, unknown>;
 }
 
 class ReadBudgetMiddleware {
   name = "ReadBudgetMiddleware";
 
-  wrapModelCall = (
-    request: {
-      messages?: BaseMessage[];
-      systemMessage?: any;
-      [key: string]: unknown;
-    },
-    handler: (req: any) => any,
+  wrapToolCall = (
+    request: ToolCallRequest,
+    handler: (req: ToolCallRequest) => any,
   ): any => {
-    const messages = request.messages;
-    if (!messages || messages.length === 0) {
-      return handler(request);
+    const outcome = handler(request);
+    if (!(outcome instanceof Promise)) {
+      return this._maybeHint(request, outcome);
     }
+    return outcome.then((r) => this._maybeHint(request, r));
+  };
 
-    const analysis = _analyzeReads(messages);
+  private _maybeHint = (request: ToolCallRequest, result: any): any => {
+    const name = request.toolCall?.name;
+    if (!name || !READ_TOOL_NAMES.has(name)) return result;
+    if (!(result instanceof ToolMessage)) return result;
+
+    // Scan the conversation history (state.messages) for the read/act picture
+    // INCLUDING the in-flight read call. The hint lands in the tool result —
+    // a new tail message that persists in the checkpoint — so the text may
+    // freely include counts/paths without ever rewriting cached history.
+    const state = (request.state ?? {}) as Record<string, unknown>;
+    const history = Array.isArray(state["messages"])
+      ? (state["messages"] as BaseMessage[])
+      : [];
+
+    // Include the in-flight call so re-read detection sees it.
+    const inflight: BaseMessage = new AIMessage({
+      content: "",
+      tool_calls: [request.toolCall as any],
+    });
+    const analysis = _analyzeReads([...history, inflight]);
     const hint = _buildHint(analysis);
-    if (!hint) return handler(request);
-
-    const systemMessage = request.systemMessage;
-    const text = readSystemMessageText(systemMessage);
-    if (!text) {
-      return handler(request);
-    }
-
-    // Idempotent: if the exact hint is already present, don't re-append.
-    if (text.includes(hint)) {
-      return handler(request);
-    }
-
-    const newContent = _appendHint(text, hint);
-    const newSystemMessage = withSystemMessageText(systemMessage, newContent);
+    if (!hint) return result;
 
     logger.debug(
-      `Injecting read-budget hint (uniqueFiles=${analysis.uniquePaths.length}, ` +
+      `Appending read-budget hint to ${name} result ` +
+        `(uniqueFiles=${analysis.uniquePaths.length}, ` +
         `hasActed=${analysis.hasActed}, isReRead=${analysis.isReRead})`,
     );
-
-    return handler({ ...request, systemMessage: newSystemMessage });
+    return _appendHintToResult(result, hint);
   };
 }
 

@@ -274,6 +274,11 @@ async function _makeGraphUncached(
   // them here. Tool selection priority is driven by descriptions (the model
   // picks based on guidance), not array index.
   //
+  // Tools are sorted by name before injection so the ordering is stable
+  // across processes/restarts — the tools prefix sits BEFORE the system
+  // message in Anthropic's cache prefix, so an ordering shuffle (e.g. MCP
+  // server connect order racing) invalidates the whole cached prefix.
+  //
   // NOTE: The SDK's ls/glob/grep tools are NOT removed here — they are
   // injected later by `createFilesystemMiddleware` (inside createDeepAgent)
   // at runtime. They are removed at runtime by `FilesystemPolicyMiddleware`
@@ -284,6 +289,7 @@ async function _makeGraphUncached(
     tools.push(...options.externalTools);
     logger.info(`Injected ${options.externalTools.length} external tool(s): ${options.externalTools.map((t: any) => t?.name ?? "?").join(", ")}`);
   }
+  tools.sort((a: any, b: any) => String(a?.name ?? "").localeCompare(String(b?.name ?? "")));
 
   // ---- 3b. agent preset — static toolset shaping (read-only enforcement in
   // plan, submit_plan injection) ----

@@ -239,23 +239,27 @@ function _profileSearches(messages: BaseMessage[]): SearchProfile {
 }
 
 /**
- * Decide whether to emit the dynamic hint. We fire when the agent has done a
- * meaningful amount of inline searching WITHOUT any delegation — the signature
- * of someone who should have fanned out but didn't. If the agent has already
- * delegated at least once, it knows the mechanism exists and chose to search
- * inline for a good reason, so we stay quiet.
+ * Decide whether to emit the dynamic hint. We fire once the agent has done a
+ * meaningful amount of inline searching, and KEEP firing on every subsequent
+ * call (monotonic — searchCount only grows within a thread). The hint text is
+ * CONSTANT (no searchCount interpolation): the system message sits at the very
+ * head of the prompt, so any per-call change — a growing counter, or the hint
+ * appearing/disappearing after the agent delegates — invalidates the ENTIRE
+ * cached prefix (system + tools + history). A stable, threshold-triggered
+ * block costs one cache miss when the threshold is first crossed and none
+ * after that.
  */
 function _shouldHint(profile: SearchProfile): boolean {
-  return profile.searchCount >= SEARCH_BUDGET && !profile.hasDelegated;
+  return profile.searchCount >= SEARCH_BUDGET;
 }
 
-function _buildHint(profile: SearchProfile): string {
+function _buildHint(): string {
   return (
-    `${HINT_MARKER} You've made ${profile.searchCount} direct search calls ` +
-    `without delegating to a subagent. If this task spans multiple areas or ` +
-    `you're not finding what you need quickly, STOP searching inline and ` +
-    `DELEGATE the remaining investigation to parallel Explore subagents via ` +
-    `the \`task\` tool — launch one per independent target in a single response.`
+    `${HINT_MARKER} Several direct search calls have been made without ` +
+    `delegating to a subagent. If this task spans multiple areas or you're ` +
+    `not finding what you need quickly, STOP searching inline and DELEGATE ` +
+    `the remaining investigation to parallel Explore subagents via the ` +
+    `\`task\` tool — launch one per independent target in a single response.`
   );
 }
 
@@ -337,12 +341,15 @@ class SubagentOrchestrationMiddleware {
     let newContent = stripTaskSystemPrompt(text);
     newContent = _appendDeclaration(newContent);
 
-    // Dynamic hint — only when over-searching without delegation is detected.
+    // Dynamic hint — constant text, threshold-triggered (monotonic within a
+    // thread; see _shouldHint). Never stripped once present: removing it after
+    // the agent delegates would flip the system message again and invalidate
+    // the whole cached prefix.
     const messages = request.messages;
     if (messages && messages.length > 0) {
       const profile = _profileSearches(messages);
       if (_shouldHint(profile)) {
-        const hint = _buildHint(profile);
+        const hint = _buildHint();
         if (!newContent.includes(hint)) {
           newContent = _appendHint(newContent, hint);
           logger.debug(
@@ -350,13 +357,6 @@ class SubagentOrchestrationMiddleware {
               `hasDelegated=${profile.hasDelegated})`,
           );
         }
-      } else {
-        // Strip any stale hint from a prior turn if the profile no longer
-        // warrants it (e.g. the agent has since delegated).
-        newContent = newContent.replace(
-          /\n*\[delegation-hint\][^\n]*(\n\[[^\]]*\][^\n]*)*$/,
-          "",
-        );
       }
     }
 
