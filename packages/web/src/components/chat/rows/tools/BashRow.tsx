@@ -17,7 +17,7 @@ export function BashRow({ entry }: ToolCardProps) {
       entry={entry}
       header={
         <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          {running ? <ShimmerText text="命令" /> : <span style={{ color: "var(--gray-500)" }}>命令</span>}
+          {running ? <ShimmerText text="执行" /> : <span style={{ color: "var(--gray-500)" }}>执行</span>}
           <span style={{ color: "var(--gray-400)" }}>|</span>
           <code
             title={command}

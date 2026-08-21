@@ -1,5 +1,5 @@
 import type { TurnEvent, ToolEvent } from "./types.js";
-import { isExplorationTool } from "../rows/tools/registry.js";
+import { isExplorationCall } from "../rows/tools/registry.js";
 
 // =============================================================================
 // projectTurnParts — the derived layer (pure function).
@@ -16,9 +16,11 @@ import { isExplorationTool } from "../rows/tools/registry.js";
 // into the projection.
 //
 // Grouping policy:
-//   - Only **exploration tools** (read_file / list_directory / ls / glob /
-//     grep / search_file_content — data-driven below) merge: a contiguous run
-//     of them collapses into one "探索组" summary bar.
+//   - Only **exploration calls** merge: exploration tool names (read_file /
+//     list_directory / ls / glob / grep / search_file_content / grep_search /
+//     rg / find — data-driven below) plus shell calls that run a bare
+//     read-only search command (ls / grep / rg / find / …). A contiguous run
+//     of them collapses into one "探索组" summary row.
 //   - Every other tool (edit / write / execute / web_search / task /
 //     ask_user_question / …) renders as its own full tool row, never grouped.
 //   - Reasoning follows ZCode's first-reasoning-row semantics by default;
@@ -61,10 +63,10 @@ export function projectTurnParts(
   );
   while (i < visible.length) {
     const ev = visible[i];
-    if (ev.type === "tool" && isExplorationTool(ev.entry.name)) {
-      // Gather the contiguous run of exploration tools.
+    if (ev.type === "tool" && isExplorationCall(ev.entry)) {
+      // Gather the contiguous run of exploration calls.
       const tools: ToolEvent[] = [];
-      while (i < visible.length && visible[i].type === "tool" && isExplorationTool((visible[i] as ToolEvent).entry.name)) {
+      while (i < visible.length && visible[i].type === "tool" && isExplorationCall((visible[i] as ToolEvent).entry)) {
         tools.push(visible[i] as ToolEvent);
         i++;
       }

@@ -5,18 +5,10 @@ import { ToolCallRenderer } from "../rows/tools/ToolCallRenderer.js";
 import { useDisplaySettingsStore } from "../../../stores/display.js";
 import { projectTurnParts } from "./project.js";
 import type { TurnItem } from "./project.js";
-import {
-  isDisplayedExplorationTool,
-  isFileReadTool,
-  readonlyToolTarget,
-  getToolDisplayName,
-} from "../rows/tools/registry.js";
-import { Collapse, Tooltip } from "antd";
-import {
-  CircleX,
-  Loader,
-  Search,
-} from "lucide-react";
+import { isSearchCall, isFileReadCall } from "../rows/tools/registry.js";
+import { Collapse } from "antd";
+import { CircleX, Search } from "lucide-react";
+import { ShimmerText } from "../ShimmerText.js";
 
 /**
  * The ordered timeline of events for one assistant turn.
@@ -54,7 +46,7 @@ export function TurnEvents({
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {items.map((item) =>
           item.kind === "tool-group" ? (
-            <ToolGroupBar key={item.id} tools={item.tools} isActive={isActive} />
+            <ToolGroupBar key={item.id} tools={item.tools} />
           ) : (
             <EventRow
               key={item.event.id}
@@ -70,233 +62,119 @@ export function TurnEvents({
 }
 
 /**
- * Lead text for an exploration group's folded summary.
- *
- * Prefers "探索了 N 个文件" (N = read_file count) when there are file reads;
- * falls back to "搜索了 M 项" (M = grep/glob/search_file_content count) when
- * the group is purely search-based. list_directory/ls never counts.
+ * 折叠态计数文案:"搜索了 X 项 · 读取了 Y 个文件"(为零的一半省略;
+ * 双零时组内只有目录列举等 → "探索了目录")。
  */
-function explorationLeadText(tools: ToolEvent[]): string {
-  const reads = tools.filter((t) => isFileReadTool(t.entry.name)).length;
-  const searches = tools.filter((t) =>
-    ["glob", "grep", "search_file_content"].includes(t.entry.name),
-  ).length;
-  if (reads > 0) {
-    return reads === 1 ? "探索了 1 个文件" : `探索了 ${reads} 个文件`;
-  }
-  if (searches > 0) {
-    return searches === 1 ? "搜索了 1 项" : `搜索了 ${searches} 项`;
-  }
-  // Group has only list_directory/ls (all hidden) — still show a neutral label.
-  return "探索了目录";
+function explorationSummary(tools: ToolEvent[]): string {
+  const searches = tools.filter((t) => isSearchCall(t.entry)).length;
+  const reads = tools.filter((t) => isFileReadCall(t.entry)).length;
+  const parts: string[] = [];
+  if (searches > 0) parts.push(searches === 1 ? "搜索了 1 项" : `搜索了 ${searches} 项`);
+  if (reads > 0) parts.push(reads === 1 ? "读取了 1 个文件" : `读取了 ${reads} 个文件`);
+  return parts.length > 0 ? parts.join(" · ") : "探索了目录";
 }
 
 /**
- * A collapsible summary bar for a contiguous run of exploration tool calls.
+ * A collapsible group row for a contiguous run of exploration calls.
  *
- * Folded (default): one line — a status icon + lead text ("探索了 N 个文件" /
- * "搜索了 M 项") + file-name/search-term chips (max 3, +M) + a tail status.
- * Expanded: an ExplorationCluster — a chips list (read_file → file name,
- * grep/glob → search term; list_directory/ls hidden), each chip carrying a
- * status dot; clicking a chip opens that single tool's full content inline.
+ * Folded (default): a single tool-row-style line, mirroring BashRow's header
+ * structure — status icon + "探索" label (ShimmerText while any member is
+ * still in flight, matching the running tool rows) + "|" + search/read counts.
+ * No Loader spinner: the running state lives in the shimmer, same as tool rows.
  *
- * Minimal visual treatment: no background or border, just the summary text,
- * matching the reasoning block's unobtrusive style.
+ * Expanded: a nested container (indent + left rail) listing every member call
+ * as a standard tool row (FileReadRow / BashRow / DefaultRow via
+ * ToolCallRenderer), each collapsed by default — the user opens rows
+ * individually. The indent + rail make the group visually distinct from the
+ * timeline's own rows.
  */
-export function ToolGroupBar({ tools, isActive }: { tools: ToolEvent[]; isActive?: boolean }) {
+export function ToolGroupBar({ tools }: { tools: ToolEvent[] }) {
   // Always collapsed by default — user clicks to expand.
   const [expanded, setExpanded] = useState<boolean>(false);
 
-  // Only the displayed exploration tools count toward status / chips.
-  const displayed = tools.filter((t) => isDisplayedExplorationTool(t.entry.name));
+  const done = tools.filter((t) => t.entry.status === "done").length;
+  const errored = tools.filter((t) => t.entry.status === "error").length;
+  const pending = tools.length - done - errored;
 
-  const total = displayed.length;
-  const done = displayed.filter((t) => t.entry.status === "done").length;
-  const errored = displayed.filter((t) => t.entry.status === "error").length;
-  const pending = total - done - errored;
-  const allDone = pending === 0 && errored === 0 && done === total;
-
-  // Single-slot icon: spinner while any tool is still in flight, the
-  // exploration-group (Search) type icon once all done (dimmed), error icon
-  // otherwise — mirrors ToolCallRow / SubagentRow.
-  let leadIcon;
-  if (errored > 0) {
-    leadIcon = <CircleX style={{ color: "var(--color-error-500)" }} />;
-  } else if (pending > 0) {
-    leadIcon = <Loader size={14} style={{ color: "var(--gray-400)", animation: "spin 0.8s linear infinite" }} />;
-  } else if (allDone) {
-    leadIcon = <Search style={{ fontSize: 13, color: "var(--gray-400)" }} />;
-  } else {
-    leadIcon = <Loader size={14} style={{ color: "var(--gray-400)", animation: "spin 0.8s linear infinite" }} />;
-  }
-
-  // Folded chips: up to 3 targets (file name / search term), remainder "+M".
-  const targets = displayed.map((t) => ({
-    id: t.id,
-    label: readonlyToolTarget(t.entry.name, t.entry.args) || getToolDisplayName(t.entry.name),
-  }));
-  const visibleTargets = targets.slice(0, 3);
-  const extra = targets.length - visibleTargets.length;
+  // Single-slot icon with the tool-row semantics: error → red CircleX;
+  // otherwise always the Search type icon in gray-400 (running is signalled by
+  // the "探索" shimmer, never a spinner).
+  const leadIcon =
+    errored > 0 ? (
+      <CircleX style={{ color: "var(--color-error-500)" }} />
+    ) : (
+      <Search style={{ fontSize: 13, color: "var(--gray-400)" }} />
+    );
 
   return (
     <div className={`collapsible-row${expanded ? " is-expanded" : ""}`}>
-    <Collapse
-      ghost
-      size="small"
-      activeKey={expanded ? ["g"] : []}
-      onChange={(keys) => setExpanded(keys.length > 0)}
-      expandIconPosition="end"
-      style={{ background: "transparent" }}
-      items={[
-        {
-          key: "g",
-          label: (
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                fontSize: 12,
-                fontWeight: 500,
-                color: "var(--gray-500)",
-                letterSpacing: "0.025em",
-                flexWrap: "wrap",
-              }}
-            >
-              {leadIcon}
-              <span>{explorationLeadText(tools)}</span>
-              {visibleTargets.map((t) => (
-                <span
-                  key={t.id}
-                  style={{
-                    fontSize: 11,
-                    lineHeight: "18px",
-                    background: "transparent",
-                    border: "1px solid var(--gray-200)",
-                    color: "var(--gray-500)",
-                    padding: "0 6px",
-                    borderRadius: 4,
-                    maxWidth: 180,
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {t.label}
-                </span>
-              ))}
-              {extra > 0 && <span style={{ fontSize: 11, color: "var(--gray-400)" }}>+{extra}</span>}
-            </div>
-          ),
-          children: <ExplorationCluster tools={displayed} isActive={isActive} />,
-        },
-      ]}
-    />
-    </div>
-  );
-}
-
-/**
- * A compact cluster view for a group of exploration tools (read_file / glob /
- * grep / search_file_content). list_directory/ls is already filtered out by
- * the caller.
- *
- * Folded: hidden behind the parent ToolGroupBar summary.
- * Expanded (rendered as the group's children): a chips list — one chip per
- * exploration tool (read_file → file name, grep/glob → search term), each
- * carrying a colored status dot (done=green, pending=blue, error=red).
- * Clicking a chip opens that single tool's full content inline — never all at
- * once — so N parallel reads/searches don't stack into N×420px of blocks.
- *
- * This is the Cursor/Windsurf-style demotion of exploratory tools: reads and
- * searches should not command the same screen real estate as writes.
- */
-export function ExplorationCluster({
-  tools,
-  isActive,
-}: {
-  tools: ToolEvent[];
-  isActive?: boolean;
-}) {
-  // The single tool whose full content is shown inline (null = none selected).
-  const [activeId, setActiveId] = useState<string | null>(null);
-
-  if (tools.length === 0) return null;
-  const activeTool = tools.find((t) => t.id === activeId) ?? null;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingTop: 4 }}>
-      {/* Chips: one per displayed exploration tool. Click a chip to open its content. */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, paddingLeft: 21 }}>
-        {tools.map((t) => {
-          const label =
-            readonlyToolTarget(t.entry.name, t.entry.args) ||
-            getToolDisplayName(t.entry.name);
-          const st = t.entry.status;
-          const dotColor =
-            st === "error"
-              ? "var(--color-error-500)"
-              : st === "done"
-                ? "var(--color-success-500)"
-                : "var(--color-info-700)";
-          const selected = activeId === t.id;
-          return (
-            <Tooltip
-              key={t.id}
-              title={getToolDisplayName(t.entry.name)}
-              mouseEnterDelay={0.4}
-            >
-              <button
-                type="button"
-                onClick={() => setActiveId(selected ? null : t.id)}
+      <Collapse
+        ghost
+        size="small"
+        activeKey={expanded ? ["g"] : []}
+        onChange={(keys) => setExpanded(keys.length > 0)}
+        expandIconPosition="end"
+        style={{ background: "transparent" }}
+        items={[
+          {
+            key: "g",
+            label: (
+              <span
                 style={{
-                  all: "unset",
-                  cursor: "pointer",
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 5,
-                  fontSize: 11,
-                  lineHeight: "20px",
-                  padding: "0 8px",
-                  borderRadius: 4,
-                  border: selected
-                    ? "1px solid var(--brand-500, #1677ff)"
-                    : "1px solid var(--gray-200)",
-                  background: selected ? "var(--brand-50, #eff6ff)" : "transparent",
-                  color: selected ? "var(--brand-600, #0958d9)" : "var(--gray-600)",
-                  maxWidth: 220,
+                  gap: 6,
+                  minWidth: 0,
+                  // 与 ToolCallRow 的 headerNode 同款排版(字号/字重/字距),
+                  // 保证"探索"与工具 row 的显示名观感一致。
+                  fontSize: 12,
+                  fontWeight: 500,
+                  color: "var(--gray-500)",
+                  letterSpacing: "0.025em",
                 }}
               >
+                <span style={{ display: "inline-flex", alignItems: "center" }}>
+                  {leadIcon}
+                </span>
+                {pending > 0 ? (
+                  <ShimmerText text="探索" />
+                ) : (
+                  <span style={{ color: "var(--gray-500)" }}>探索</span>
+                )}
+                <span style={{ color: "var(--gray-400)" }}>|</span>
                 <span
                   style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: "50%",
-                    background: dotColor,
-                    flexShrink: 0,
-                  }}
-                />
-                <span
-                  style={{
+                    fontSize: 12,
+                    color: "var(--gray-900)",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
                   }}
                 >
-                  {label}
+                  {explorationSummary(tools)}
                 </span>
-              </button>
-            </Tooltip>
-          );
-        })}
-      </div>
-
-      {/* Inline detail for the selected chip only — never all at once. */}
-      {activeTool && (
-        <div style={{ paddingLeft: 21, paddingTop: 2 }}>
-          <ToolCallRenderer entry={activeTool.entry} defaultExpanded={true} />
-        </div>
-      )}
+              </span>
+            ),
+            children: (
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 6,
+                  marginLeft: 5,
+                  paddingLeft: 10,
+                  paddingTop: 2,
+                  borderLeft: "2px solid var(--gray-150)",
+                }}
+              >
+                {tools.map((t) => (
+                  <ToolCallRenderer key={t.id} entry={t.entry} />
+                ))}
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   );
 }
