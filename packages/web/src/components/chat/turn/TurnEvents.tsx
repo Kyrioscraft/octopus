@@ -4,7 +4,6 @@ import { EventRow } from "./EventRow.js";
 import { ToolCallRenderer } from "../rows/tools/ToolCallRenderer.js";
 import { useDisplaySettingsStore } from "../../../stores/display.js";
 import { projectTurnParts } from "./project.js";
-import type { TurnItem } from "./project.js";
 import { isSearchCall, isFileReadCall } from "../rows/tools/registry.js";
 import { Collapse } from "antd";
 import { CircleX, Search } from "lucide-react";
