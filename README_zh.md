@@ -26,7 +26,17 @@ Octopus（八爪鱼）是一个 AI 智能体平台，支持多模型对话、工
 web / tui  ──→  tentacle（客户端 SDK）  ──→  server（Hono + NDJSON 流式）  ──→  core（LangGraph / deepagents 引擎）
 ```
 
-五个包组成的 pnpm monorepo — `core`、`server`、`tentacle`、`web`、`tui`。开发约定详见 [`AGENTS.md`](./AGENTS.md)。
+五个包组成的 pnpm monorepo，均位于 [`packages/`](./packages) 下：
+
+| 包 | 职责 |
+|---------|---------|
+| [`core`](./packages/core) | 智能体引擎：LangGraph 图、模型提供商、工具、权限、配置、日志 |
+| [`server`](./packages/server) | Hono HTTP 服务（端口 9876）：认证 + 聊天 API、NDJSON 流式、持久化 |
+| [`tentacle`](./packages/tentacle) | 类型化浏览器/Node 客户端 SDK + NDJSON 流解析 |
+| [`web`](./packages/web) | React 19 + Ant Design + Zustand 单页应用（Vite，端口 5173） |
+| [`tui`](./packages/tui) | 终端界面（Ink）与无头 `oc` CLI |
+
+开发约定详见 [`AGENTS.md`](./AGENTS.md)，设计文档见 [`architecture/`](./architecture)。
 
 ## 快速开始
 
@@ -37,8 +47,8 @@ cd octopus
 pnpm install
 
 # 配置至少一个 API Key
-cp server/.env.example server/.env
-# 编辑 server/.env: OPENAI_API_KEY=sk-...
+cp packages/server/.env.example packages/server/.env
+# 编辑 packages/server/.env: OPENAI_API_KEY=sk-...
 
 pnpm build
 
@@ -63,7 +73,7 @@ oc agents       # 无界面子命令
 
 ## 配置
 
-在 `server/.env` 中设置：
+在 `packages/server/.env` 中设置（完整选项见 `packages/server/.env.example`）：
 
 | 变量 | 默认值 | 说明 |
 |----------|---------|-------------|
@@ -72,9 +82,7 @@ oc agents       # 无界面子命令
 | `OCTOPUS_MODEL` | — | 覆盖默认模型（格式：`provider:model`） |
 | `OCTOPUS_ENABLE_SHELL` | `false` | 允许智能体执行 shell 命令 |
 | `OCTOPUS_ENABLE_WEB_SEARCH` | `true` | 启用网络搜索工具 |
-| `OCTOPUS_DB_PATH` | `data/octopus.db` | 数据库文件路径 |
-
-完整选项见 `server/.env.example`。
+| `OCTOPUS_DB_PATH` | `data/octopus.db` | 数据库文件路径（相对 server 运行目录） |
 
 ## 许可证
 

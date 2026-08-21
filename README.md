@@ -6,7 +6,7 @@
 [![Node](https://img.shields.io/badge/node-%3E%3D22-brightgreen)](https://nodejs.org)
 [![pnpm](https://img.shields.io/badge/pnpm-%3E%3D10-blue)](https://pnpm.io)
 
-中文文档请参阅 [README_zh.md](./README_zh.md)。
+中文文档请参阅 [README_zh.md](./README_zh.md).
 
 ---
 
@@ -17,7 +17,7 @@ Octopus is an AI agent platform that lets you chat with LLMs, give them tools, a
 - **Multi-model** — Anthropic, OpenAI, DeepSeek, OpenRouter, and any OpenAI-compatible provider. Switch models per request.
 - **MCP native** — Connect to MCP servers over stdio / SSE / HTTP. Tools are auto-discovered and namespaced.
 - **Skills & sub-agents** — Extend the agent with markdown-defined skills and sub-agents. Hierarchical file-based discovery with override semantics.
-- **HITL approval** — Human-in-the-loop with plan / confirm / auto execution modes. Review tool calls before they run.
+- **HITL approval** — Human-in-the-loop with plan / confirm / auto execution agents. Review tool calls before they run.
 - **Multi-interface** — Web UI (React), terminal TUI (Ink), and headless CLI. Same backend, your choice.
 
 ## Architecture
@@ -26,7 +26,17 @@ Octopus is an AI agent platform that lets you chat with LLMs, give them tools, a
 web / tui  ──→  tentacle (client SDK)  ──→  server (Hono + NDJSON streaming)  ──→  core (LangGraph / deepagents engine)
 ```
 
-Five packages in a pnpm monorepo — `core`, `server`, `tentacle`, `web`, `tui`. See [`AGENTS.md`](./AGENTS.md) for development conventions.
+Five packages in a pnpm monorepo, all under [`packages/`](./packages):
+
+| Package | Purpose |
+|---------|---------|
+| [`core`](./packages/core) | Agent engine: LangGraph graphs, model providers, tools, permissions, config, logging |
+| [`server`](./packages/server) | Hono HTTP server (port 9876): auth + chat API, NDJSON streaming, persistence |
+| [`tentacle`](./packages/tentacle) | Typed browser/Node client SDK + NDJSON stream parsing |
+| [`web`](./packages/web) | React 19 + Ant Design + Zustand SPA (Vite, port 5173) |
+| [`tui`](./packages/tui) | Terminal UI (Ink) and headless `oc` CLI |
+
+See [`AGENTS.md`](./AGENTS.md) for development conventions and [`architecture/`](./architecture) for design documents.
 
 ## Quick Start
 
@@ -37,8 +47,8 @@ cd octopus
 pnpm install
 
 # Configure at least one API key
-cp server/.env.example server/.env
-# Edit server/.env: OPENAI_API_KEY=sk-...
+cp packages/server/.env.example packages/server/.env
+# Edit packages/server/.env: OPENAI_API_KEY=sk-...
 
 pnpm build
 
@@ -63,7 +73,7 @@ oc agents       # headless subcommands
 
 ## Configuration
 
-Set these in `server/.env`:
+Set these in `packages/server/.env` (see `packages/server/.env.example` for all options):
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -72,9 +82,7 @@ Set these in `server/.env`:
 | `OCTOPUS_MODEL` | — | Override default model (`provider:model`) |
 | `OCTOPUS_ENABLE_SHELL` | `false` | Allow agent shell execution |
 | `OCTOPUS_ENABLE_WEB_SEARCH` | `true` | Enable web search tool |
-| `OCTOPUS_DB_PATH` | `data/octopus.db` | Database path |
-
-See `server/.env.example` for all options.
+| `OCTOPUS_DB_PATH` | `data/octopus.db` | Database path (relative to the server working directory) |
 
 ## License
 
