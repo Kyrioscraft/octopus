@@ -161,10 +161,15 @@ export class TurnEventAccumulator {
           const te: ToolEvent = {
             id: `te_${ev.toolCallId}`,
             type: "tool",
-            entry: { id: ev.toolCallId, name: ev.name, args: {}, status: "pending" },
+            // tool.started carries the full args (durable) — a replayed row
+            // renders its command/file name immediately instead of
+            // "(empty)"/"(unknown)" while awaiting tool.result.
+            entry: { id: ev.toolCallId, name: ev.name, args: ev.args ?? {}, status: "pending" },
           };
           this.toolIndex.set(ev.toolCallId, this.events.length);
-          this.toolArgs.set(ev.toolCallId, "");
+          // Seed the accumulation baseline so later live deltas (if any) parse
+          // against the full JSON, not an empty buffer.
+          this.toolArgs.set(ev.toolCallId, ev.args ? JSON.stringify(ev.args) : "");
           this.events.push(te);
         }
         return;

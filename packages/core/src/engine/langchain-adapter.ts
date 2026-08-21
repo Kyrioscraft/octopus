@@ -198,6 +198,24 @@ function safeParse(s: string): Record<string, unknown> {
 }
 
 /**
+ * Parse the accumulated args string into a non-empty plain object, or
+ * undefined. Attached to tool.started so the durable announcement carries the
+ * full args — a replayed (post-detach) row renders its command/file name
+ * immediately instead of "(empty)"/"(unknown)" while awaiting tool.result.
+ */
+function parsedArgsOrNil(s: string | undefined): Record<string, unknown> | undefined {
+  if (!s) return undefined;
+  try {
+    const v = JSON.parse(s);
+    return typeof v === "object" && v !== null && !Array.isArray(v) && Object.keys(v).length > 0
+      ? (v as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * True when the accumulated args string is a COMPLETE JSON object — i.e. the
  * tool call's arguments finished streaming. This gates the tool.started
  * announcement: the row appears exactly once, already carrying its full args
@@ -485,8 +503,9 @@ export async function* wrapAgentStream(
         const toolName = ac.pendingName.get(callId) ?? (typeof msg.name === "string" && msg.name.length > 0 ? msg.name : undefined);
         if (toolName && toolName !== "task") {
           ac.announced.add(callId);
-          yield { type: "tool.started", toolCallId: callId, name: toolName, ...(agentNs ? { agentNs } : {}) };
           const pendingArgs = ac.argsAcc.get(callId);
+          const startedArgs = parsedArgsOrNil(pendingArgs);
+          yield { type: "tool.started", toolCallId: callId, name: toolName, ...(startedArgs ? { args: startedArgs } : {}), ...(agentNs ? { agentNs } : {}) };
           if (pendingArgs) {
             yield { type: "tool.args.delta", toolCallId: callId, index: 0, argsDelta: pendingArgs, ...(agentNs ? { agentNs } : {}) };
           }
@@ -539,7 +558,8 @@ export async function* wrapAgentStream(
         if (!ac.announced.has(tc.id)) ac.pendingName.set(tc.id, tc.name);
         if (!ac.announced.has(tc.id) && completeArgs(ac.argsAcc.get(tc.id))) {
           ac.announced.add(tc.id);
-          yield { type: "tool.started", toolCallId: tc.id, name: tc.name, ...(agentNs ? { agentNs } : {}) };
+          const startedArgs = parsedArgsOrNil(ac.argsAcc.get(tc.id));
+          yield { type: "tool.started", toolCallId: tc.id, name: tc.name, ...(startedArgs ? { args: startedArgs } : {}), ...(agentNs ? { agentNs } : {}) };
           yield { type: "tool.args.delta", toolCallId: tc.id, index: 0, argsDelta: ac.argsAcc.get(tc.id)!, ...(agentNs ? { agentNs } : {}) };
         }
       }
@@ -573,7 +593,8 @@ export async function* wrapAgentStream(
             const toolName = ac.pendingName.get(callId);
             if (toolName) {
               ac.announced.add(callId);
-              yield { type: "tool.started", toolCallId: callId, name: toolName, ...(agentNs ? { agentNs } : {}) };
+              const startedArgs = parsedArgsOrNil(ac.argsAcc.get(callId));
+              yield { type: "tool.started", toolCallId: callId, name: toolName, ...(startedArgs ? { args: startedArgs } : {}), ...(agentNs ? { agentNs } : {}) };
               yield { type: "tool.args.delta", toolCallId: callId, index: idx, argsDelta: ac.argsAcc.get(callId)!, ...(agentNs ? { agentNs } : {}) };
             }
           }

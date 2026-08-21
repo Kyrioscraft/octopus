@@ -568,8 +568,20 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       logger.exception("Background run failed", err);
       emit({ type: "turn.error", errorType: "internal", message: (err as Error).message || "未知错误", threadId });
     } finally {
-      // A paused (HITL) exit must keep its registry entry.
-      if (getRun(threadId)?.status === "running") finishRun(threadId);
+      // A paused (HITL) exit must keep its registry entry. A still-RUNNING
+      // entry means the run ended WITHOUT a terminal event (a swallowed
+      // error path) — emit a fallback turn.error so the durable log always
+      // ends terminally (otherwise /events synthesizes a bogus run_lost
+      // "服务重启" error on the next attach).
+      const runState = getRun(threadId)?.status;
+      if (runState === "paused") {
+        // keep the entry — re-attach restores the ask panel
+      } else if (runState === "running") {
+        emit({ type: "turn.error", errorType: "internal", message: "运行异常终止（未产生终止事件）", threadId });
+        finishRun(threadId);
+      } else if (runState === undefined || runState === "done") {
+        finishRun(threadId);
+      }
     }
   })();
 
@@ -727,12 +739,18 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
       logger.exception("Background resume failed", err);
       emit({ type: "turn.error", errorType: "internal", message: (err as Error).message || "未知错误", threadId });
     } finally {
-      // Only finish a run that is still RUNNING. A turn that ended at a HITL
-      // interrupt is `paused` (set by makeRunEmit on the ask chunk) — the
-      // registry entry must SURVIVE so /threads reports running and a
-      // re-attaching client can restore the ask panel from the replay
-      // buffer. finishRun would erase it and the thread would look done.
-      if (getRun(threadId)?.status === "running") finishRun(threadId);
+      // Same safety net as POST /agent: paused (HITL) keeps the entry;
+      // still-running means no terminal event was emitted — emit a fallback
+      // turn.error so the durable log ends terminally (no bogus run_lost).
+      const runState = getRun(threadId)?.status;
+      if (runState === "paused") {
+        // keep the entry — re-attach restores the ask panel
+      } else if (runState === "running") {
+        emit({ type: "turn.error", errorType: "internal", message: "运行异常终止（未产生终止事件）", threadId });
+        finishRun(threadId);
+      } else if (runState === undefined || runState === "done") {
+        finishRun(threadId);
+      }
     }
   })();
 

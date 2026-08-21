@@ -1,6 +1,6 @@
 import { Input, Button, Tooltip, Popover, Select, Tag } from "antd";
 import {
-  ArrowUp, Pause,
+  ArrowUp, Square,
   Paperclip,
   Plus,
   FilePlus, Image,
@@ -285,7 +285,7 @@ export function InputBar({
         <Tooltip title={busy ? "停止回答" : ""}>
           <Button
             type="text" shape="circle"
-            icon={busy ? <Pause /> : <ArrowUp />}
+            icon={busy ? <Square size={14} /> : <ArrowUp />}
             onClick={busy ? onStop : onSend}
             disabled={!text.trim() && !busy}
             style={{

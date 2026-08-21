@@ -218,6 +218,9 @@ export function useChat({
   scrollToBottom: (opts?: { force?: boolean; smooth?: boolean }) => void;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  /** Snapshot fetch in flight (thread switch) — shows a centered spinner
+   *  instead of the misleading welcome screen while the list is blanked. */
+  const [loading, setLoading] = useState(false);
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   /** Active ask_user_question_required payload; non-null morphs input into AskPanel. */
@@ -260,6 +263,20 @@ export function useChat({
   // streaming output won't yank them back down.
   const scroll = useCallback(() => scrollToBottom(), [scrollToBottom]);
 
+  // Set after history hydration / optimistic send so the msgs effect below
+  // force-scrolls to the bottom once the new content has actually rendered.
+  // Scrolling synchronously after setMsgs races React's commit — the DOM
+  // height doesn't include the new message yet, so the scroll lands on the
+  // OLD bottom and the fresh message ends up hidden below the fold (behind
+  // the input bar area).
+  const pendingScrollRef = useRef<{ smooth?: boolean } | null>(null);
+  useEffect(() => {
+    if (!pendingScrollRef.current) return;
+    const opts = pendingScrollRef.current;
+    pendingScrollRef.current = null;
+    scrollToBottom({ force: true, ...opts });
+  }, [msgs, scrollToBottom]);
+
   // ---- Model providers (loaded once + on workspace change) ----
   const loadModelProviders = useCallback(async () => {
     try {
@@ -292,6 +309,11 @@ export function useChat({
     // the old thread's events patch the new thread's message array (the
     // server-side run continues in the background regardless).
     detachLocal();
+    // Optimistically blank the list SYNCHRONOUSLY on switch — the snapshot
+    // fetch takes ~a second; without this the PREVIOUS thread's messages stay
+    // on screen (looking like the wrong conversation) until it lands.
+    setMsgs([]);
+    setLoading(true);
     hydratingRef.current.add(tid);
     try {
       // P1 snapshot hydration: ONE atomic response with the durable events,
@@ -327,6 +349,8 @@ export function useChat({
 
       const { msgs, openAcc } = projectSnapshot(tid, snap.events, normalized);
       setMsgs(msgs.length > 0 ? msgs : normalized);
+      // Jump to the latest message once the batch renders.
+      pendingScrollRef.current = {};
       // Stateless cursor: the SERVER's maxSeq is authoritative (covers
       // volatile seqs already assigned to the live run). Never trust a
       // locally accumulated cursor here.
@@ -353,6 +377,7 @@ export function useChat({
     } catch {
       setMsgs([]);
     } finally {
+      setLoading(false);
       hydratingRef.current.delete(tid);
     }
   }, []);
@@ -499,10 +524,13 @@ export function useChat({
    *  restarts at 1, and a leftover cursor from the previous thread (e.g.
    *  33850) makes send() subscribe with after=<stale>, so the server-side
    *  filter drops EVERY event of the new thread (blank live output, only
-   *  the timer running). Same reset as detachLocal. */
+   *  the timer running). Also detach the local stream so the OLD thread's
+   *  busy flag / ask panel (tool approval, ask_user_question) don't bleed
+   *  onto the welcome screen. accessMode / selectedModel are separate state
+   *  and are intentionally preserved. */
   const clearMsgs = useCallback(() => {
+    detachLocal();
     setMsgs([]);
-    lastSeqRef.current = 0;
     turnAcc.current = null;
   }, []);
 
@@ -777,8 +805,10 @@ export function useChat({
     setBusy(true);
     setAsk(null);
     if (activeThreadId) useChatStore.getState().setThreadRunning(activeThreadId, true);
-    // User just sent a message — force follow to the bottom.
-    scrollToBottom({ force: true, smooth: true });
+    // User just sent a message — force follow to the bottom AFTER React
+    // commits the optimistic bubbles (scrolling now would target the old
+    // scrollHeight and leave the user message hidden behind the input bar).
+    pendingScrollRef.current = { smooth: true };
     const controller = new AbortController();
     abortRef.current = controller;
     turnAcc.current = new TurnEventAccumulator();
@@ -1056,7 +1086,9 @@ export function useChat({
   }, [doSend, accessMode, changeAccessMode]);
 
   // ---- Derived state ----
-  const showStart = msgs.length === 0;
+  // Welcome screen ONLY for a genuinely empty thread — not mid-switch (the
+  // blanked list during snapshot fetch would otherwise flash the welcome UI).
+  const showStart = msgs.length === 0 && !loading;
 
   /** Latest todo list (last write_todos in the last assistant turn). */
   const todos: TodoItem[] = useMemo(() => {
@@ -1102,7 +1134,7 @@ export function useChat({
     // state
     msgs, text, setText, busy, ask, sessionAllowlist, accessMode, setAccessMode: changeAccessMode,
     selectedModel, setSelectedModel, attachments, modelOptions, todos, allSubagents, showStart,
-    attachInputRef, commands,
+    loading, attachInputRef, commands,
     // actions
     send, resolve, stop, doSend, onKey, load, clearMsgs, pickAttachments, removeAttachment,
     onSlashSelect, handleSystemCommand,

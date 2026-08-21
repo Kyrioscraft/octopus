@@ -257,36 +257,6 @@ export function stampWorkDuration(
 }
 
 // =============================================================================
-// Transport helpers
-// =============================================================================
-// NOTE: LangGraph chunk unpacking + text extraction moved to core's
-// wrapAgentStream (engine.ts). The service consumes AgentEvent now and no
-// longer touches LangChain message objects directly.
-
-/**
- * Detect whether an error signals that the client closed the connection.
- * Hono/Node surfaces this several ways (AbortError, ERR_STREAM_DESTROYED,
- * "controller is already closed", connection reset, ...).
- */
-export function isClientDisconnect(err: unknown): boolean {
-  const e = err as { name?: string; message?: string; code?: string } | null;
-  if (!e) return false;
-  const name = e.name ?? "";
-  const code = e.code ?? "";
-  const msg = e.message ?? "";
-  return (
-    name === "AbortError" ||
-    code === "ABORT_ERR" ||
-    code === "ERR_STREAM_DESTROYED" ||
-    code === "ERR_INVALID_STATE" ||
-    msg.includes("aborted") ||
-    msg.includes("controller is already closed") ||
-    msg.includes("stream has been destroyed") ||
-    (msg.includes("connection") && msg.includes("reset"))
-  );
-}
-
-// =============================================================================
 // HITL interrupt helpers (moved from chat.ts)
 // =============================================================================
 
@@ -601,36 +571,27 @@ export async function streamChat(
         streamErr?.message?.includes?.("interrupt") ||
         streamErr?.constructor?.name === "GraphInterrupt";
 
-      if (isClientDisconnect(streamErr)) {
-        // Distinguish an explicit /stop (registry AbortController aborted)
-        // from an HTTP-connection cancellation that propagated into the
-        // LangGraph stream (Node/Hono wires the request signal into
-        // agent.stream). Only an explicit stop interrupts the run; a client
-        // disconnect must let the run finish in the background (events keep
-        // flowing into the run registry, persistence + finished still run —
-        // enqueue failures are swallowed by the route's makeRunEmit).
-        if (abortSignal?.aborted) {
-          clientAborted = true;
-          const saved = savePartialAssistantMessage(input.threadId, accumulatedContent, input.requestId);
-          const durationMs = stampWorkDuration(input.threadId, input.startedAt);
-          emit({
-            type: "turn.interrupted",
-            partialSaved: saved,
-            ...(durationMs !== undefined ? { durationMs } : {}),
-          });
-          logger.info(`Run aborted by stop request${saved ? " (partial saved)" : ""}`, {
-            thread_id: input.threadId,
-            request_id: input.requestId,
-          });
-        } else {
-          logger.info("Client disconnected — run continues in background", {
-            thread_id: input.threadId,
-            request_id: input.requestId,
-          });
-        }
-        // Both fall through to the post-stream path (persist + interrupt
-        // check + finished). For a disconnect the run already completed its
-        // final state in the graph; for a stop the state is what it was.
+      // Subscription model: the graph stream is bound ONLY to the run
+      // registry's AbortController (explicit /stop). There is no live HTTP
+      // response tied to the run (POST /agent returns 202 immediately), so a
+      // "client disconnect" cannot occur here — an AbortError or connection
+      // reset at this point is an UPSTREAM failure (provider/proxy timeout)
+      // and must surface as turn.error, not be swallowed as a disconnect
+      // (swallowing it leaves the durable log without a terminal event, which
+      // /events later misreports as the synthetic run_lost restart error).
+      if (abortSignal?.aborted) {
+        clientAborted = true;
+        const saved = savePartialAssistantMessage(input.threadId, accumulatedContent, input.requestId);
+        const durationMs = stampWorkDuration(input.threadId, input.startedAt);
+        emit({
+          type: "turn.interrupted",
+          partialSaved: saved,
+          ...(durationMs !== undefined ? { durationMs } : {}),
+        });
+        logger.info(`Run aborted by stop request${saved ? " (partial saved)" : ""}`, {
+          thread_id: input.threadId,
+          request_id: input.requestId,
+        });
       } else if (!isInterrupt) {
         const isDeserError =
           streamErr?.message?.includes?.("deserialize") ||
@@ -684,31 +645,26 @@ export async function streamChat(
       });
     }
   } catch (err) {
-    if (isClientDisconnect(err)) {
-      if (abortSignal?.aborted) {
-        // Explicit stop — only this path persists partial + notifies.
-        if (accumulatedContent && !clientAborted) {
-          savePartialAssistantMessage(input.threadId, accumulatedContent, input.requestId);
-        }
-        const durationMs = stampWorkDuration(input.threadId, input.startedAt);
-        emit({
-          type: "turn.interrupted",
-          partialSaved: accumulatedContent.length > 0,
-          ...(durationMs !== undefined ? { durationMs } : {}),
-        });
-        logger.info(`Run aborted (outer)`, {
-          thread_id: input.threadId,
-          request_id: input.requestId,
-        });
-      } else {
-        // Connection cancellation reached the outer loop — the run is over
-        // from our perspective; nothing more to do (events were recorded).
-        logger.info("Client disconnected (outer) — run already recorded", {
-          thread_id: input.threadId,
-          request_id: input.requestId,
-        });
+    if (abortSignal?.aborted && !clientAborted) {
+      // Explicit stop reached the outer loop — persist partial + notify.
+      if (accumulatedContent) {
+        savePartialAssistantMessage(input.threadId, accumulatedContent, input.requestId);
       }
+      const durationMs = stampWorkDuration(input.threadId, input.startedAt);
+      emit({
+        type: "turn.interrupted",
+        partialSaved: accumulatedContent.length > 0,
+        ...(durationMs !== undefined ? { durationMs } : {}),
+      });
+      logger.info(`Run aborted (outer)`, {
+        thread_id: input.threadId,
+        request_id: input.requestId,
+      });
     } else {
+      // Any other failure (including upstream provider aborts/connection
+      // resets that isClientDisconnect would have swallowed) must surface as
+      // a terminal error — a silent return leaves the durable log without a
+      // terminal event and /events later reports a bogus run_lost.
       logger.exception("Agent stream failed", err);
       emit({
         type: "turn.error",
@@ -788,15 +744,14 @@ export async function streamResume(
         streamErr?.name === "GraphInterrupt" ||
         streamErr?.message?.includes?.("interrupt") ||
         streamErr?.constructor?.name === "GraphInterrupt";
-      if (isClientDisconnect(streamErr)) {
-        // Explicit /stop → notify listeners; plain disconnect → the run's
-        // events are already recorded, finish silently.
-        if (abortSignal?.aborted) {
-          emit({
-            type: "turn.interrupted",
-            partialSaved: false,
-          });
-        }
+      // Subscription model: only an explicit /stop (abortSignal.aborted)
+      // interrupts here — upstream AbortError/connection resets are real
+      // errors and propagate to the outer catch (turn.error), never silent.
+      if (abortSignal?.aborted) {
+        emit({
+          type: "turn.interrupted",
+          partialSaved: false,
+        });
       } else if (!isInterrupt) throw streamErr;
     }
 

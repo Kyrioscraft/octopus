@@ -318,7 +318,7 @@ export type DurableStreamEvent =
   | { type: "text.ended"; seq: number; messageId: string; agentNs?: string; text: string }
   | { type: "reasoning.ended"; seq: number; messageId: string; agentNs?: string; text: string }
   // --- tool calls (first-class events, keyed by toolCallId) ---
-  | { type: "tool.started"; seq: number; toolCallId: string; name: string; agentNs?: string }
+  | { type: "tool.started"; seq: number; toolCallId: string; name: string; agentNs?: string; /** Full parsed args — durable, so a replayed (post-detach) row renders its command/file name immediately. Complements tool.result.args. */ args?: Record<string, unknown> }
   | { type: "tool.result"; seq: number; toolCallId: string; result: string; isError: boolean; agentNs?: string; /** Full parsed args — the replayable boundary (args deltas are volatile). */ args?: Record<string, unknown>; /** Tool name when known — lets a row render standalone. */ name?: string }
   // --- subagents (explicit lifecycle; no heuristic inference client-side) ---
   | {

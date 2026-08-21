@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { Button } from "antd";
+import { Button, Spin } from "antd";
 import { useSearchParams } from "react-router-dom";
 import { OctopusClient } from "@octopus/tentacle";
 import { useChatStore } from "../stores/chat.js";
@@ -78,13 +78,21 @@ export function ChatPage() {
 
   // React to `?thread=` query changes (SPA navigation between conversations).
   // On a fresh thread id, set it active + load its history; when the query is
-  // cleared (new chat), clear messages so the start screen shows.
+  // cleared (new chat), clear messages so the start screen shows. The
+  // lastLoadedRef guard skips a duplicate load of the SAME id (React
+  // StrictMode runs effects twice on mount in dev — the second load() would
+  // abort the first /events tail and silently stop live output).
   const threadParam = searchParams.get("thread");
+  const lastLoadedRef = useRef<string | null>(null);
   useEffect(() => {
     if (threadParam) {
-      setActiveThreadId(threadParam);
-      chat.load(threadParam);
+      if (lastLoadedRef.current !== threadParam) {
+        lastLoadedRef.current = threadParam;
+        setActiveThreadId(threadParam);
+        chat.load(threadParam);
+      }
     } else {
+      lastLoadedRef.current = null;
       setActiveThreadId(undefined);
       chat.clearMsgs();
     }
@@ -130,7 +138,7 @@ export function ChatPage() {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", position: "relative" }}>
       <ChatHeader
-        showStart={chat.showStart}
+        showStart={chat.showStart && !chat.loading}
         companionOpen={companionOpen}
         onToggleCompanion={toggleCompanion}
         todos={chat.todos}
@@ -142,7 +150,13 @@ export function ChatPage() {
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <div ref={scrollContainerRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", position: "relative" }}>
-            {chat.showStart ? (
+            {chat.loading ? (
+              // Thread switch in flight — the list was optimistically blanked;
+              // a centered spinner reads as "loading", not "empty conversation".
+              <div style={{ height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <Spin size="large" />
+              </div>
+            ) : chat.showStart ? (
               <StartScreen
                 greeting={greeting}
                 inputArea={inputArea}
@@ -162,7 +176,7 @@ export function ChatPage() {
           {/* Bottom input bar (only when messages exist). Lives inside the LEFT
               column so its width shrinks with the message list when the
               companion panel opens. */}
-          {!chat.showStart && (
+          {!chat.showStart && !chat.loading && (
             <div style={{
               padding: "12px 20px",
               background: "var(--gray-0)", flexShrink: 0,

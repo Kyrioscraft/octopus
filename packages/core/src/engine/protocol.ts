@@ -36,7 +36,7 @@ export type AgentEvent =
    */
   | { type: "text.ended"; messageId: string; agentNs?: string; text: string }
   | { type: "reasoning.ended"; messageId: string; agentNs?: string; text: string }
-  | { type: "tool.started"; toolCallId: string; name: string; agentNs?: string }
+  | { type: "tool.started"; toolCallId: string; name: string; agentNs?: string; /** Full parsed args — the announcement is deferred until args are complete, so they ride along here (durable) and a replayed row renders its command/file name immediately instead of "(empty)"/"(unknown)". Complements tool.result.args. */ args?: Record<string, unknown> }
   | { type: "tool.args.delta"; toolCallId: string; index: number; argsDelta: string; agentNs?: string }
   | { type: "tool.result"; toolCallId: string; result: string; isError: boolean; agentNs?: string; /** Full parsed args — the replayable boundary (args deltas are volatile, never persisted). */ args?: Record<string, unknown>; /** Tool name when the ToolMessage carries it — lets a row render standalone without pairing to tool.started. */ name?: string }
   | {
