@@ -267,8 +267,8 @@ export const BUILTIN_SLASH_COMMANDS: BuiltinSlashCommand[] = [
   },
   {
     name: "trace",
-    displayName: "LangSmith 追踪",
-    description: "在 LangSmith 中查看当前线程",
+    displayName: "Langfuse 追踪",
+    description: "在 Langfuse 中查看当前线程",
     kind: "system",
     systemAction: "trace",
     platform: "tui",

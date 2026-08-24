@@ -1,7 +1,9 @@
 import { serve } from "@hono/node-server";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadDotEnv, configure, getLogger, setCheckpointer } from "@octopus/core";
 import { createApp } from "./app.js";
-import { configureLangSmithTracing } from "./langsmith-tracing.js";
+import { logLangfuseStatus, isLangfuseEnabled } from "./langfuse-tracing.js";
 import { initDb } from "./db/index.js";
 import { createSqliteCheckpointer } from "./checkpointer.js";
 
@@ -13,15 +15,31 @@ import { createSqliteCheckpointer } from "./checkpointer.js";
 //    Order: project .env → ~/.deepagents/.env (shell env vars win).
 loadDotEnv();
 
+// 1b. loadDotEnv() reads `.env` from process.cwd() — if the server is started
+//     outside packages/server (e.g. `node packages/server/dist/main.js` from
+//     the repo root), the package's .env (LANGFUSE_* keys etc.) is missed.
+//     Backfill from the directory of THIS file (dist/ → package root).
+//     _loadDotEnvFile skips missing files, so an absent .env is a no-op.
+loadDotEnv(dirname(dirname(fileURLToPath(import.meta.url))));
+
 // 2. Configure logging — reads OCTOPUS_LOG_LEVEL from env (default: INFO).
 configure();
 
-// 3. Configure LangSmith tracing — syncs OCTOPUS_LANGSMITH_TRACING_* into the
-//    standard LANGSMITH_* vars that @langchain/core's callback manager reads,
-//    and logs the resulting status. Must run after loadDotEnv + configure.
-configureLangSmithTracing();
+// 3. Register the Langfuse OpenTelemetry span processor (v5 SDK) and log the
+//    tracing status (enabled baseUrl / disabled how-to-enable) at startup.
+//    The processor reads LANGFUSE_PUBLIC_KEY/SECRET_KEY/BASE_URL from env and
+//    exports CallbackHandler spans asynchronously; register it only when
+//    configured so unconfigured setups carry zero OTel overhead.
+if (isLangfuseEnabled()) {
+  const { LangfuseSpanProcessor } = await import("@langfuse/otel");
+  const { NodeTracerProvider } = await import("@opentelemetry/sdk-trace-node");
+  new NodeTracerProvider({
+    spanProcessors: [new LangfuseSpanProcessor()],
+  }).register();
+}
+logLangfuseStatus();
 
-// 4. Init the DB and swap the process-level LangGraph checkpointer from
+// 3. Init the DB and swap the process-level LangGraph checkpointer from
 //    MemorySaver to SQLite, so HITL interrupt state survives restarts
 //    (a paused thread's /resume works after a server restart). Uses a
 //    SEPARATE db file from the message store to keep checkpoint WAL traffic

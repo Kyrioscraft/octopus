@@ -52,6 +52,7 @@ import {
   resolveAgentCwd,
 } from "../services/workspace.service.js";
 import { listAllSubagents, resolveBuiltinOverrides } from "../services/subagent.service.js";
+import { createLangfuseHandler, flushLangfuseHandler } from "../langfuse-tracing.js";
 
 export const chatRouter = new Hono();
 
@@ -525,6 +526,16 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       ...(interruptOverride ? { interruptOn: interruptOverride } : {}),
     },
   };
+  // Langfuse tracing(可选):每请求一个 handler,trace 以 thread_id 作为
+  // session,metadata 携带用户/agent/请求上下文。未配置密钥时跳过。
+  const langfuseHandler = createLangfuseHandler({
+    threadId,
+    traceName: "chat",
+    metadata: { userId, agent: agentName, requestId, model: modelOverride ?? config.model },
+  });
+  if (langfuseHandler) {
+    (langgraphConfig as { callbacks?: unknown[] }).callbacks = [langfuseHandler];
+  }
 
   // One active run per thread: a second client sending while a run is
   // executing/paused must NOT silently abort it (multi-client safety). The
@@ -582,6 +593,8 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       } else if (runState === undefined || runState === "done") {
         finishRun(threadId);
       }
+      // Langfuse 批量上报是异步的 —— stream 结束后显式 flush,防丢尾部事件。
+      flushLangfuseHandler(langfuseHandler);
     }
   })();
 
@@ -695,6 +708,16 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
     configurable: { thread_id: threadId },
     ...(interruptOverride ? { context: { interruptOn: interruptOverride } } : {}),
   };
+  // Langfuse tracing(可选):resume 是独立 trace,通过相同 thread_id
+  // (session) 与原始 trace 在 Langfuse 中关联。
+  const langfuseHandler = createLangfuseHandler({
+    threadId,
+    traceName: "chat-resume",
+    metadata: { userId, agent: agentName, requestId, kind: resumeBody.kind },
+  });
+  if (langfuseHandler) {
+    (langgraphConfig as { callbacks?: unknown[] }).callbacks = [langfuseHandler];
+  }
 
   // One active run per thread: a paused run IS the expected state here (the
   // ask this resume answers) — starting the resume supersedes it internally.
@@ -751,6 +774,10 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
       } else if (runState === undefined || runState === "done") {
         finishRun(threadId);
       }
+      // Langfuse 批量上报是异步的 —— stream 结束后显式 flush,防丢尾部事件。
+      // paused(HITL)的 trace 由 handler 的周期性 flush 兜底,下次 resume
+      // 使用新 handler,不依赖此处。
+      flushLangfuseHandler(langfuseHandler);
     }
   })();
 

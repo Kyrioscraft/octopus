@@ -151,7 +151,7 @@ export const COMMANDS: readonly SlashCommand[] = [
   },
   {
     name: "/trace",
-    description: "Open current thread in LangSmith",
+    description: "Open current thread in Langfuse",
     bypassTier: BypassTier.SIDE_EFFECT_FREE,
   },
   {

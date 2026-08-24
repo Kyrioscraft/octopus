@@ -24,18 +24,6 @@ export interface Settings {
   googleCloudProject?: string;
   langsmithProject?: string;
 
-  /**
-   * LangSmith tracing 配置(独立于 sandbox,避免命名冲突)。
-   *
-   * 注意:`LANGSMITH_API_KEY` / `LANGSMITH_PROJECT` 已被 deepagents
-   * Sandbox(托管代码执行 VM)复用。这里通过 `OCTOPUS_LANGSMITH_TRACING_*`
-   * 提供独立命名空间,落回通用 `LANGSMITH_*` 仅作为零代码路径的兼容。
-   */
-  langsmithTracingEnabled?: boolean;
-  langsmithTracingApiKey?: string;
-  langsmithTracingEndpoint?: string;
-  langsmithTracingProject?: string;
-
   /** The resolved model name (provider:model). */
   modelName?: string;
   /** The resolved provider portion of modelName. */
@@ -110,9 +98,11 @@ function _loadDotEnvFile(filePath: string): void {
  *
  * Equivalent to Python `cortex.config._load_dotenv()`.
  */
-export function loadDotEnv(): void {
-  // 1. Project .env
-  _loadDotEnvFile(join(process.cwd(), ".env"));
+export function loadDotEnv(fromDir?: string): void {
+  // 1. Project .env (caller-specified dir, else process.cwd()). The explicit
+  //    dir lets the server package load its own .env regardless of the cwd
+  //    it was started from (e.g. repo-root `node packages/server/dist/main.js`).
+  _loadDotEnvFile(join(fromDir ?? process.cwd(), ".env"));
 
   // 2. Global ~/.deepagents/.env
   _loadDotEnvFile(join(DEFAULT_CONFIG_DIR, ".env"));
@@ -141,24 +131,6 @@ export function fromEnvironment(): Settings {
   const langsmithProject = process.env["DEEPAGENTS_CODE_LANGSMITH_PROJECT"]
     ?? process.env["LANGSMITH_PROJECT"]
     ?? undefined;
-
-  // LangSmith tracing —— 独立命名空间,避免与 sandbox 复用的 LANGSMITH_* 冲突。
-  // 优先用 OCTOPUS_LANGSMITH_TRACING_*,落回通用 LANGSMITH_* 兼容零代码路径。
-  const langsmithTracingRaw = resolveEnvVar("OCTOPUS_LANGSMITH_TRACING");
-  const langsmithTracingEnabled =
-    langsmithTracingRaw === "true" || langsmithTracingRaw === "1";
-  const langsmithTracingApiKey =
-    resolveEnvVar("OCTOPUS_LANGSMITH_TRACING_API_KEY")
-    ?? resolveEnvVar("LANGSMITH_API_KEY")
-    ?? undefined;
-  const langsmithTracingEndpoint =
-    resolveEnvVar("OCTOPUS_LANGSMITH_TRACING_ENDPOINT")
-    ?? resolveEnvVar("LANGSMITH_ENDPOINT")
-    ?? undefined;
-  const langsmithTracingProject =
-    resolveEnvVar("OCTOPUS_LANGSMITH_TRACING_PROJECT")
-    ?? resolveEnvVar("LANGSMITH_PROJECT")
-    ?? "octopus";
 
   const projectRoot = process.env["DEEPAGENTS_CODE_SERVER_CWD"]
     ?? process.env["DEEPAGENTS_CODE_PROJECT_ROOT"]
@@ -215,10 +187,6 @@ export function fromEnvironment(): Settings {
     tavilyApiKey,
     googleCloudProject,
     langsmithProject,
-    langsmithTracingEnabled,
-    langsmithTracingApiKey,
-    langsmithTracingEndpoint,
-    langsmithTracingProject,
     projectRoot,
     shellAllowList,
     extraSkillsDirs,
@@ -253,8 +221,6 @@ export function reloadFromEnvironment(prev: Settings): { settings: Settings; cha
   const reloadableKeys: (keyof Settings)[] = [
     "openaiApiKey", "anthropicApiKey", "googleApiKey", "nvidiaApiKey",
     "tavilyApiKey", "googleCloudProject", "langsmithProject",
-    "langsmithTracingEnabled", "langsmithTracingApiKey",
-    "langsmithTracingEndpoint", "langsmithTracingProject",
     "projectRoot", "shellAllowList", "extraSkillsDirs",
   ];
 
