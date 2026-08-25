@@ -26,15 +26,17 @@ import { interrupt } from "@langchain/langgraph";
 
 /** One option the user can pick. */
 const QuestionOptionSchema = z.object({
-  label: z.string().describe("Short human-readable label for the option."),
-  value: z.string().describe("Stable machine value returned to the agent on selection."),
+  label: z.string().optional().describe("Short human-readable label for the option."),
+  value: z.string().optional().describe(
+    "Stable machine value returned to the agent on selection. Defaults to label if omitted.",
+  ),
   description: z.string().optional().describe("Optional helper text shown beneath the label."),
 });
 
 /** A single question posed to the user. */
 const AskQuestionSchema = z.object({
   question: z.string().describe("The complete question text."),
-  header: z.string().max(12).optional().describe("Short label (≤12 chars) for the header chip."),
+  header: z.string().optional().describe("Short label for the header chip (truncated to 12 chars)."),
   options: z.array(QuestionOptionSchema).optional().describe(
     "Selectable options. Omit for a free-text (clarify) question.",
   ),
@@ -92,8 +94,21 @@ export function createAskUserQuestionTool() {
         questions: input.questions.map((q, i) => ({
           question_id: `ask_${Date.now()}_${i}`,
           question: q.question,
-          ...(q.header ? { header: q.header } : {}),
-          ...(q.options ? { options: q.options } : {}),
+          ...(q.header ? { header: q.header.slice(0, 12) } : {}),
+          // LLMs often omit `value` (label-only options) — fall back to the
+          // label so zod validation upstream never rejects the call, and the
+          // downstream AskPanel/buildAskPayload always see both fields.
+          ...(q.options
+            ? {
+                options: q.options
+                  .filter((o) => (o.label ?? o.value) != null)
+                  .map((o) => ({
+                  label: o.label ?? o.value!,
+                  value: o.value ?? o.label!,
+                  ...(o.description ? { description: o.description } : {}),
+                })),
+              }
+            : {}),
           ...(q.multi_select ? { multi_select: q.multi_select } : {}),
           ...(q.allow_other ? { allow_other: q.allow_other } : {}),
         })),
@@ -129,8 +144,9 @@ export function createAskUserQuestionTool() {
         "you can reasonably assume.",
         "",
         "Schema guidance: omit `options` for a free-text clarification; provide",
-        "`options` (2-4, concise) for a selection. Use `allow_other` when the user",
-        "might pick something you didn't list.",
+        "`options` (2-4, concise) for a selection — each option only needs a",
+        "`label` (plus optional `description`); `value` may be omitted. Use",
+        "`allow_other` when the user might pick something you didn't list.",
       ].join("\n"),
       schema: AskUserQuestionInputSchema,
     },
