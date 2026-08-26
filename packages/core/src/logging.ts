@@ -16,6 +16,8 @@
  */
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { createWriteStream, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
 // =============================================================================
 // Types
@@ -61,6 +63,7 @@ const _contextStore = new AsyncLocalStorage<LogContext>();
 let _level: LogLevel = LogLevel.INFO;
 let _stream: NodeJS.WritableStream = process.stderr;
 let _colors: boolean = process.stderr.isTTY ?? false;
+let _logFileStream: NodeJS.WritableStream | null = null;
 
 // =============================================================================
 // ANSI escape codes
@@ -148,6 +151,14 @@ function _log(level: LogLevel, name: string, message: string, ...args: unknown[]
 
   const line = _colorize(level, formatted + argsStr + extra) + "\n";
   _stream.write(line);
+  // Optional file mirror (OCTOPUS_LOG_FILE) — for tool-trace diagnostics.
+  if (_logFileStream) {
+    try {
+      _logFileStream.write(line.replace(/\x1b\[[0-9;]*m/g, ""));
+    } catch {
+      /* file mirror must never break logging */
+    }
+  }
 }
 
 function _createLogger(name: string): Logger {
@@ -201,6 +212,18 @@ export function configure(options?: ConfigureOptions): void {
   // Resolve colors
   if (options?.colors !== undefined) {
     _colors = options.colors;
+  }
+
+  // Resolve file mirror: OCTOPUS_LOG_FILE appends every record (ANSI-stripped)
+  if (!_logFileStream && process.env["OCTOPUS_LOG_FILE"]) {
+    try {
+      const file = process.env["OCTOPUS_LOG_FILE"];
+      const dir = dirname(file);
+      if (dir && dir !== ".") mkdirSync(dir, { recursive: true });
+      _logFileStream = createWriteStream(file, { flags: "a" });
+    } catch {
+      // Ignore — file mirror is best-effort
+    }
   }
 }
 

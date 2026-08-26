@@ -364,6 +364,9 @@ async function _makeGraphUncached(
     }),
   );
   middleware.push(new ToolExceptionRecoveryMiddleware());
+  // GLM-style parallel-tool-call streaming corruption is repaired at the
+  // source in ChatOpenAICompatible (agent/openai-compat.ts), covering both
+  // the execution path and the UI streaming accumulator.
   middleware.push(new ResumeStateMiddleware());
 
   // Filesystem policy middleware — runs after the SDK's FilesystemMiddleware
@@ -404,6 +407,20 @@ async function _makeGraphUncached(
     tools,
     options?.builtinSubagentOverrides,
   );
+  // Materialize any STRING model specs into model instances. A string model
+  // reaches the SDK's initChatModel → native ChatOpenAI, bypassing
+  // ChatOpenAICompatible's streaming tool-call attribution repair — GLM's
+  // parallel-tool-call index-reuse corruption then breaks subagents (the
+  // exact bug fixed for the main graph). buildChatModel constructs the same
+  // compat-hardened instance with the same provider config resolution.
+  for (const spec of subagentSpecs) {
+    if (typeof spec.model === "string") {
+      spec.model = await buildChatModel(
+        spec.model,
+        config.providerOverrides,
+      );
+    }
+  }
 
   // ---- 7. Discover skills (path conventions live in the skills domain) ----
   const { skills: skillsList, sourcePaths: skillSourcePaths } = discoverSkillSources({

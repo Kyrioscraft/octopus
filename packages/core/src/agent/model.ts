@@ -124,8 +124,10 @@ export async function _buildChatModel(
         `Provider "${provider}" — using OpenAI-compatible mode. ` +
         "Install @langchain/google-genai for native Gemini SDK support.",
       );
-      const { ChatOpenAI } = await import("@langchain/openai");
-      model = new ChatOpenAI({
+      // ChatOpenAICompatible = ChatOpenAI + streaming tool-call attribution
+      // repair (GLM/newapi-style index reuse). No-op for spec-compliant endpoints.
+      const { ChatOpenAICompatible } = await import("./openai-compat.js");
+      model = new ChatOpenAICompatible({
         model: modelName,
         streaming: true,
         ...(apiKey ? { apiKey } : {}),
@@ -137,8 +139,8 @@ export async function _buildChatModel(
     default: {
       // OpenAI + all OpenAI-compatible providers (deepseek, openrouter, together, xai,
       // groq, fireworks, perplexity, baseten, mistralai, nvidia, cohere, huggingface, etc.)
-      const { ChatOpenAI } = await import("@langchain/openai");
-      model = new ChatOpenAI({
+      const { ChatOpenAICompatible } = await import("./openai-compat.js");
+      model = new ChatOpenAICompatible({
         model: modelName,
         streaming: true,
         ...(apiKey ? { apiKey } : {}),

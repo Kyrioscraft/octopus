@@ -156,25 +156,45 @@ const TOOL_DESCRIPTION_OVERRIDES: Record<string, string> = {
  * schema: only `file_path` required, `offset` optional (0-indexed line),
  * `limit` optional defaulting to 2000 (full-file reads by default).
  */
-const READ_FILE_SCHEMA = z
-  .object({
-    file_path: z
-      .string()
-      .describe("Absolute path to the file (or directory) to read"),
-    offset: z
-      .coerce.number()
-      .optional()
-      .describe(
-        "Line offset to start reading from (0-indexed). Omit to read from the start.",
-      ),
-    limit: z
-      .coerce.number()
-      .optional()
-      .describe(
-        "Maximum number of lines to read. Omit to read the whole file (default 2000).",
-      ),
-  })
-  .describe("Read a file or directory from the filesystem");
+/**
+ * Preprocess `read_file` input for weaker models / flaky streaming providers.
+ * OpenAI-compatible endpoints (GLM etc.) occasionally deliver tool-call args
+ * with alternate key spellings; map the common variants onto `file_path` so
+ * zod validation doesn't hard-fail the call (the SDK's original schema had
+ * the same `path` → `file_path` normalization — restored here and extended).
+ */
+function _normalizeReadFileInput(raw: unknown): unknown {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const input = raw as Record<string, unknown>;
+  if (input["file_path"] === undefined || input["file_path"] === "") {
+    const alt = input["path"] ?? input["filePath"] ?? input["filename"];
+    if (typeof alt === "string" && alt !== "") input["file_path"] = alt;
+  }
+  return input;
+}
+
+const READ_FILE_SCHEMA = z.preprocess(
+  _normalizeReadFileInput,
+  z
+    .object({
+      file_path: z
+        .string()
+        .describe("Absolute path to the file (or directory) to read"),
+      offset: z
+        .coerce.number()
+        .optional()
+        .describe(
+          "Line offset to start reading from (0-indexed). Omit to read from the start.",
+        ),
+      limit: z
+        .coerce.number()
+        .optional()
+        .describe(
+          "Maximum number of lines to read. Omit to read the whole file (default 2000).",
+        ),
+    })
+    .describe("Read a file or directory from the filesystem"),
+);
 
 /**
  * SDK-injected search tools that are REMOVED from the toolset to enforce a

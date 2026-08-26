@@ -18,6 +18,8 @@
 
 import { getLogger } from "../logging.js";
 import { BinaryContentSanitizerMiddleware } from "../middleware/binary_content_sanitizer.js";
+import { FilesystemPolicyMiddleware } from "../middleware/filesystem_policy_middleware.js";
+import { ToolExceptionRecoveryMiddleware } from "../middleware/tool_exception_recovery.js";
 import { BUILTIN_SUBAGENTS } from "./subagent-defs.js";
 import type { ExternalSubagentSpec, SubagentRegistryEntry } from "./graph.js";
 
@@ -64,7 +66,27 @@ export function assembleSubagentSpecs(
   mainTools: any[],
   builtinSubagentOverrides?: Record<string, string | null>,
 ): any[] {
-  const subagentMiddleware = [new BinaryContentSanitizerMiddleware()];
+  const subagentMiddleware = [
+    new BinaryContentSanitizerMiddleware(),
+    // Apply the same read_file schema/description overrides to SUBAGENTS.
+    // The SDK builds each subagent with a FRESH FilesystemMiddleware — the
+    // subagent's read_file is a distinct tool instance with the SDK's
+    // original schema (offset/limit required, limit default 100, no
+    // path→file_path normalization). Without this, weaker models /
+    // flaky-streaming providers (GLM etc.) that omit args hard-fail inside
+    // the subagent, the exception surfaces to the parent as a task-tool
+    // error, and the model concludes the subagent is "broken" and stops
+    // delegating. wrapModelCall here rewrites the subagent's own tool
+    // instance at model-call time, so the parent's copy is unaffected.
+    new FilesystemPolicyMiddleware(),
+    // Subagent tool errors must recover INSIDE the subagent (error
+    // ToolMessage → subagent model retries) instead of aborting the whole
+    // subagent invoke — otherwise one bad tool call kills the delegation.
+    new ToolExceptionRecoveryMiddleware(),
+    // GLM streaming tool-call attribution is repaired at the SOURCE in
+    // ChatOpenAICompatible (agent/openai-compat.ts) — applies to subagents
+    // automatically since they share the same model construction path.
+  ];
   const subagentSpecs: any[] = [];
   for (const sa of externalSubagents) {
     const spec: Record<string, unknown> = {

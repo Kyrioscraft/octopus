@@ -50,46 +50,10 @@ class ConfigurableModelMiddleware {
 
   wrapModelCall = async (request: any, handler: (req: any) => any): Promise<any> => {
     const modifiedRequest = await _applyOverrides(request, this._buildChatModel);
-    const result = await handler(modifiedRequest || request);
-    _logCacheUsage(result);
-    return result;
+    return handler(modifiedRequest || request);
   };
 }
 
-/**
- * Debug-log prompt-cache usage for the completed model call. Reads LangChain's
- * `usage_metadata` (present on AIMessage results across providers):
- * cache_read / cache_creation token counts come from Anthropic's
- * cache_read_input_tokens / cache_creation_input_tokens. Used to verify
- * prompt-cache hit rates (see dynamic_context_middleware.ts rationale).
- */
-function _logCacheUsage(result: any): void {
-  const usage = result?.usage_metadata;
-  if (!usage || typeof usage !== "object") return;
-  const parts: string[] = [
-    `input=${usage.input_tokens ?? "?"}`,
-    `output=${usage.output_tokens ?? "?"}`,
-  ];
-  const input = typeof usage.input_tokens === "number" ? usage.input_tokens : 0;
-  // Cache fields: standard usage_metadata carries input_token_details.cache_read
-  // when mapped; DeepSeek-style relays put prompt_cache_hit_tokens /
-  // prompt_tokens_details.cached_tokens in response_metadata.usage instead.
-  const rmUsage = (result as any)?.response_metadata?.usage ?? {};
-  const read =
-    (usage as any).input_token_details?.cache_read ??
-    (usage as any).cache_read_token_count ??
-    rmUsage.prompt_cache_hit_tokens ??
-    rmUsage.prompt_tokens_details?.cached_tokens;
-  const miss = rmUsage.prompt_cache_miss_tokens;
-  if (read !== undefined) parts.push(`cache_read=${read}`);
-  if (miss !== undefined) parts.push(`cache_miss=${miss}`);
-  const prompt = rmUsage.prompt_tokens ?? input;
-  if (typeof read === "number" && prompt > 0) {
-    parts.push(`hit_rate=${Math.round((read / prompt) * 100)}%`);
-  }
-  logger.debug(`token usage: ${parts.join(" ")}`);
-  logger.debug(`token usage: ${parts.join(" ")}`);
-}
 
 /**
  * Inspect runtime context for a model spec / model params override and, when
