@@ -1,17 +1,108 @@
-import { Input, Button, Tooltip, Popover, Select, Tag } from "antd";
+import { Input, Button, Tooltip, Select, Spin } from "antd";
 import {
   ArrowUp, Square,
-  Paperclip,
+  FileWarning,
   Plus,
-  FilePlus, Image,
-  Zap,
+  Zap, X, FileText,
 } from "lucide-react";
 import { ACCESS_MODES, MODE_ORDER, type AccessMode } from "../constants.js";
 import { SlashCommandMenu } from "./SlashCommandMenu.js";
 import type { SlashCommandEntry } from "@octopus/tentacle";
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 
 const { TextArea } = Input;
+
+/** A draft attachment as owned by useChat's addFiles state machine. */
+export interface DraftAttachmentView {
+  id: string;
+  name: string;
+  mime?: string;
+  size: number;
+  previewUrl?: string;
+  status: "uploading" | "ready" | "error";
+  path?: string;
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n}B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)}KB`;
+  return `${(n / 1048576).toFixed(1)}MB`;
+}
+
+/** One attachment chip: image thumbnail (click to enlarge) or file card,
+ *  hover-revealed remove, upload spinner / error retry states. */
+function AttachmentChip({
+  att, onRemove, onRetry,
+}: {
+  att: DraftAttachmentView;
+  onRemove: (id: string) => void;
+  onRetry: (id: string) => void;
+}) {
+  const isImage = (att.mime ?? "").startsWith("image/");
+  return (
+    <div
+      style={{
+        position: "relative", flexShrink: 0,
+        display: "flex", alignItems: "center", gap: 6,
+        height: 46, padding: isImage ? 0 : "4px 8px 4px 6px",
+        borderRadius: 8,
+        border: att.status === "error" ? "1px solid var(--danger-color, #f5222d)" : "1px solid var(--gray-150)",
+        background: "var(--gray-0)",
+        overflow: "hidden",
+      }}
+      className="attachment-chip"
+    >
+      {isImage && att.previewUrl ? (
+        <img
+          src={att.previewUrl}
+          alt={att.name}
+          style={{ width: 58, height: 46, objectFit: "cover", borderRadius: 8, display: "block", cursor: "zoom-in" }}
+          onClick={() => window.open(att.previewUrl, "_blank")}
+        />
+      ) : (
+        <>
+          {att.status === "error"
+            ? <FileWarning size={18} style={{ color: "var(--danger-color, #f5222d)", flexShrink: 0 }} />
+            : <FileText size={18} style={{ color: "var(--gray-600)", flexShrink: 0 }} />}
+          <div style={{ display: "flex", flexDirection: "column", minWidth: 0, maxWidth: 150 }}>
+            <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {att.name}
+            </span>
+            <span style={{ fontSize: 11, color: "var(--gray-500, #999)" }}>
+              {att.status === "error" ? "上传失败" : formatBytes(att.size)}
+            </span>
+          </div>
+        </>
+      )}
+      {att.status === "uploading" && (
+        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.6)", borderRadius: 8 }}>
+          <Spin size="small" />
+        </div>
+      )}
+      <Tooltip title={att.status === "error" ? "重试上传" : att.name}>
+        <button
+          type="button"
+          aria-label={att.status === "error" ? "重试上传" : "移除附件"}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (att.status === "error") onRetry(att.id);
+            else onRemove(att.id);
+          }}
+          style={{
+            position: "absolute", top: 2, right: 2,
+            width: 16, height: 16, borderRadius: "50%",
+            border: "none", padding: 0, cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            background: "rgba(0,0,0,0.55)", color: "#fff",
+          }}
+          className="attachment-chip-x"
+        >
+          {att.status === "error" ? "↻" : <X size={10} />}
+        </button>
+      </Tooltip>
+    </div>
+  );
+}
 
 /**
  * The shared input bar — a bordered card with a textarea on top and a bottom
@@ -23,9 +114,10 @@ const { TextArea } = Input;
  * attachments, handlers) is passed in via props so the parent (Chat.tsx)
  * stays the single source of truth for input state.
  *
- * The hidden file input for attachments is rendered here (triggered
- * programmatically by the + popover) and refs itself via `attachInputRef`
- * passed from the parent so the ref lifetime matches the component's.
+ * Attachments enter three ways (opencode parity): paste into the textarea,
+ * drag & drop onto the card, and the + popover's two pickers (image / any
+ * file). The hidden inputs are rendered here and triggered programmatically;
+ * the actual upload state machine lives in useChat.addFiles.
  */
 export function InputBar({
   text,
@@ -35,8 +127,9 @@ export function InputBar({
   setAccessMode,
   attachments,
   onRemoveAttachment,
+  onRetryAttachment,
   attachInputRef,
-  onPickAttachments,
+  onAddFiles,
   onKey,
   selectedModel,
   setSelectedModel,
@@ -53,10 +146,11 @@ export function InputBar({
   busy: boolean;
   accessMode: AccessMode;
   setAccessMode: (v: AccessMode) => void;
-  attachments: string[];
-  onRemoveAttachment: (index: number) => void;
+  attachments: DraftAttachmentView[];
+  onRemoveAttachment: (id: string) => void;
+  onRetryAttachment: (id: string) => void;
   attachInputRef: React.RefObject<HTMLInputElement | null>;
-  onPickAttachments: (e: React.ChangeEvent<HTMLInputElement>) => void;
+  onAddFiles: (files: FileList | File[]) => void;
   onKey: (e: React.KeyboardEvent) => void;
   selectedModel: string | null;
   setSelectedModel: (v: string | null) => void;
@@ -68,10 +162,6 @@ export function InputBar({
   onSlashSelect: (cmd: SlashCommandEntry) => void;
   onSystemCommand: (cmd: SlashCommandEntry) => void;
 }) {
-  const ppStyle: React.CSSProperties = {
-    padding: "4px 8px", cursor: "pointer", fontSize: 13, borderRadius: 4,
-    transition: "background-color 0.15s ease",
-  };
   const iconBtnStyle: React.CSSProperties = {
     height: 28, borderRadius: 8, flexShrink: 0,
     color: "var(--gray-600)", transition: "color 0.2s ease",
@@ -82,6 +172,9 @@ export function InputBar({
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
   const [slashQuery, setSlashQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
+  // ---- Drag & drop state ----
+  const [dragging, setDragging] = useState(false);
+  const dragDepthRef = useRef(0);
 
   // Detect `/` at the start of input — show/hide the command menu.
   const handleTextChange = useCallback(
@@ -97,6 +190,45 @@ export function InputBar({
       }
     },
     [setText],
+  );
+
+  // Paste with files (screenshots) → attachments instead of text.
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const files = Array.from(e.clipboardData?.files ?? []);
+      if (files.length > 0) {
+        e.preventDefault();
+        onAddFiles(files);
+      }
+    },
+    [onAddFiles],
+  );
+
+  // Drag & drop — depth-counted so nested enter/leave pairs don't flicker.
+  const handleDragEnter = useCallback((e: React.DragEvent) => {
+    if (!Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
+    e.preventDefault();
+    dragDepthRef.current += 1;
+    setDragging(true);
+  }, []);
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    if (!Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
+    e.preventDefault(); // required to allow the drop
+  }, []);
+  const handleDragLeave = useCallback(() => {
+    dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+    if (dragDepthRef.current === 0) setDragging(false);
+  }, []);
+  const handleDrop = useCallback(
+    (e: React.DragEvent) => {
+      if (!Array.from(e.dataTransfer?.types ?? []).includes("Files")) return;
+      e.preventDefault();
+      dragDepthRef.current = 0;
+      setDragging(false);
+      const files = Array.from(e.dataTransfer?.files ?? []);
+      if (files.length > 0) onAddFiles(files);
+    },
+    [onAddFiles],
   );
 
   const handleSlashSelect = useCallback(
@@ -121,16 +253,26 @@ export function InputBar({
     [text, setText, onSlashSelect, onSystemCommand],
   );
 
+  const hasReadyAttachment = attachments.some((a) => a.status === "ready");
+  const uploadingCount = attachments.filter((a) => a.status === "uploading").length;
+
   return (
-    <div ref={containerRef} style={{
-      position: "relative",
-      display: "flex", flexDirection: "column",
-      background: "var(--gray-25)",
-      border: "1px solid var(--gray-150)",
-      borderRadius: 13, padding: "10px 10px 8px",
-      boxShadow: "0 2px 8px var(--shadow-1)",
-      transition: "box-shadow 0.3s ease",
-    }}>
+    <div
+      ref={containerRef}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{
+        position: "relative",
+        display: "flex", flexDirection: "column",
+        background: "var(--gray-25)",
+        border: dragging ? "2px dashed var(--main-500)" : "1px solid var(--gray-150)",
+        borderRadius: 13, padding: dragging ? "9px 9px 7px" : "10px 10px 8px",
+        boxShadow: "0 2px 8px var(--shadow-1)",
+        transition: "box-shadow 0.3s ease, border-color 0.15s ease",
+      }}
+    >
       {/* Slash-command autocomplete menu (above the textarea) */}
       <SlashCommandMenu
         commands={commands}
@@ -138,6 +280,18 @@ export function InputBar({
         visible={slashMenuVisible}
         onSelect={handleSlashSelect}
       />
+
+      {/* Drop overlay */}
+      {dragging && (
+        <div style={{
+          position: "absolute", inset: 0, zIndex: 5, borderRadius: 13,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "rgba(255,255,255,0.85)", pointerEvents: "none",
+          fontSize: 14, color: "var(--main-600, #16a34a)", fontWeight: 500,
+        }}>
+          释放以添加附件
+        </div>
+      )}
 
       {/* High-privilege banner: surfaces the risk whenever an autonomous mode
           is armed so the user knows changes will apply without per-step
@@ -164,17 +318,15 @@ export function InputBar({
         </div>
       )}
 
-      {/* Attachment chips (if any) */}
+      {/* Attachment chips — horizontal scroll (opencode-style strip) */}
       {attachments.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
-          {attachments.map((name, i) => (
-            <Tag
-              key={i} closable onClose={() => onRemoveAttachment(i)}
-              style={{ marginInlineEnd: 0 }}
-            >
-              <Paperclip style={{ marginRight: 4 }} />
-              {name}
-            </Tag>
+        <div style={{
+          display: "flex", gap: 6, marginBottom: 8,
+          overflowX: "auto", paddingBottom: 2,
+          scrollbarWidth: "thin",
+        }}>
+          {attachments.map((att) => (
+            <AttachmentChip key={att.id} att={att} onRemove={onRemoveAttachment} onRetry={onRetryAttachment} />
           ))}
         </div>
       )}
@@ -183,6 +335,7 @@ export function InputBar({
       <TextArea
         value={text} onChange={(e) => handleTextChange(e.target.value)}
         onKeyDown={onKey}
+        onPaste={handlePaste}
         placeholder={ACCESS_MODES[accessMode].placeholder}
         autoSize={showStart ? { minRows: 3, maxRows: 8 } : { minRows: 2, maxRows: 8 }}
         disabled={busy}
@@ -199,34 +352,16 @@ export function InputBar({
         display: "flex", alignItems: "center", gap: 6,
         marginTop: 8, flexShrink: 0,
       }}>
-        {/* Left group: + attachments, access mode */}
-        <Popover
-          placement="topLeft"
-          trigger="click"
-          overlayStyle={{ padding: 4 }}
-          content={
-            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-              <div
-                style={{ ...ppStyle, display: "flex", alignItems: "center", gap: 6 }}
-                onClick={() => attachInputRef.current?.click()}
-              >
-                <FilePlus /> 添加文件
-              </div>
-              <div
-                style={{ ...ppStyle, display: "flex", alignItems: "center", gap: 6 }}
-                onClick={() => attachInputRef.current?.click()}
-              >
-                <Image /> 上传图片
-              </div>
-            </div>
-          }
-        >
+        {/* Left group: + attachments (unified picker — images, docs, anything),
+            access mode */}
+        <Tooltip title="添加附件（图片 / 文件）" mouseEnterDelay={0.8}>
           <Button type="text" size="small"
             icon={<Plus />}
+            onClick={() => attachInputRef.current?.click()}
             style={{ ...iconBtnStyle }}
             className="hover-green"
           />
-        </Popover>
+        </Tooltip>
 
         {/* Access mode — icon in the trigger, two-line (name + hint) options,
             Shift+Tab hint in the tooltip. */}
@@ -282,12 +417,12 @@ export function InputBar({
           ]}
         />
 
-        <Tooltip title={busy ? "停止回答" : ""}>
+        <Tooltip title={busy ? "停止回答" : uploadingCount > 0 ? "附件上传中…" : ""}>
           <Button
             type="text" shape="circle"
             icon={busy ? <Square size={14} /> : <ArrowUp />}
             onClick={busy ? onStop : onSend}
-            disabled={!text.trim() && !busy}
+            disabled={(!text.trim() && !hasReadyAttachment && !busy) || uploadingCount > 0}
             style={{
               width: 32, height: 32, flexShrink: 0, border: "none",
               background: "var(--main-500)", color: "var(--gray-0)",
@@ -310,10 +445,15 @@ export function InputBar({
         </Tooltip>
       </div>
 
-      {/* Hidden file input for attachments. */}
+      {/* Hidden file input for attachments — the unified picker (no accept
+          filter: images, documents, anything). Value resets after each pick
+          so picking the same file twice in a row still fires onChange. */}
       <input
         ref={attachInputRef} type="file" multiple style={{ display: "none" }}
-        onChange={onPickAttachments}
+        onChange={(e) => {
+          if (e.target.files?.length) onAddFiles(e.target.files);
+          e.target.value = "";
+        }}
       />
     </div>
   );

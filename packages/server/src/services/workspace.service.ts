@@ -711,3 +711,49 @@ export function ensureThreadOutputs(
   ensureDir(dir);
   return dir;
 }
+
+// =============================================================================
+// Chat attachments — uploaded from the input box before the turn is sent
+// =============================================================================
+
+/**
+ * Store a chat attachment under the workspace's `attachments/` area.
+ *
+ * Files land in `attachments/<short-uuid>/<sanitized-filename>` — the uuid
+ * subdir prevents same-name overwrites between turns while keeping the
+ * original filename visible to the agent (it appears in read_file paths and
+ * model-facing attachment notes).
+ */
+export function uploadChatAttachment(
+  userId: string,
+  workspaceId: string,
+  fileName: string,
+  data: Buffer,
+): UploadResult {
+  validateSegment(fileName);
+  const { root } = requireRoot(userId, workspaceId);
+  const parentRel = `attachments/${uuid().slice(0, 8)}`;
+  const childRel = `${parentRel}/${fileName}`;
+  const abs = resolveSafePath(root, childRel);
+  ensureDir(dirname(abs));
+  writeFileSync(abs, data);
+  return {
+    path: relativePath(root, abs),
+    name: fileName,
+    size: data.byteLength,
+  };
+}
+
+/** Resolve a chat attachment ref to an absolute path inside the workspace
+ * root, verifying existence. Throws when the path escapes the root. */
+export function resolveChatAttachmentPath(
+  userId: string,
+  workspaceId: string,
+  rel: string,
+): string {
+  const { root } = requireRoot(userId, workspaceId);
+  const abs = resolveSafePath(root, rel);
+  if (!existsSyncSafe(abs)) throw new NotFoundError("附件不存在");
+  return abs;
+}
+

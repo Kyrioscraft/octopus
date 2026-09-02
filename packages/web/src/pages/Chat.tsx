@@ -120,8 +120,9 @@ export function ChatPage() {
       setAccessMode={chat.setAccessMode}
       attachments={chat.attachments}
       onRemoveAttachment={chat.removeAttachment}
+      onRetryAttachment={chat.retryAttachment}
       attachInputRef={chat.attachInputRef}
-      onPickAttachments={chat.pickAttachments}
+      onAddFiles={chat.addFiles}
       onKey={chat.onKey}
       selectedModel={chat.selectedModel}
       setSelectedModel={chat.setSelectedModel}
@@ -168,6 +169,7 @@ export function ChatPage() {
                 busy={chat.busy}
                 endRef={endRef}
                 onOpenSubagent={openSubagentPanel}
+                workspaceId={activeWorkspaceId}
               />
             )}
 

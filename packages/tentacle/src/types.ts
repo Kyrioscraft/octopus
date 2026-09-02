@@ -54,6 +54,24 @@ export interface ChatMessage {
   content: string | ChatContentPart[];
 }
 
+/**
+ * A chat attachment — a file previously uploaded to the thread's workspace
+ * via POST /api/chat/attachments. Carried as a lightweight workspace-relative
+ * path reference (never base64 on the wire); the server expands it into the
+ * model input at send time (images → image_url blocks, text/pdf/docx →
+ * inlined or referenced text, other binaries → a path hint).
+ */
+export interface AttachmentRef {
+  /** Workspace-relative path (e.g. "attachments/a1b2/report.pdf"). */
+  path: string;
+  /** Original filename at pick time (display + model hint). */
+  name: string;
+  /** MIME type as sniffed by the client at upload (best effort). */
+  mime?: string;
+  /** Byte size at upload time. */
+  size?: number;
+}
+
 export interface ChatRequest {
   messages: ChatMessage[];
   thread_id?: string;
@@ -61,6 +79,8 @@ export interface ChatRequest {
   agent_id?: string;
   /** Workspace to bind the thread to (its dir becomes the agent's cwd). */
   workspace_id?: string;
+  /** Attachments referenced by this user turn (uploaded to the workspace). */
+  attachments?: AttachmentRef[];
   /** Optional per-request model override ("provider:model"). Applied server-side
    *  via the configurable_model middleware; omitted = use config default. */
   model?: string;
@@ -309,7 +329,7 @@ export type StreamEventType = StreamEvent["type"];
 /** Persisted events — the durable per-thread event log (`thread_events`). */
 export type DurableStreamEvent =
   // --- turn lifecycle (emitted by the chat service layer) ---
-  | { type: "turn.started"; seq: number; threadId: string; requestId: string; runStartedAt: number; /** The user's turn text — present ONLY on fresh turns (POST /agent); resume turns omit it, continuing the same turn without a new user bubble. Plain string — matches the server's BoundaryEvent. */ userMessage?: string }
+  | { type: "turn.started"; seq: number; threadId: string; requestId: string; runStartedAt: number; /** The user's turn text — present ONLY on fresh turns (POST /agent); resume turns omit it, continuing the same turn without a new user bubble. Plain string — matches the server's BoundaryEvent. */ userMessage?: string; /** Attachments of this turn (workspace-relative refs) — present alongside userMessage on fresh turns; lets replaying clients render attachment chips on the user bubble. */ attachments?: AttachmentRef[] }
   | { type: "turn.finished"; seq: number; threadId: string; title?: string; durationMs: number }
   | { type: "thread.title.updated"; seq: number; threadId: string; title: string }
   | { type: "turn.error"; seq: number; errorType: string; message: string; threadId?: string }
@@ -705,6 +725,12 @@ export interface WorkspaceUploadResult {
   path: string;
   name: string;
   size: number;
+}
+
+/** Result of a chat-attachment upload (POST /api/chat/attachments). */
+export interface ChatAttachmentUploadResult extends WorkspaceUploadResult {
+  /** Workspace the file landed in (the client reuses it for later sends). */
+  workspaceId: string;
 }
 
 // =============================================================================

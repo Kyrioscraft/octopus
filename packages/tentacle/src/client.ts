@@ -36,6 +36,7 @@ import {
   type WorkspaceListResponse,
   type WorkspaceTreeResponse,
   type WorkspaceUploadResult,
+  type ChatAttachmentUploadResult,
   type WorkspaceWriteRequest,
   type HostBrowseResult,
   type SandboxSettings,
@@ -724,6 +725,25 @@ export class OctopusClient {
     );
     if (!res.ok) throw await this.#httpError(res);
     return res.json() as Promise<WorkspaceUploadResult>;
+  }
+
+  /** Upload a chat attachment into a workspace's attachments/ area. Omit
+   * `workspaceId` to let the server resolve the user's default workspace
+   * (matches how POST /api/chat/agent binds threads). */
+  async uploadChatAttachment(
+    file: File,
+    workspaceId?: string,
+  ): Promise<ChatAttachmentUploadResult> {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (workspaceId !== undefined) formData.append("workspace_id", workspaceId);
+    const res = await fetch(`${this.#baseUrl}/api/chat/attachments`, {
+      method: "POST",
+      headers: this.#authHeader(),
+      body: formData,
+    });
+    if (!res.ok) throw await this.#httpError(res);
+    return res.json() as Promise<ChatAttachmentUploadResult>;
   }
 
   // =========================================================================

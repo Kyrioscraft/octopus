@@ -1,6 +1,7 @@
 import { TurnEvents } from "../turn/TurnEvents.js";
 import { Markdown } from "../../widgets/Markdown.js";
 import { WorkTimer } from "../WorkTimer.js";
+import { MessageAttachments } from "./MessageAttachments.js";
 import type { SubagentEvent } from "../turn/types.js";
 import type { Msg } from "../types.js";
 
@@ -22,9 +23,12 @@ import type { Msg } from "../types.js";
 export function MessageBubble({
   msg,
   onOpenSubagent,
+  workspaceId,
 }: {
   msg: Msg;
   onOpenSubagent: (ev: SubagentEvent) => void;
+  /** Active workspace — lets history-loaded attachment thumbs fetch bytes. */
+  workspaceId?: string;
 }) {
   return (
     <div style={{
@@ -78,6 +82,10 @@ export function MessageBubble({
             // Empty streaming bubble renders nothing — the WorkTimer at the
             // top of the turn already signals the busy state.
             ""
+          )}
+          {/* User attachments — thumbnails / file cards below the text. */}
+          {msg.role === "user" && msg.attachments && msg.attachments.length > 0 && (
+            <MessageAttachments attachments={msg.attachments} workspaceId={workspaceId} />
           )}
         </div>
       )}

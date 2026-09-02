@@ -21,17 +21,20 @@ export function MessageList({
   busy,
   endRef,
   onOpenSubagent,
+  workspaceId,
 }: {
   msgs: Msg[];
   busy: boolean;
   endRef: RefObject<HTMLDivElement | null>;
   onOpenSubagent: (ev: SubagentEvent) => void;
+  /** Active workspace — forwarded for history attachment preview fetching. */
+  workspaceId?: string;
 }) {
   return (
     <div style={{ padding: "1rem 1.5rem" }}>
       <div style={{ maxWidth: 800, width: "100%", margin: "0 auto" }}>
         {msgs.map((m) => (
-          <MessageBubble key={m.id} msg={m} onOpenSubagent={onOpenSubagent} />
+          <MessageBubble key={m.id} msg={m} onOpenSubagent={onOpenSubagent} workspaceId={workspaceId} />
         ))}
         {/* Running indicator — always visible at the bottom while busy
             (zcode-style): a spinning lucide Loader icon, even after the

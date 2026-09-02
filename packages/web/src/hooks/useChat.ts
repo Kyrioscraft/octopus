@@ -7,18 +7,33 @@ import {
   type AskUserQuestionPayload,
   type ResumeRequestBody,
   type SlashCommandEntry,
+  type AttachmentRef,
 } from "@octopus/tentacle";
 import { TurnEventAccumulator, contentFromEvents } from "../components/chat/turn/TurnEventAccumulator.js";
 import type { TurnEvent, SubagentEvent } from "../components/chat/turn/types.js";
 import type { ToolCallEntry } from "../components/chat/rows/tools/types.js";
 import type { TodoItem } from "../components/chat/companion/types.js";
-import type { Msg } from "../components/chat/types.js";
+import type { Msg, MsgAttachment } from "../components/chat/types.js";
 import type { AccessMode } from "../components/chat/constants.js";
 import { MODE_ORDER } from "../components/chat/constants.js";
+import { resizeImageIfNeeded, sniffMime } from "../components/chat/input/imageResize.js";
 import { useThemeStore } from "../stores/theme.js";
 import { useChatStore } from "../stores/chat.js";
 
 const sdk = new OctopusClient();
+
+/** A draft attachment in the input bar — picked, uploading, ready, or failed.
+ *  `file` is kept for retry; `path` is assigned by the upload endpoint. */
+interface DraftAttachment {
+  id: string;
+  name: string;
+  mime?: string;
+  size: number;
+  previewUrl?: string;
+  status: "uploading" | "ready" | "error";
+  path?: string;
+  file?: File;
+}
 
 /**
  * Two-pass normalization of persisted thread history into the Msg[] view model.
@@ -168,6 +183,11 @@ function normalizeHistory(rows: any[]): Msg[] {
       role: m.role as Msg["role"],
       content: m.content,
       ...(events.length > 0 ? { events } : {}),
+      // User rows carry their attachments in extraMetadata (wire refs, no
+      // absPath) — mapped here so history bubbles render attachment chips.
+      ...((m.role === "user" && Array.isArray(extra?.attachments))
+        ? { attachments: extra!.attachments as MsgAttachment[] }
+        : {}),
       status: "done",
     });
   }
@@ -230,7 +250,9 @@ export function useChat({
   const [accessMode, setAccessMode] = useState<AccessMode>("confirm");
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [modelProviders, setModelProviders] = useState<ModelProviderEntry[]>([]);
-  const [attachments, setAttachments] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<DraftAttachment[]>([]);
+  const attachmentsRef = useRef<DraftAttachment[]>([]);
+  attachmentsRef.current = attachments;
   const [commands, setCommands] = useState<SlashCommandEntry[]>([]);
 
   const attachInputRef = useRef<HTMLInputElement>(null);
@@ -429,7 +451,12 @@ export function useChat({
             const content = typeof ev.userMessage === "string"
               ? ev.userMessage
               : (ev.userMessage as { content?: string }).content ?? "";
-            turns.push({ id: `u_r_${ev.requestId}`, role: "user", content, status: "done" } as Msg);
+            turns.push({
+              id: `u_r_${ev.requestId}`, role: "user", content, status: "done",
+              ...(Array.isArray(ev.attachments) && ev.attachments.length > 0
+                ? { attachments: ev.attachments as MsgAttachment[] }
+                : {}),
+            } as Msg);
           }
           acc = new TurnEventAccumulator();
           turns.push({
@@ -796,7 +823,23 @@ export function useChat({
 
   // ---- Send a new user message ----
   const send = useCallback(async (content: string) => {
-    const u: Msg = { id: `u_${Date.now()}`, role: "user", content, status: "done" };
+    // Snapshot + clear the draft attachments (ready ones ride the request).
+    const draftAttachments = attachmentsRef.current.filter((a) => a.status === "ready");
+    const wireAttachments: AttachmentRef[] = draftAttachments
+      .filter((a): a is DraftAttachment & { path: string } => !!a.path)
+      .map(({ path, name, mime, size }) => ({ path, name, ...(mime ? { mime } : {}), ...(size !== undefined ? { size } : {}) }));
+    setAttachments([]);
+    const u: Msg = {
+      id: `u_${Date.now()}`, role: "user", content, status: "done",
+      ...(wireAttachments.length > 0
+        ? {
+            attachments: wireAttachments.map((ref) => {
+              const draft = draftAttachments.find((d) => d.path === ref.path);
+              return { ...ref, ...(draft?.previewUrl ? { previewUrl: draft.previewUrl } : {}) };
+            }),
+          }
+        : {}),
+    };
     const a: Msg = {
       id: `a_${Date.now()}`, role: "assistant", content: "", status: "streaming", events: [],
       startedAtMs: Date.now(),
@@ -818,6 +861,7 @@ export function useChat({
           messages: [{ role: "user", content }],
           thread_id: activeThreadId,
           ...(sendWorkspaceId ? { workspace_id: sendWorkspaceId } : {}),
+          ...(wireAttachments.length > 0 ? { attachments: wireAttachments } : {}),
           // Agent name (successor of the access mode — same four values in
           // phase 1, see architecture/AGENT_MIGRATION_PLAN.md).
           agent: accessMode,
@@ -973,17 +1017,93 @@ export function useChat({
   }, [activeThreadId]);
 
   // ---- Attachment handling ----
-  const pickAttachments = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files) return;
-    const names = Array.from(files).map((f) => f.name);
-    setAttachments((prev) => [...prev, ...names]);
-    e.target.value = "";
+  // Draft attachments live as an upload state machine: picked → uploading →
+  // ready (path assigned by the server) / error. Files upload to the
+  // workspace IMMEDIATELY on pick (opencode-style) so sending only carries
+  // lightweight path refs; previews are local object URLs. Uploads run
+  // CONCURRENTLY (capped) — one request per file keeps error isolation and
+  // single-file retries clean while avoiding serial queuing.
+  const uploadWorkspaceRef = useRef<string | undefined>(sendWorkspaceId);
+  uploadWorkspaceRef.current = sendWorkspaceId;
+
+  /** Upload one entry (single-file endpoint, independently resolved). */
+  const uploadEntry = useCallback(async (entry: DraftAttachment) => {
+    if (!entry.file) return;
+    try {
+      const result = await sdk.uploadChatAttachment(entry.file, uploadWorkspaceRef.current);
+      setAttachments((prev) => prev.map((a) => (a.id === entry.id
+        ? { ...a, status: "ready" as const, path: result.path, size: result.size, mime: a.mime ?? undefined }
+        : a)));
+      // Remember which workspace the upload landed in so subsequent
+      // uploads AND the send (workspace binding) agree.
+      if (!uploadWorkspaceRef.current) uploadWorkspaceRef.current = result.workspaceId;
+    } catch (err) {
+      setAttachments((prev) => prev.map((a) => (a.id === entry.id ? { ...a, status: "error" as const } : a)));
+      antdMessage.error(`上传 ${entry.name} 失败：${(err as Error).message ?? "未知错误"}`);
+    }
   }, []);
 
-  const removeAttachment = useCallback((index: number) => {
-    setAttachments((prev) => prev.filter((_, j) => j !== index));
+  const addFiles = useCallback(async (input: FileList | File[]) => {
+    const files = Array.from(input);
+    if (files.length === 0) return;
+    const batch: DraftAttachment[] = [];
+    for (const original of files) {
+      // Dedupe consecutive picks of the same file (name+size identity —
+      // clipboard screenshots get fresh names each paste so content-hash
+      // dedupe isn't worth it here).
+      const dupe = attachmentsRef.current.find(
+        (a) => a.name === original.name && a.size === original.size,
+      );
+      if (dupe) {
+        antdMessage.warning(`已添加过 ${original.name}`);
+        continue;
+      }
+      let file = original;
+      try {
+        // Downscale oversized images before upload — inline base64 rides
+        // along every turn's checkpoint history, so size matters.
+        file = (await resizeImageIfNeeded(original)).file;
+      } catch {
+        // Non-decodable image or canvas failure — upload the original.
+      }
+      const previewUrl = file.type.startsWith("image/") ? URL.createObjectURL(file) : undefined;
+      const entry: DraftAttachment = {
+        id: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: file.name, mime: sniffMime(file), size: file.size,
+        previewUrl, status: "uploading", file,
+      };
+      batch.push(entry);
+    }
+    if (batch.length === 0) return;
+    setAttachments((prev) => [...prev, ...batch]);
+    // Concurrent pool — cap at 4 so a big batch doesn't occupy every browser
+    // connection to the origin (6 under HTTP/1.1) and starve other API calls.
+    const CONCURRENCY = 4;
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(CONCURRENCY, batch.length) }, async () => {
+      while (cursor < batch.length) {
+        const entry = batch[cursor++];
+        await uploadEntry(entry);
+      }
+    });
+    await Promise.all(workers);
+  }, [uploadEntry]);
+
+  const removeAttachment = useCallback((id: string) => {
+    setAttachments((prev) => {
+      const target = prev.find((a) => a.id === id);
+      if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+      return prev.filter((a) => a.id !== id);
+    });
   }, []);
+
+  /** Retry a failed upload (same file reference is kept on the entry). */
+  const retryAttachment = useCallback((id: string) => {
+    const entry = attachmentsRef.current.find((a) => a.id === id);
+    if (!entry?.file) return;
+    setAttachments((prev) => prev.map((a) => (a.id === id ? { ...a, status: "uploading" as const } : a)));
+    void uploadEntry({ ...entry, status: "uploading" });
+  }, [uploadEntry]);
 
   // ---- Slash command selection ----
   const onSlashSelect = useCallback(
@@ -1071,7 +1191,14 @@ export function useChat({
   // ---- Input send + keyboard ----
   const doSend = useCallback(() => {
     const t = text.trim();
-    if (!t || busy) return;
+    const hasReady = attachmentsRef.current.some((a) => a.status === "ready");
+    // Attachment-only sends are allowed; uploading/error entries block send
+    // (they'd silently drop from the turn otherwise).
+    const uploading = attachmentsRef.current.some((a) => a.status === "uploading");
+    const broken = attachmentsRef.current.some((a) => a.status === "error");
+    if ((!t && !hasReady) || busy) return;
+    if (uploading) { antdMessage.warning("附件仍在上传中，请稍候"); return; }
+    if (broken) { antdMessage.warning("有附件上传失败，请移除或重试"); return; }
     setText("");
     send(t);
   }, [text, busy, send]);
@@ -1136,7 +1263,7 @@ export function useChat({
     selectedModel, setSelectedModel, attachments, modelOptions, todos, allSubagents, showStart,
     loading, attachInputRef, commands,
     // actions
-    send, resolve, stop, doSend, onKey, load, clearMsgs, pickAttachments, removeAttachment,
+    send, resolve, stop, doSend, onKey, load, clearMsgs, addFiles, removeAttachment, retryAttachment,
     onSlashSelect, handleSystemCommand,
   };
 }

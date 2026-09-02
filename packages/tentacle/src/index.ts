@@ -7,6 +7,8 @@ export {
   type ChatContentPart,
   type ChatMessage,
   type ChatRequest,
+  type AttachmentRef,
+  type ChatAttachmentUploadResult,
   type FirstRunResponse,
   type InitRequest,
   type LoginRequest,

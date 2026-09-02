@@ -50,11 +50,60 @@ import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRul
 import {
   ensureThreadOutputs,
   resolveAgentCwd,
+  uploadChatAttachment,
+  resolveChatAttachmentPath,
+  PathTraversalError,
+  NotFoundError,
 } from "../services/workspace.service.js";
 import { listAllSubagents, resolveBuiltinOverrides } from "../services/subagent.service.js";
 import { createLangfuseHandler, flushLangfuseHandler } from "../langfuse-tracing.js";
 
 export const chatRouter = new Hono();
+
+/** Wire shape of an attachment reference (mirrors tentacle's AttachmentRef). */
+interface AttachmentRefWire {
+  path: string;
+  name?: string;
+  mime?: string;
+  size?: number;
+}
+
+/**
+ * Validate + resolve the request's attachment refs against the workspace
+ * root: each path must stay inside the workspace (traversal guard via
+ * resolveSafePath) and point at an existing file. Returns the resolved list
+ * (absPath filled in) — or fails the request with 400/404.
+ */
+function resolveRequestAttachments(
+  c: Context,
+  userId: string,
+  workspaceId: string,
+  refs: AttachmentRefWire[] | undefined,
+): { ok: true; value: import("../services/chat.service.js").ResolvedAttachment[] } | { ok: false; response: Response } {
+  if (!refs || refs.length === 0) return { ok: true, value: [] };
+  const out: import("../services/chat.service.js").ResolvedAttachment[] = [];
+  for (const ref of refs) {
+    if (typeof ref?.path !== "string" || !ref.path) {
+      return { ok: false, response: c.json({ detail: "附件路径无效" }, 400) };
+    }
+    try {
+      const absPath = resolveChatAttachmentPath(userId, workspaceId, ref.path);
+      out.push({
+        path: ref.path,
+        name: typeof ref.name === "string" && ref.name ? ref.name : ref.path.split("/").pop() ?? ref.path,
+        mime: typeof ref.mime === "string" ? ref.mime : undefined,
+        size: typeof ref.size === "number" ? ref.size : undefined,
+        absPath,
+      });
+    } catch (err) {
+      if (err instanceof PathTraversalError) {
+        return { ok: false, response: c.json({ detail: "附件路径越界" }, 400) };
+      }
+      return { ok: false, response: c.json({ detail: `附件不存在：${ref.path}` }, 404) };
+    }
+  }
+  return { ok: true, value: out };
+}
 
 /**
  * Resolve the user's subagents (file-source + user-defined, merged) into the
@@ -355,6 +404,9 @@ interface ChatRequest {
   agent_id?: string;
   /** Workspace to bind this thread to (its dir becomes the agent's cwd). */
   workspace_id?: string;
+  /** Attachments uploaded via POST /api/chat/attachments — workspace-relative
+   *  path refs expanded into multimodal content at send time. */
+  attachments?: AttachmentRefWire[];
   /** Optional per-request model override ("provider:model"). Applied via the
    *  configurable_model middleware at runtime; falls back to config default. */
   model?: string;
@@ -439,9 +491,18 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
   // Make sure this conversation has an outputs/ directory inside the workspace.
   ensureThreadOutputs(userId, workspace.id, threadId);
 
+  // Resolve attachments against the workspace root BEFORE anything else — a
+  // bad ref (traversal / missing file) fails the request with a clear error
+  // instead of poisoning the persisted turn. absPath is stripped when the
+  // refs are persisted/emitted; the graph input expansion reads the file.
+  const attachmentResult = resolveRequestAttachments(c, userId, workspace.id, body.attachments);
+  if (!attachmentResult.ok) return attachmentResult.response;
+  const resolvedAttachments = attachmentResult.value;
+
   // Persist user message BEFORE streaming — carrying the resolved agent so
-  // the next turn can inherit it (message-level agent binding, phase 3).
-  saveUserMessage(threadId, userMessage, agentName);
+  // the next turn can inherit it (message-level agent binding, phase 3), and
+  // the attachment refs so history loads render chips.
+  saveUserMessage(threadId, userMessage, agentName, resolvedAttachments);
 
   const config = loadConfig();
   const modelOverride = body.model?.trim() || undefined;
@@ -569,6 +630,7 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
           agent,
           subagentRegistry,
           langgraphConfig,
+          ...(resolvedAttachments.length > 0 ? { attachments: resolvedAttachments } : {}),
           modelSpec: config.model,
           startedAt: run.startedAt,
         },
@@ -599,6 +661,51 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
   })();
 
   return c.json({ threadId, requestId }, 202);
+});
+
+// =========================================================================
+// POST /api/chat/attachments  (upload an input-box attachment)
+// =========================================================================
+
+/**
+ * Multipart upload of a chat attachment. The file lands in the workspace's
+ * `attachments/<uuid>/<filename>` area and is referenced by workspace-relative
+ * path in the subsequent POST /agent call. `workspace_id` is optional — the
+ * same resolution as /agent applies (request → thread binding → user default),
+ * except there is no thread yet at pick time, so it's request → user default.
+ */
+chatRouter.post("/attachments", getOptionalUser, async (c) => {
+  const userId = c.var.user.sub;
+  const MAX = 100 * 1024 * 1024;
+  let body: Record<string, string | File>;
+  try {
+    body = await c.req.parseBody({ all: false });
+  } catch {
+    return c.json({ error: "bad_request", message: "无效的 multipart 请求" }, 400);
+  }
+  const file = body["file"];
+  if (!(file instanceof File)) {
+    return c.json({ error: "bad_request", message: "缺少 file 字段" }, 400);
+  }
+  const workspaceId = typeof body["workspace_id"] === "string" && body["workspace_id"]
+    ? body["workspace_id"]
+    : undefined;
+  // Match POST /agent's workspace resolution minus the thread binding — at
+  // pick time the thread may not exist yet, so: request → user default.
+  const { workspace } = resolveAgentCwd(userId, workspaceId ?? null);
+  try {
+    const buf = Buffer.from(await file.arrayBuffer());
+    if (buf.byteLength > MAX) {
+      return c.json({ error: "too_large", message: "文件超过 100MB 限制" }, 413);
+    }
+    const result = uploadChatAttachment(userId, workspace.id, file.name || "upload", buf);
+    return c.json({ ...result, workspaceId: workspace.id }, 201);
+  } catch (err) {
+    if (err instanceof PathTraversalError || err instanceof NotFoundError) {
+      return c.json({ error: "not_found", message: (err as Error).message }, 404);
+    }
+    return c.json({ error: "upload_failed", message: (err as Error).message || "上传失败" }, 500);
+  }
 });
 
 // =========================================================================

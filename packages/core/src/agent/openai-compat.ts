@@ -403,6 +403,36 @@ class ChatOpenAICompatibleCompletions extends ChatOpenAICompletions {
       },
     );
   }
+
+  /**
+   * Single HTTP choke point — `_generate`, `_streamResponseChunks` and
+   * `_streamChatModelEvents` all funnel through here with the FINAL wire
+   * body. Some OpenAI-compatible relays (newapi observed) drop image data
+   * from multimodal messages when a streaming request also carries
+   * `stream_options: {include_usage: true}`: the model then sees only the
+   * data-URL string ("I can't see the image") or the relay 400s outright.
+   * Strip `stream_options` for image-bearing streaming requests; the lost
+   * usage stats are acceptable. (langgraph's streamMode:"messages" chunk
+   * path goes through `_streamResponseChunks`, so patching per-method
+   * misses it — this covers every path.)
+   */
+  async completionWithRetry(body: any, options: any): Promise<any> {
+    if (body?.stream && body.stream_options) {
+      const hasImageUrl =
+        Array.isArray(body.messages) &&
+        body.messages.some(
+          (m: any) =>
+            Array.isArray(m?.content) &&
+            m.content.some((p: any) => p?.type === "image_url"),
+        );
+      if (hasImageUrl) {
+        const fixed = { ...body };
+        delete fixed.stream_options;
+        return super.completionWithRetry(fixed, options);
+      }
+    }
+    return super.completionWithRetry(body, options);
+  }
 }
 
 /**

@@ -37,7 +37,7 @@ const logger = getLogger("chat.service");
  * route's run-registry wrapper before enqueue/persist.
  */
 export type BoundaryEvent =
-  | { type: "turn.started"; threadId: string; requestId: string; runStartedAt: number; /** Fresh turns only (POST /agent); resume turns omit it and continue the same turn without a user bubble. */ userMessage?: string }
+  | { type: "turn.started"; threadId: string; requestId: string; runStartedAt: number; /** Fresh turns only (POST /agent); resume turns omit it and continue the same turn without a user bubble. */ userMessage?: string; /** Attachments of this turn (wire refs, no absPath) — mirrors the persisted extraMetadata.attachments so replaying clients render chips. */ attachments?: AttachmentWireRef[] }
   | { type: "turn.finished"; threadId: string; title?: string; durationMs?: number }
   | { type: "thread.title.updated"; threadId: string; title: string }
   | { type: "turn.error"; errorType: string; message: string; threadId?: string }
@@ -64,6 +64,10 @@ export interface ChatInput {
   agent: any;
   subagentRegistry: Map<string, SubagentRegistryEntry>;
   langgraphConfig: Record<string, unknown>;
+  /** Attachments uploaded by the client for this turn — already validated
+   *  (path resolved inside the workspace) by the route. Expanded into the
+   *  graph input as image_url blocks / inlined text. */
+  attachments?: ResolvedAttachment[];
   /** Model spec for title generation on new threads. */
   modelSpec?: string;
   /** Signal from the run registry — aborted by an explicit /stop request.
@@ -73,6 +77,20 @@ export interface ChatInput {
    *  persist the turn's work duration ("已工作 Xm" indicator). */
   startedAt?: number;
 }
+
+/** A chat attachment with its server-side resolved absolute path. The wire
+ * shape (path/name/mime/size) mirrors tentacle's AttachmentRef. */
+export interface ResolvedAttachment {
+  path: string;
+  name: string;
+  mime?: string;
+  size?: number;
+  /** Absolute filesystem path, resolved by the route via the workspace root. */
+  absPath: string;
+}
+
+/** Wire/persisted form — everything except the server-local absPath. */
+export type AttachmentWireRef = Omit<ResolvedAttachment, "absPath">;
 
 /** Input for resuming a HITL-interrupted turn. */
 export interface ResumeInput {
@@ -158,13 +176,28 @@ export interface ResumeRequestBody {
 
 /** Persist user message to thread store. The optional agent name is stored
  *  in extraMetadata — message-level agent binding (phase 3 of the agent
- *  migration, mirroring opencode's per-message agent field). */
-export function saveUserMessage(threadId: string, content: string, agent?: string): void {
+ *  migration, mirroring opencode's per-message agent field). Attachments
+ *  (wire refs without absPath) ride along in extraMetadata so history loads
+ *  can render attachment chips. */
+export function saveUserMessage(
+  threadId: string,
+  content: string,
+  agent?: string,
+  attachments?: ResolvedAttachment[],
+): void {
+  const wireAttachments = attachments?.map(({ absPath: _absPath, ...ref }) => ref);
+  const extraMetadata: Record<string, unknown> | undefined =
+    agent || wireAttachments
+      ? {
+          ...(agent ? { agent } : {}),
+          ...(wireAttachments ? { attachments: wireAttachments } : {}),
+        }
+      : undefined;
   addMessage(threadId, {
     id: `msg_${Date.now()}`,
     role: "user",
     content,
-    extraMetadata: agent ? { agent } : undefined,
+    extraMetadata,
     createdAt: new Date().toISOString(),
   });
 }
@@ -499,6 +532,189 @@ function processAgentEvent(
   emit(event);
 }
 
+// =============================================================================
+// Attachment expansion — build multimodal graph input from attachment refs
+// =============================================================================
+
+/** Content blocks the LangGraph Rust checkpointer can deserialize — keep the
+ * user message within text + image_url or thread reload 400s (see
+ * core's BinaryContentSanitizerMiddleware). */
+type UserContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } };
+
+/** Inline threshold for text-like attachments (bytes). Smaller files are
+ * fully inlined into the user message (opencode-style eager expansion);
+ * larger ones get a head preview + a read_file pointer. */
+const TEXT_INLINE_MAX_BYTES = 100 * 1024;
+/** Skip inlining (and skip the image block) beyond this size — providers
+ * reject oversized base64 anyway. */
+const IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+
+const IMAGE_MIMES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"]);
+
+/** Extensions treated as extractable text (beyond mime text/* and
+ * application/json etc.) — mirrors the client-side whitelist. */
+const TEXT_EXTENSIONS = new Set([
+  "md", "txt", "markdown", "mdx", "log", "csv", "tsv",
+  "json", "jsonc", "yaml", "yml", "toml", "xml", "ini", "env", "properties", "conf",
+  "ts", "tsx", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro",
+  "py", "rb", "go", "rs", "java", "kt", "kts", "c", "h", "cpp", "hpp", "cs",
+  "php", "swift", "sql", "sh", "bash", "zsh", "fish", "ps1", "bat", "cmd",
+  "html", "htm", "css", "scss", "sass", "less", "svg",
+  "dockerfile", "makefile", "gitignore", "gitattributes", "editorconfig",
+]);
+
+function extensionOf(name: string): string {
+  const base = name.toLowerCase();
+  const dot = base.lastIndexOf(".");
+  // Extensionless dotfiles (".gitignore") → the whole name IS the extension.
+  if (dot <= 0) return base.replace(/^\./, "");
+  return base.slice(dot + 1);
+}
+
+function isTextLike(name: string, mime?: string): boolean {
+  if (mime) {
+    if (IMAGE_MIMES.has(mime)) return false;
+    if (mime.startsWith("text/")) return true;
+    if (/^(application\/(json|xml|yaml|toml|x-sh|x-javascript|typescript))/i.test(mime)) return true;
+    if (mime === "application/pdf" || mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return false;
+  }
+  return TEXT_EXTENSIONS.has(extensionOf(name));
+}
+
+/** Clip text to a preview with a pointer to the full file. Keeps the first
+ * ~200 lines; the agent can read_file the rest on demand. */
+function clipText(text: string, displayPath: string): string {
+  const lines = text.split("\n");
+  if (lines.length <= 200) return text;
+  return `${lines.slice(0, 200).join("\n")}\n\n...（内容过长已截断，共 ${lines.length} 行；完整内容位于 ${displayPath}，可用 read_file 读取）`;
+}
+
+/** Extract plain text from a PDF buffer via unpdf. Returns "" when the PDF
+ * has no text layer (e.g. scanned images). */
+async function extractPdfText(buf: Buffer): Promise<string> {
+  const { extractText, getDocumentProxy } = await import("unpdf");
+  const pdf = await getDocumentProxy(new Uint8Array(buf));
+  const { text } = await extractText(pdf, { mergePages: true });
+  return text ?? "";
+}
+
+/** Extract plain text from a DOCX buffer via mammoth. */
+async function extractDocxText(buf: Buffer): Promise<string> {
+  const mammoth = await import("mammoth");
+  const { value } = await mammoth.extractRawText({ buffer: buf });
+  return value;
+}
+
+/**
+ * Expand attachments into user-message content blocks:
+ *   images            → image_url (base64 data URL) — the ONLY image channel
+ *                       the model can see (read_file image blocks are
+ *                       sanitized to placeholders by the checkpointer guard)
+ *   text-like files   → inlined (≤100KB) or head-preview + read_file pointer
+ *   pdf / docx        → text extracted (unpdf / mammoth), then the size rule
+ *   other binaries    → honest path-reference note (agent may still read_file
+ *                       them, but content is not parsed)
+ *
+ * A failure to expand one attachment never fails the turn — it degrades to a
+ * note the model can relay to the user.
+ */
+async function expandAttachments(
+  attachments: ResolvedAttachment[],
+): Promise<UserContentBlock[]> {
+  const blocks: UserContentBlock[] = [];
+  for (const att of attachments) {
+    try {
+      const ext = extensionOf(att.name);
+      const mime =
+        att.mime && att.mime !== "application/octet-stream"
+          ? att.mime
+          : att.mime ?? (IMAGE_MIMES.has(`image/${ext}`) ? `image/${ext}` : undefined);
+      // 1) Images — sniff by declared mime or image extension.
+      const isImage =
+        (mime && IMAGE_MIMES.has(mime)) ||
+        ["png", "jpg", "jpeg", "gif", "webp", "bmp"].includes(ext);
+      if (isImage) {
+        const { readFile } = await import("node:fs/promises");
+        const buf = await readFile(att.absPath);
+        if (buf.byteLength > IMAGE_MAX_BYTES) {
+          blocks.push({ type: "text", text: `[图片 ${att.name}（${(buf.byteLength / 1048576).toFixed(1)}MB）超过 8MB 限制，未附加；文件位于 ${att.path}]` });
+          continue;
+        }
+        const imageMime = mime && IMAGE_MIMES.has(mime) ? mime : ext === "jpg" ? "image/jpeg" : `image/${ext}`;
+        blocks.push({
+          type: "image_url",
+          image_url: { url: `data:${imageMime};base64,${buf.toString("base64")}` },
+        });
+        continue;
+      }
+      // 2) PDF — extract the text layer.
+      if (ext === "pdf" || mime === "application/pdf") {
+        const { readFile } = await import("node:fs/promises");
+        let text = "";
+        try {
+          text = await extractPdfText(await readFile(att.absPath));
+        } catch (err) {
+          logger.exception("PDF text extraction failed", err);
+        }
+        if (!text.trim()) {
+          blocks.push({ type: "text", text: `[附件 ${att.name} 是 PDF 但无法提取文本（可能是扫描件）；文件位于 ${att.path}]` });
+        } else {
+          blocks.push({ type: "text", text: `[附件 ${att.name}（PDF，已提取文本）]\n${clipText(text, att.path)}` });
+        }
+        continue;
+      }
+      // 3) DOCX — extract raw text.
+      if (ext === "docx" || mime === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+        const { readFile } = await import("node:fs/promises");
+        let text = "";
+        try {
+          text = await extractDocxText(await readFile(att.absPath));
+        } catch (err) {
+          logger.exception("DOCX text extraction failed", err);
+        }
+        if (!text.trim()) {
+          blocks.push({ type: "text", text: `[附件 ${att.name} 是 Word 文档但无法提取文本；文件位于 ${att.path}]` });
+        } else {
+          blocks.push({ type: "text", text: `[附件 ${att.name}（Word 文档，已提取文本）]\n${clipText(text, att.path)}` });
+        }
+        continue;
+      }
+      // 4) Text-like — inline (small) or preview + pointer (large).
+      if (isTextLike(att.name, mime)) {
+        const { readFile } = await import("node:fs/promises");
+        const buf = await readFile(att.absPath);
+        if (buf.byteLength <= TEXT_INLINE_MAX_BYTES) {
+          blocks.push({ type: "text", text: `[附件 ${att.name} 的内容]\n${buf.toString("utf8")}` });
+        } else {
+          blocks.push({ type: "text", text: `[附件 ${att.name} 的内容（过长，仅开头部分）]\n${clipText(buf.toString("utf8"), att.path)}` });
+        }
+        continue;
+      }
+      // 5) Other binaries — honest reference note.
+      blocks.push({ type: "text", text: `[附件 ${att.name}${mime ? `（${mime}）` : ""}位于 ${att.path}，该类型暂不支持内容解析]` });
+    } catch (err) {
+      logger.exception("Attachment expansion failed", err);
+      blocks.push({ type: "text", text: `[附件 ${att.name} 读取失败：${(err as Error).message ?? "未知错误"}]` });
+    }
+  }
+  return blocks;
+}
+
+/** Build the graph input content: plain string when there are no attachments
+ * (zero behavior change), content blocks otherwise. */
+async function buildUserContent(
+  userMessage: string,
+  attachments?: ResolvedAttachment[],
+): Promise<string | UserContentBlock[]> {
+  if (!attachments || attachments.length === 0) return userMessage;
+  const blocks: UserContentBlock[] = [];
+  if (userMessage) blocks.push({ type: "text", text: userMessage });
+  blocks.push(...(await expandAttachments(attachments)));
+  return blocks;
+}
+
 /**
  * Run a fresh chat turn to completion. Handles persistence, HITL, title
  * generation, and client disconnect. The route owns the ReadableStream; this
@@ -521,6 +737,11 @@ export async function streamChat(
       requestId: input.requestId,
       runStartedAt: input.startedAt ?? Date.now(),
       userMessage: input.userMessage,
+      ...(input.attachments && input.attachments.length > 0
+        ? {
+            attachments: input.attachments.map(({ absPath: _absPath, ...ref }) => ref),
+          }
+        : {}),
     });
 
     // 1b. Auto-title a new thread's first turn IN THE BACKGROUND (opencode
@@ -529,10 +750,13 @@ export async function streamChat(
     //     model is still streaming). Failures are silent — the title simply
     //     stays "新对话" until the user renames it.
     if (input.isNewThread) {
-      const fallbackTitle = input.userMessage.slice(0, 30);
+      // Attachment-only turns have no text — fall back to the first
+      // attachment's name so the sidebar shows something meaningful.
+      const fallbackTitle = input.userMessage.slice(0, 30) || input.attachments?.[0]?.name.slice(0, 30) || "";
       void (async () => {
         try {
-          const generated = await generateTitle(input.userMessage, input.modelSpec);
+          const titleSeed = input.userMessage || (input.attachments?.length ? `关于附件 ${input.attachments[0].name} 的问题` : "");
+          const generated = titleSeed ? await generateTitle(titleSeed, input.modelSpec) : undefined;
           const title = generated ?? fallbackTitle;
           // Lazy import to avoid a circular dep at module load (thread.service is
           // pure db; importing its rename fn here keeps update local to this call).
@@ -551,7 +775,7 @@ export async function streamChat(
     // 2. Stream graph (via standardized AgentEvent — no LangGraph coupling here)
     try {
       const eventStream = await input.agent.stream(
-        { messages: [{ role: "user", content: input.userMessage }] },
+        { messages: [{ role: "user", content: await buildUserContent(input.userMessage, input.attachments) }] },
         {
           ...input.langgraphConfig,
           streamMode: ["messages" as const],

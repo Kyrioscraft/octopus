@@ -1,4 +1,17 @@
 import type { TurnEvent } from "./turn/types.js";
+import type { AttachmentRef } from "@octopus/tentacle";
+
+/**
+ * An attachment as rendered on a message bubble — the persisted wire ref plus
+ * (when available locally) a preview object URL. History-loaded messages
+ * resolve previews lazily via the workspace download API.
+ */
+export interface MsgAttachment extends AttachmentRef {
+  /** Local preview URL (object URL of the picked file, or a lazily fetched
+   *  blob URL for history messages). Images render as thumbnails; other
+   *  files show a generic card. */
+  previewUrl?: string;
+}
 
 /**
  * A single chat message — the unit rendered as one bubble/turn in the
@@ -29,4 +42,6 @@ export interface Msg {
   startedAtMs?: number;
   /** Frozen work duration (ms) — from persisted work_duration_ms; shown when the turn ended. */
   workDurationMs?: number;
+  /** Attachments the user sent with this message (user bubbles only). */
+  attachments?: MsgAttachment[];
 }
