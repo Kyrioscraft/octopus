@@ -10,6 +10,13 @@ import {
 } from "lucide-react";
 import { OctopusClient, type SubagentEntry } from "@octopus/tentacle";
 import { SettingsCard, InfoRow } from "../components/shared/SettingsCard.js";
+import {
+  topBarStyle,
+  iconTileStyle,
+  titleStyle,
+  subtitleStyle,
+  iconBtnStyle,
+} from "../components/shared/PageHeader.js";
 
 const sdk = new OctopusClient();
 
@@ -214,7 +221,7 @@ export function SubagentDetailPage() {
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflow: "auto", background: "var(--gray-10)" }}>
+      <div style={{ flex: 1, overflow: "auto", background: "var(--bg-canvas)" }}>
         {loading ? (
           <div style={{ display: "flex", justifyContent: "center", padding: 80 }}>
             <Spin />
@@ -304,52 +311,6 @@ export function SubagentDetailPage() {
     </div>
   );
 }
-
-const topBarStyle: React.CSSProperties = {
-  height: 45,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "0 16px",
-  borderBottom: "1px solid var(--gray-150)",
-  flexShrink: 0,
-  background: "var(--gray-0)",
-};
-
-const iconTileStyle: React.CSSProperties = {
-  width: 32,
-  height: 32,
-  borderRadius: 8,
-  background: "var(--main-20)",
-  color: "var(--main-color)",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  fontSize: 17,
-  flexShrink: 0,
-};
-
-const titleStyle: React.CSSProperties = {
-  fontSize: 15,
-  fontWeight: 600,
-  color: "var(--gray-1000)",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-  whiteSpace: "nowrap",
-};
-
-const subtitleStyle: React.CSSProperties = {
-  fontSize: 12,
-  color: "var(--gray-500)",
-  marginTop: 2,
-};
-
-const iconBtnStyle: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 6,
-  color: "var(--gray-600)",
-};
 
 const codeBlockStyle: React.CSSProperties = {
   margin: 0,

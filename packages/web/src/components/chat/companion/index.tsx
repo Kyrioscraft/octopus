@@ -72,11 +72,13 @@ export function Companion(props: CompanionPanelProps) {
   }));
 
   return (
+    // Flush pane inside the app's content card — the resizer's hairline is its
+    // only boundary, so a nested card here would read as a card-in-card.
     <div
       style={{
         width: width,
         flexShrink: 0,
-        background: "var(--gray-0)",
+        background: "var(--bg-canvas)",
         display: "flex",
         flexDirection: "column",
         overflow: "hidden",
@@ -170,12 +172,12 @@ export function CompanionDivider() {
   // Hidden when the panel is closed — no orphan line next to the message list.
   if (!open || tabs.length === 0) return null;
 
-  const lineColor = dragging ? "var(--main-color)" : "var(--gray-200)";
+  const lineColor = dragging ? "var(--accent-solid)" : "var(--border-subtle)";
   return (
     <div
       onMouseDown={onHandleDown}
       onMouseEnter={(e) => {
-        if (!dragging) e.currentTarget.style.background = "var(--gray-100)";
+        if (!dragging) e.currentTarget.style.background = "var(--bg-hover)";
       }}
       onMouseLeave={(e) => {
         if (!dragging) e.currentTarget.style.background = "transparent";
@@ -186,7 +188,7 @@ export function CompanionDivider() {
         cursor: "col-resize",
         position: "relative",
         zIndex: 5,
-        transition: "background 0.15s ease",
+        transition: "background var(--dur-1) var(--ease)",
       }}
       title="拖拽调整宽度"
     >
@@ -199,8 +201,8 @@ export function CompanionDivider() {
           bottom: 0,
           width: 1,
           transform: "translateX(-50%)",
-          background: dragging ? "var(--main-color)" : lineColor,
-          transition: "background 0.15s ease",
+          background: dragging ? "var(--accent-solid)" : lineColor,
+          transition: "background var(--dur-1) var(--ease)",
           pointerEvents: "none",
         }}
       />
@@ -232,8 +234,8 @@ function TabStrip({
         display: "flex",
         alignItems: "center",
         gap: 2,
-        padding: "4px 6px 0",
-        borderBottom: "1px solid var(--gray-150)",
+        padding: "6px 6px 0",
+        borderBottom: "1px solid var(--border-default)",
         flexShrink: 0,
         overflowX: "auto",
       }}
@@ -245,21 +247,32 @@ function TabStrip({
           <div
             key={t.id}
             onClick={() => onSelect(t.id)}
+            className="focus-ring"
+            role="tab"
+            aria-selected={isActive}
+            tabIndex={0}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onSelect(t.id);
+              }
+            }}
             style={{
               display: "inline-flex",
               alignItems: "center",
               gap: 5,
               height: 28,
               padding: "0 6px 0 9px",
-              fontSize: 12,
-              borderRadius: "6px 6px 0 0",
+              fontSize: "var(--text-xs)",
+              borderRadius: "var(--radius-xs) var(--radius-xs) 0 0",
               cursor: "pointer",
               whiteSpace: "nowrap",
-              color: isActive ? "var(--gray-1000)" : "var(--gray-500)",
-              background: isActive ? "var(--gray-0)" : "transparent",
-              borderBottom: isActive ? "2px solid var(--main-color)" : "2px solid transparent",
+              color: isActive ? "var(--text-primary)" : "var(--text-tertiary)",
+              background: isActive ? "var(--bg-subtle)" : "transparent",
+              borderBottom: isActive ? "2px solid var(--accent-solid)" : "2px solid transparent",
               marginBottom: -1,
               userSelect: "none",
+              transition: "background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease)",
             }}
           >
             <span style={{ display: "inline-flex", fontSize: 12 }}>{meta.icon}</span>
@@ -270,30 +283,17 @@ function TabStrip({
       })}
       {/* "+" add-tab menu. */}
       <Dropdown menu={{ items: addMenuItems }} trigger={["click"]} placement="bottomLeft">
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            width: 26,
-            height: 26,
-            borderRadius: 4,
-            color: "var(--gray-500)",
-            cursor: "pointer",
-            flexShrink: 0,
-          }}
+        <button
+          type="button"
+          className="icon-btn focus-ring"
           title="添加标签页"
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "var(--gray-100)";
-            e.currentTarget.style.color = "var(--gray-700)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "transparent";
-            e.currentTarget.style.color = "var(--gray-500)";
-          }}
+          aria-label="添加标签页"
+          style={{ width: 26, height: 26, marginLeft: 2 }}
         >
-          <Plus style={{ fontSize: 13 }} />
-        </div>
+          <span style={{ display: "flex", fontSize: 14 }}>
+            <Plus />
+          </span>
+        </button>
       </Dropdown>
     </div>
   );
@@ -322,18 +322,18 @@ function TabCloseButton({ onClose }: { onClose: () => void }) {
         justifyContent: "center",
         width: 16,
         height: 16,
-        borderRadius: 4,
-        color: "var(--gray-400)",
+        borderRadius: "var(--radius-xs)",
+        color: "var(--text-disabled)",
         cursor: "pointer",
-        transition: "all 0.12s ease",
+        transition: "background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease)",
       }}
       onMouseEnter={(e) => {
-        e.currentTarget.style.background = "var(--gray-100)";
-        e.currentTarget.style.color = "var(--gray-700)";
+        e.currentTarget.style.background = "var(--bg-hover)";
+        e.currentTarget.style.color = "var(--text-primary)";
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = "transparent";
-        e.currentTarget.style.color = "var(--gray-400)";
+        e.currentTarget.style.color = "var(--text-disabled)";
       }}
       title="关闭标签页"
     >

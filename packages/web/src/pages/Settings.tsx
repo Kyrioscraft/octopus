@@ -1,6 +1,7 @@
 import { OctopusClient } from "@octopus/tentacle";
 import { GeneralSettingsSection } from "../components/settings/GeneralSettingsSection.js";
 import { ModelSettingsSection } from "../components/settings/ModelSettingsSection.js";
+import { PageHeader } from "../components/shared/PageHeader.js";
 
 const sdk = new OctopusClient();
 
@@ -23,25 +24,11 @@ interface SettingsPageProps {
 export function SettingsPage({ tab }: SettingsPageProps) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Header */}
-      <div
-        style={{
-          height: 45,
-          display: "flex",
-          alignItems: "center",
-          padding: "0 20px",
-          borderBottom: "1px solid var(--gray-150)",
-          flexShrink: 0,
-        }}
-      >
-        <span style={{ fontWeight: 600, fontSize: 15, color: "var(--gray-1000)" }}>
-          {TAB_TITLES[tab]}
-        </span>
-      </div>
+      <PageHeader title={TAB_TITLES[tab]} />
 
       {/* Scrollable content */}
-      <div style={{ flex: 1, overflow: "auto", padding: 20 }}>
-        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+      <div style={{ flex: 1, overflow: "auto", padding: "20px 20px 48px" }}>
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
           {tab === "general" ? (
             <GeneralSettingsSection sdk={sdk} />
           ) : (

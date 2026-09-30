@@ -1,6 +1,7 @@
 /* =============================================================================
  * Markdown rendering styles for assistant messages.
- * Loaded once globally (main.tsx). Scoped under `.md-body`.
+ * Imported once, globally, by layouts/AppLayout.tsx. Scoped under `.md-body`.
+ * Colours come from the tokens in theme.css.
  * ===========================================================================*/
 
 /* --- highlight.js github-light theme (inlined to avoid extra HTTP request) ---
@@ -8,22 +9,22 @@
 .md-body .hljs { color: #24292e; background: transparent; }
 .md-body .hljs-comment, .md-body .hljs-quote { color: #6a737d; font-style: italic; }
 .md-body .hljs-keyword, .md-body .hljs-selector-tag, .md-body .hljs-literal,
-.md-body .hljs-type, .md-body .hljs-name { color: #d73a49; }
+.md-body .hljs-type, .md-body .hljs-name { color: #cf222e; }
 .md-body .hljs-string, .md-body .hljs-attr, .md-body .hljs-symbol,
 .md-body .hljs-bullet, .md-body .hljs-addition, .md-body .hljs-regexp,
-.md-body .hljs-template-tag, .md-body .hljs-template-variable { color: #032f62; }
-.md-body .hljs-number, .md-body .hljs-meta { color: #005cc5; }
-.md-body .hljs-title, .md-body .hljs-section, .md-body .hljs-built_in { color: #6f42c1; }
-.md-body .hljs-title.function_ { color: #6f42c1; }
-.md-body .hljs-variable, .md-body .hljs-attribute, .md-body .hljs-tag { color: #22863a; }
-.md-body .hljs-deletion { color: #b31d28; }
+.md-body .hljs-template-tag, .md-body .hljs-template-variable { color: #0a3069; }
+.md-body .hljs-number, .md-body .hljs-meta { color: #0550ae; }
+.md-body .hljs-title, .md-body .hljs-section, .md-body .hljs-built_in { color: #8250df; }
+.md-body .hljs-title.function_ { color: #8250df; }
+.md-body .hljs-variable, .md-body .hljs-attribute, .md-body .hljs-tag { color: #116329; }
+.md-body .hljs-deletion { color: #82071e; }
 .md-body .hljs-emphasis { font-style: italic; }
-.md-body .hljs-strong { font-weight: 700; }
+.md-body .hljs-strong { font-weight: 600; }
 
 /* --- highlight.js github-dark theme (dark mode override) ---
  * Activated by <html data-theme="dark"> (see stores/theme.ts). Token set
  * mirrors the light block above. Background stays transparent so the
- * surrounding .md-pre surface (var(--gray-25)) shows through. */
+ * surrounding .md-pre surface (var(--bg-subtle)) shows through. */
 [data-theme="dark"] .md-body .hljs { color: #c9d1d9; }
 [data-theme="dark"] .md-body .hljs-comment,
 [data-theme="dark"] .md-body .hljs-quote { color: #8b949e; font-style: italic; }
@@ -52,77 +53,133 @@
 [data-theme="dark"] .md-body .hljs-deletion { color: #ffa198; }
 
 /* --- Markdown body typography --- */
-.md-body { font-size: 15px; line-height: 1.7; color: var(--gray-900); word-break: break-word; }
+.md-body {
+  font-size: var(--text-md);
+  line-height: var(--lh-prose);
+  letter-spacing: 0.01em;
+  color: var(--text-primary);
+  word-break: break-word;
+}
 .md-body > *:first-child { margin-top: 0; }
 .md-body > *:last-child { margin-bottom: 0; }
 
-.md-body p { margin: 0.5em 0; }
+.md-body p { margin: 0.75em 0; }
+
 .md-body h1, .md-body h2, .md-body h3, .md-body h4, .md-body h5, .md-body h6 {
-  margin: 1em 0 0.5em; font-weight: 600; line-height: 1.3; color: var(--gray-1000);
+  margin: 1.4em 0 0.6em;
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--gray-1000);
 }
-.md-body h1 { font-size: 1.5em; }
-.md-body h2 { font-size: 1.3em; }
-.md-body h3 { font-size: 1.15em; }
+.md-body h1 { font-size: 1.45em; }
+.md-body h2 { font-size: 1.25em; }
+.md-body h3 { font-size: 1.1em; }
 .md-body h4, .md-body h5, .md-body h6 { font-size: 1em; }
 
-.md-body ul, .md-body ol { margin: 0.5em 0; padding-left: 1.6em; }
-.md-body li { margin: 0.25em 0; }
-.md-body li > p { margin: 0.25em 0; }
+.md-body ul, .md-body ol { margin: 0.75em 0; padding-left: 1.5em; }
+.md-body li { margin: 0.3em 0; }
+.md-body li > p { margin: 0.3em 0; }
+.md-body li::marker { color: var(--text-disabled); }
 
 .md-body blockquote {
-  margin: 0.6em 0; padding: 0.2em 1em;
-  border-left: 3px solid var(--main-200);
-  background: var(--main-10);
-  color: var(--gray-700); border-radius: 0 6px 6px 0;
+  margin: 0.9em 0;
+  padding: 0.3em 1em;
+  border-left: 2px solid var(--border-strong);
+  background: var(--bg-subtle);
+  color: var(--text-secondary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 }
-.md-body blockquote > p { margin: 0.3em 0; }
+.md-body blockquote > p { margin: 0.4em 0; }
 
-.md-body a { color: var(--main-600); text-decoration: none; }
+.md-body a { color: var(--accent); text-decoration: none; }
 .md-body a:hover { text-decoration: underline; }
 
-.md-body hr { border: none; border-top: 1px solid var(--gray-150); margin: 1.2em 0; }
+.md-body hr { border: none; border-top: 1px solid var(--border-subtle); margin: 1.5em 0; }
 
-/* Inline code */
+.md-body img {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+}
+
+/* Inline code — neutral so green stays reserved for state */
 .md-body .md-inline-code {
-  background: var(--gray-100); color: var(--color-error-700);
-  padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.88em;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  background: var(--bg-muted);
+  color: var(--gray-1000);
+  padding: 0.15em 0.4em;
+  border-radius: var(--radius-xs);
+  font-family: var(--font-mono);
+  font-size: 0.875em;
 }
 
 /* Code blocks — wrap long lines instead of horizontal scrolling */
 .md-body .md-pre {
-  position: relative; margin: 0.7em 0; padding: 14px 16px;
-  background: var(--gray-25); border: 1px solid var(--gray-150);
-  border-radius: 10px; overflow-x: hidden;
+  position: relative;
+  margin: 0.9em 0;
+  padding: 14px 16px;
+  background: var(--bg-subtle);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow-x: hidden;
 }
 .md-body .md-pre code {
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 13.5px; line-height: 1.6; background: transparent; padding: 0;
-  white-space: pre-wrap; word-break: break-word;
-}
-.md-copy-btn {
-  position: absolute; top: 6px; right: 6px;
-  width: 26px; height: 26px; border: none; cursor: pointer;
-  background: var(--gray-0); border-radius: 6px;
-  color: var(--gray-500); display: flex; align-items: center; justify-content: center;
-  opacity: 0; transition: opacity 0.15s ease, color 0.15s ease;
-  box-shadow: 0 1px 3px var(--shadow-1);
-}
-.md-body .md-pre:hover .md-copy-btn { opacity: 1; }
-.md-copy-btn:hover { color: var(--main-color); }
-
-/* Tables (GFM) */
-.md-body table {
-  border-collapse: collapse; margin: 0.7em 0; width: 100%;
-  font-size: 0.94em;
-}
-.md-body th, .md-body td {
-  border: 1px solid var(--gray-150); padding: 7px 12px; text-align: left;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.65;
+  background: transparent;
+  padding: 0;
+  white-space: pre-wrap;
   word-break: break-word;
 }
-.md-body th { background: var(--gray-50); font-weight: 600; color: var(--gray-1000); }
-.md-body tr:nth-child(even) td { background: var(--gray-10); }
+.md-copy-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--border-default);
+  cursor: pointer;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-xs);
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity var(--dur-2) var(--ease), color var(--dur-2) var(--ease);
+  box-shadow: var(--shadow-xs);
+}
+.md-body .md-pre:hover .md-copy-btn,
+.md-body .md-pre:focus-within .md-copy-btn { opacity: 1; }
+.md-copy-btn:hover { color: var(--accent); }
+
+/* Tables (GFM) — hairline only, no zebra */
+.md-body table {
+  border-collapse: collapse;
+  margin: 0.9em 0;
+  width: 100%;
+  font-size: 0.94em;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.md-body th, .md-body td {
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 8px 12px;
+  text-align: left;
+  word-break: break-word;
+}
+.md-body th {
+  background: var(--bg-subtle);
+  font-weight: 600;
+  color: var(--gray-1000);
+  font-size: 0.94em;
+}
+.md-body tr:last-child td { border-bottom: none; }
+.md-body tbody tr:hover td { background: var(--bg-subtle); }
 
 /* Task list (GFM) — hide the raw bullet, show the checkbox */
 .md-body li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.3em; }
-.md-body input[type="checkbox"] { margin-right: 0.5em; accent-color: var(--main-500); }
+.md-body input[type="checkbox"] { margin-right: 0.5em; accent-color: var(--accent-solid); }

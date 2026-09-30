@@ -13,10 +13,13 @@ import { ReasoningBlock } from "../rows/ReasoningBlock.js";
  * events interleave.
  *
  * Visual weight hierarchy (so the "final reply" stands out from process info):
- *   - reasoning → amber, small, collapsible (process)
- *   - tool      → gray row, collapsible (process)
+ *   - reasoning → small, muted, collapsible (process)
+ *   - tool      → muted rail row, collapsible (process)
  *   - subagent  → compact row; detail opens in the side panel (process)
- *   - text      → no row, full width, primary font (the answer)
+ *   - text      → full width, primary colour, no chrome (the answer)
+ *
+ * The process rows are wrapped by TurnEvents in a rail with a status dot per
+ * entry; this file only renders the row itself.
  */
 export function EventRow({
   event,
@@ -40,16 +43,17 @@ export function EventRow({
       return <ToolCallRenderer entry={event.entry} defaultExpanded={isActive} />;
 
     case "text":
-      // The final reply — highest visual weight, no row wrapper.
+      // The final reply — highest visual weight. Normally rendered by
+      // TurnEvents.AnswerBlock (outside the rail); this branch keeps EventRow
+      // usable standalone.
       return (
         <div
           style={{
-            fontSize: 15,
-            lineHeight: "24px",
-            letterSpacing: "0.25px",
-            color: "var(--gray-900)",
+            fontSize: "var(--text-md)",
+            lineHeight: "26px",
+            letterSpacing: "0.01em",
+            color: "var(--text-primary)",
             wordBreak: "break-word",
-            paddingLeft: 6,
           }}
         >
           <Markdown content={event.text} />

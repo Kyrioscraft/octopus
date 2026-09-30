@@ -2,10 +2,9 @@ import { useMemo, useState } from "react";
 import ReactDiffViewer, { DiffMethod } from "react-diff-viewer-continued";
 import { Segmented } from "antd";
 import type { ToolCardProps } from "./types.js";
-import { ToolCallRow, DiffStat } from "./ToolCallRow.js";
+import { ToolCallRow, DiffStat, ToolRowHeader } from "./ToolCallRow.js";
 import { basename, countLines, inferLanguage } from "./registry.js";
 import { useThemeStore } from "../../../../stores/theme.js";
-import { ShimmerText } from "../../ShimmerText.js";
 
 /**
  * edit_file / replace row — the headline feature. Renders a real unified /
@@ -39,27 +38,27 @@ export function FileEditRow({ entry }: ToolCardProps) {
   const isDark = useThemeStore((s) => s.resolved) === "dark";
   const diffVariables = useMemo(() => {
     const surface = {
-      diffViewerBackground: "var(--gray-0)",
-      diffViewerTitleBackground: "var(--gray-25)",
-      diffViewerTitleColor: "var(--gray-700)",
-      diffViewerTitleBorderColor: "var(--gray-150)",
-      diffViewerColor: "var(--gray-900)",
-      addedBackground: "rgba(82, 196, 26, 0.10)",
-      addedColor: "var(--gray-900)",
-      addedGutterBackground: "rgba(82, 196, 26, 0.18)",
+      diffViewerBackground: "var(--bg-elevated)",
+      diffViewerTitleBackground: "var(--bg-subtle)",
+      diffViewerTitleColor: "var(--text-secondary)",
+      diffViewerTitleBorderColor: "var(--border-default)",
+      diffViewerColor: "var(--text-primary)",
+      addedBackground: "rgba(18, 183, 106, 0.10)",
+      addedColor: "var(--text-primary)",
+      addedGutterBackground: "rgba(18, 183, 106, 0.18)",
       addedGutterColor: "var(--color-success-700)",
-      removedBackground: "rgba(255, 77, 79, 0.10)",
-      removedColor: "var(--gray-900)",
-      removedGutterBackground: "rgba(255, 77, 79, 0.18)",
+      removedBackground: "rgba(217, 45, 32, 0.10)",
+      removedColor: "var(--text-primary)",
+      removedGutterBackground: "rgba(217, 45, 32, 0.18)",
       removedGutterColor: "var(--color-error-700)",
-      wordAddedBackground: "rgba(82, 196, 26, 0.25)",
-      wordRemovedBackground: "rgba(255, 77, 79, 0.25)",
-      gutterBackground: "var(--gray-25)",
-      gutterBackgroundDark: "var(--gray-50)",
-      gutterColor: "var(--gray-400)",
-      codeFoldGutterBackground: "var(--gray-25)",
-      codeFoldBackground: "var(--gray-25)",
-      codeFoldContentColor: "var(--gray-500)",
+      wordAddedBackground: "rgba(18, 183, 106, 0.25)",
+      wordRemovedBackground: "rgba(217, 45, 32, 0.25)",
+      gutterBackground: "var(--bg-subtle)",
+      gutterBackgroundDark: "var(--bg-muted)",
+      gutterColor: "var(--text-disabled)",
+      codeFoldGutterBackground: "var(--bg-subtle)",
+      codeFoldBackground: "var(--bg-subtle)",
+      codeFoldContentColor: "var(--text-tertiary)",
     };
     return { light: surface, dark: surface };
   }, []);
@@ -78,26 +77,13 @@ export function FileEditRow({ entry }: ToolCardProps) {
     <ToolCallRow
       entry={entry}
       header={
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          {running ? <ShimmerText text="编辑" /> : <span style={{ color: "var(--gray-500)" }}>编辑</span>}
-          <span style={{ color: "var(--gray-400)" }}>|</span>
-          <code
-            title={filePath}
-            style={{
-              fontSize: 12,
-              background: "var(--gray-100)",
-              padding: "1px 6px",
-              borderRadius: 4,
-              color: "var(--gray-900)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {fileName || "(unknown)"}
-          </code>
-          <DiffStat added={added} removed={removed} />
-        </span>
+        <ToolRowHeader
+          verb="编辑"
+          running={running}
+          detail={fileName || "(unknown)"}
+          detailTitle={filePath}
+          tail={<DiffStat added={added} removed={removed} />}
+        />
       }
       body={
         <div style={{ paddingTop: 4 }}>
@@ -105,7 +91,7 @@ export function FileEditRow({ entry }: ToolCardProps) {
             style={{
               display: "flex",
               justifyContent: "flex-end",
-              marginBottom: 6,
+              marginBottom: 8,
             }}
           >
             <Segmented
@@ -120,8 +106,8 @@ export function FileEditRow({ entry }: ToolCardProps) {
           </div>
           <div
             style={{
-              border: "1px solid var(--gray-150)",
-              borderRadius: 6,
+              border: "1px solid var(--border-default)",
+              borderRadius: "var(--radius-md)",
               overflow: "hidden",
             }}
           >
@@ -141,9 +127,8 @@ export function FileEditRow({ entry }: ToolCardProps) {
                 variables: diffVariables,
                 contentText: {
                   fontSize: "12px",
-                  fontFamily:
-                    "SFMono-Regular, Consolas, Menlo, monospace",
-                  lineHeight: "1.55",
+                  fontFamily: "var(--font-mono)",
+                  lineHeight: "1.6",
                 },
                 gutter: {
                   fontSize: "11px",
@@ -156,12 +141,13 @@ export function FileEditRow({ entry }: ToolCardProps) {
             <div
               style={{
                 marginTop: 8,
-                padding: "6px 10px",
+                padding: "7px 10px",
                 fontSize: 12,
                 color: "var(--color-success-700)",
                 background: "var(--color-success-50)",
-                borderRadius: 6,
+                borderRadius: "var(--radius-sm)",
                 border: "1px solid var(--color-success-100)",
+                fontFamily: "var(--font-mono)",
               }}
             >
               ✓ {entry.result}

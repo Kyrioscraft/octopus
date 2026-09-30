@@ -1,12 +1,14 @@
 import { useState, useEffect } from "react";
+import { ShimmerText } from "./ShimmerText.js";
 
 /**
- * zcode-style work-duration label ("已工作 12s" / "已工作 1m 05s" / "已工作 1h 02m").
+ * The work-duration meta line at the TOP of an assistant turn.
  *
- * Shown at the TOP of an assistant turn for its whole lifetime:
- *  - running: ticks every second from `startedAtMs`, with a spinning loader.
- *  - done/error: frozen at `durationMs` (persisted work_duration_ms, or the
- *    local elapsed fallback when the server value is unavailable).
+ *  - running: a pulsing accent dot + shimmering "生成中" + the elapsed seconds.
+ *    This is the turn's only liveness indicator — it renders even before the
+ *    first token arrives, so an empty turn is never silent.
+ *  - done/error: a quiet "已工作 12s" (frozen at the persisted work_duration_ms,
+ *    or the local elapsed fallback when the server value is unavailable).
  */
 function formatDuration(ms: number): string {
   const totalSec = Math.max(0, Math.floor(ms / 1000));
@@ -40,20 +42,36 @@ export function WorkTimer({
   }, [running]);
 
   if (running) {
-    if (startedAtMs === undefined) return null;
+    const elapsed = startedAtMs !== undefined ? formatDuration(Date.now() - startedAtMs) : undefined;
     return (
-      <div style={{ padding: "2px 0 6px 6px" }}>
-        <span style={{ fontSize: 12, color: "var(--gray-500)", letterSpacing: "0.025em" }}>
-          已工作 {formatDuration(Date.now() - startedAtMs)}
-        </span>
+      <div style={{ display: "flex", alignItems: "center", gap: 7, height: 22, marginBottom: 2 }}>
+        <span
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: "50%",
+            background: "var(--accent-solid)",
+            animation: "dotPulse 1.4s var(--ease) infinite",
+            flexShrink: 0,
+          }}
+        />
+        <ShimmerText text="生成中" fontSize={12.5} fontWeight={500} />
+        {elapsed && (
+          <>
+            <span style={{ color: "var(--text-disabled)", fontSize: 12.5 }}>·</span>
+            <span className="tnum" style={{ fontSize: 12.5, color: "var(--text-tertiary)" }}>
+              {elapsed}
+            </span>
+          </>
+        )}
       </div>
     );
   }
 
   if (durationMs === undefined) return null;
   return (
-    <div style={{ padding: "2px 0 6px 6px" }}>
-      <span style={{ fontSize: 12, color: "var(--gray-400)", letterSpacing: "0.025em" }}>
+    <div style={{ display: "flex", alignItems: "center", height: 22, marginBottom: 2 }}>
+      <span className="tnum" style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
         已工作 {formatDuration(durationMs)}
       </span>
     </div>

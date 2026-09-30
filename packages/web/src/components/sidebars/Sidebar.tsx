@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import type { ReactNode } from "react";
-import { Button, Tooltip, Dropdown, Modal, Input, Popconfirm, message as antdMessage } from "antd";
+import { Dropdown, Modal, Input, Popconfirm, message as antdMessage } from "antd";
 import type { MenuProps } from "antd";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -16,43 +16,43 @@ import {
   Bot,
   FolderOpen,
   Monitor,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Sun,
+  Moon,
+  MonitorCog,
+  LogOut,
 } from "lucide-react";
 import { OctopusClient, type Thread, type Workspace } from "@octopus/tentacle";
 import { useChatStore } from "../../stores/chat.js";
+import { useUiStore } from "../../stores/ui.js";
+import { useThemeStore } from "../../stores/theme.js";
+import type { ThemeMode } from "../../stores/theme.js";
 import { DirBrowserModal } from "../workspace/DirBrowserModal.js";
-import { formatRelativeTime } from "../../utils/time.js";
+import { IconButton } from "../widgets/IconButton.js";
+import { NavRow, SectionLabel } from "./SidebarNav.js";
+import { groupByDay, formatRelativeTime } from "../../utils/time.js";
 
 const sdk = new OctopusClient();
 
-// Reusable row used by the global search modal results.
+// Reusable row used by the global search palette results.
 function SearchResultRow({
   icon, label, onClick,
 }: { icon: ReactNode; label: string; onClick: () => void }) {
   return (
-    <div
-      onClick={onClick}
-      style={{
-        display: "flex", alignItems: "center", gap: 10,
-        padding: "0 10px", height: 36, borderRadius: 8,
-        cursor: "pointer", fontSize: 14, color: "var(--gray-700)",
-        marginBottom: 2,
-        transition: "background-color 0.15s ease, color 0.15s ease",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.backgroundColor = "var(--main-20)";
-        e.currentTarget.style.color = "var(--main-color)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.backgroundColor = "transparent";
-        e.currentTarget.style.color = "var(--gray-700)";
-      }}
-    >
-      <span style={{ fontSize: 16, display: "flex", alignItems: "center", color: "var(--gray-500)" }}>
+    <div className="ui-row focus-ring" role="button" tabIndex={0} onClick={onClick}>
+      <span
+        style={{
+          fontSize: 15,
+          display: "flex",
+          alignItems: "center",
+          color: "var(--text-tertiary)",
+          flexShrink: 0,
+        }}
+      >
         {icon}
       </span>
-      <span style={{
-        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
-      }}>
+      <span className="truncate" style={{ flex: 1 }}>
         {label}
       </span>
     </div>
@@ -61,23 +61,22 @@ function SearchResultRow({
 
 function SearchEmpty() {
   return (
-    <div style={{
-      textAlign: "center", color: "var(--gray-300)",
-      fontSize: 13, padding: "16px 0",
-    }}>
+    <div
+      style={{
+        textAlign: "center",
+        color: "var(--text-disabled)",
+        fontSize: "var(--text-sm)",
+        padding: "16px 0",
+      }}
+    >
       无匹配结果
     </div>
   );
 }
 
-const navItems = [
-  { key: "search", icon: <Search />, label: "搜索" },
-  { key: "extensions", icon: <LayoutGrid />, label: "扩展管理" },
-];
-
-// Static page-feature entries surfaced by the global search modal.
+// Static page-feature entries surfaced by the command palette.
 const FEATURES = [
-  { label: "新建对话", path: "/agent", icon: <MessageSquare /> },
+  { label: "新建任务", path: "/agent", icon: <MessageSquare /> },
   { label: "扩展管理 - 技能", path: "/extensions/skills", icon: <BookOpen /> },
   { label: "扩展管理 - MCP服务器", path: "/extensions/mcp", icon: <Plug /> },
   { label: "扩展管理 - 子智能体", path: "/extensions/subagents", icon: <Bot /> },
@@ -85,12 +84,30 @@ const FEATURES = [
   { label: "设置 - 模型配置", path: "/settings/model", icon: <Settings /> },
 ];
 
-export function Sidebar() {
+const THEME_OPTIONS: { key: ThemeMode; label: string; icon: ReactNode }[] = [
+  { key: "light", label: "浅色", icon: <Sun /> },
+  { key: "dark", label: "深色", icon: <Moon /> },
+  { key: "system", label: "跟随系统", icon: <MonitorCog /> },
+];
+
+/**
+ * The chat sidebar: brand + primary actions, workspace list, and the conversation
+ * history grouped by day.
+ *
+ * Collapsed state (`collapsed`) reduces it to a 60px icon rail; the workspace and
+ * conversation lists are hidden there because an icon-only entry has no title to
+ * identify it — expand to browse history.
+ */
+export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
   const {
     threads, setThreads, activeThreadId, setActiveThreadId,
     workspaces, setWorkspaces, activeWorkspaceId, setActiveWorkspaceId,
     runningThreads,
   } = useChatStore();
+  const toggleSidebar = useUiStore((s) => s.toggleSidebar);
+  const themeMode = useThemeStore((s) => s.mode);
+  const setThemeMode = useThemeStore((s) => s.setMode);
+
   const location = useLocation();
   // Derive the active nav key from the current path so it survives refresh.
   const initialNavKey = location.pathname.startsWith("/extensions")
@@ -99,7 +116,7 @@ export function Sidebar() {
   const [navKey, setNavKey] = useState<string | null>(initialNavKey);
   const navigate = useNavigate();
 
-  // --- Global search modal state ---
+  // --- Global search palette state ---
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
   // --- Directory-browser modal (Open Folder) ---
@@ -119,7 +136,7 @@ export function Sidebar() {
     setQuery("");
   }, []);
 
-  // Ctrl/Cmd+K toggles the global search modal.
+  // Ctrl/Cmd+K toggles the search palette.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
@@ -265,6 +282,11 @@ export function Sidebar() {
     navigate("/agent");
   };
 
+  const openThread = (t: Thread) => {
+    setActiveThreadId(t.id);
+    navigate(`/?thread=${t.id}`);
+  };
+
   // --- Search results ---
   const q = query.trim().toLowerCase();
   const filteredFeatures = q
@@ -281,318 +303,337 @@ export function Sidebar() {
 
   const jumpToThread = (t: Thread) => {
     closeSearch();
-    setActiveThreadId(t.id);
-    navigate(`/?thread=${t.id}`);
+    openThread(t);
   };
+
+  const threadGroups = groupByDay(threads, (t) => t.createdAt);
+
+  /* Collapsed rail: the brand, the primary actions and the footer. Lists are
+     hidden — an icon-only conversation entry carries no identifying title. */
+  if (collapsed) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", height: "100%", alignItems: "center" }}>
+        <div style={{ padding: "14px 0 6px", flexShrink: 0 }}>
+          <img src="/octopus-logo.svg" alt="Octopus" style={{ width: 28, height: 28 }} />
+        </div>
+        <div style={{ padding: "0 0 6px", flexShrink: 0 }}>
+          <IconButton icon={<PanelLeftOpen />} title="展开侧栏" onClick={toggleSidebar} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "4px 0", width: "100%", alignItems: "center", flexShrink: 0 }}>
+          <div style={{ width: 36 }}>
+            <NavRow icon={<MessageSquare />} label="新建任务" collapsed onClick={handleNewChat} />
+          </div>
+          <div style={{ width: 36 }}>
+            <NavRow icon={<Search />} label="搜索" collapsed onClick={openSearch} />
+          </div>
+          <div style={{ width: 36 }}>
+            <NavRow
+              icon={<LayoutGrid />}
+              label="扩展管理"
+              collapsed
+              active={navKey === "extensions"}
+              onClick={() => { setNavKey("extensions"); navigate("/extensions"); }}
+            />
+          </div>
+          <div style={{ width: 36 }}>
+            <NavRow
+              icon={<FolderOpen />}
+              label="打开文件夹"
+              collapsed
+              onClick={() => setDirBrowserOpen(true)}
+            />
+          </div>
+        </div>
+        <div style={{ flex: 1 }} />
+        <div style={{ display: "flex", flexDirection: "column", gap: 2, padding: "8px 0 12px", alignItems: "center", flexShrink: 0 }}>
+          <IconButton
+            icon={themeMode === "dark" ? <Sun /> : <Moon />}
+            title="切换主题"
+            onClick={() => setThemeMode(themeMode === "dark" ? "light" : "dark")}
+          />
+          <IconButton icon={<Settings />} title="设置" onClick={() => navigate("/settings/general")} />
+        </div>
+
+        {/* Modals stay mounted so Ctrl+K still works from the rail. */}
+        {searchModal()}
+        {renameModal()}
+        {deleteConfirm()}
+        <DirBrowserModal
+          open={dirBrowserOpen}
+          onClose={() => setDirBrowserOpen(false)}
+          onSelect={openFolder}
+        />
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Brand area */}
+      {/* Brand + collapse */}
       <div style={{
         display: "flex", alignItems: "center", gap: 8,
-        padding: "14px 14px 8px", flexShrink: 0,
+        padding: "12px 8px 10px 14px", flexShrink: 0,
       }}>
         <img
           src="/octopus-logo.svg"
           alt="Octopus Logo"
-          style={{ width: 28, height: 28 }}
+          style={{ width: 26, height: 26 }}
         />
         <span style={{
-          fontSize: 15, fontWeight: 650, lineHeight: "20px",
+          fontSize: "var(--text-base)", fontWeight: 600, letterSpacing: "-0.01em",
           color: "var(--gray-1000)", overflow: "hidden",
-          textOverflow: "ellipsis", whiteSpace: "nowrap",
+          textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1,
         }}>
           Octopus Agent
         </span>
+        <IconButton icon={<PanelLeftClose />} title="收起侧栏" size={28} iconSize={15} onClick={toggleSidebar} />
       </div>
 
-      {/* "创建新对话" — primary action, right under the brand */}
-      <div style={{ padding: "0 12px 8px", flexShrink: 0 }}>
-        <Button
-          block
-          onClick={handleNewChat}
+      {/* Navigation items — "新建任务" is an action row like any other, so the
+          sidebar is one flat list of entries rather than a CTA plus a list. The
+          solid accent stays reserved for the composer's send button. */}
+      <div style={{ padding: "0 8px", flexShrink: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+        <NavRow
           icon={<MessageSquare />}
-          style={{
-            borderColor: "var(--gray-150)",
-            backgroundColor: "var(--gray-0)",
-            color: "var(--main-color)",
-            boxShadow: "0 3px 4px rgba(0,10,20,0.02)",
-            fontWeight: 500, height: 36, fontSize: 14, borderRadius: 8,
-            transition: "box-shadow 0.2s ease, border-color 0.2s ease",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.boxShadow = "0 3px 4px rgba(0,10,20,0.07)";
-            e.currentTarget.style.borderColor = "var(--gray-200)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.boxShadow = "0 3px 4px rgba(0,10,20,0.02)";
-            e.currentTarget.style.borderColor = "var(--gray-150)";
-          }}
-        >
-          创建新对话
-        </Button>
+          label="新建任务"
+          onClick={handleNewChat}
+        />
+        <NavRow
+          icon={<Search />}
+          label="搜索"
+          onClick={openSearch}
+          trail={<span className="kbd">⌘K</span>}
+        />
+        <NavRow
+          icon={<LayoutGrid />}
+          label="扩展管理"
+          active={navKey === "extensions"}
+          onClick={() => { setNavKey("extensions"); navigate("/extensions"); }}
+        />
       </div>
-
-      {/* Navigation items */}
-      <div style={{ padding: "0 8px", flexShrink: 0 }}>
-        {navItems.map((item) => (
-          <Tooltip key={item.key} title={item.label} placement="right">
-            <div
-              onClick={() => {
-                if (item.key === "search") {
-                  openSearch();
-                  return;
-                }
-                setNavKey(item.key);
-                if (item.key === "extensions") navigate("/extensions");
-              }}
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                padding: "0 10px", height: 36, borderRadius: 8,
-                cursor: "pointer", fontSize: 14,
-                color: navKey === item.key ? "var(--main-color)" : "var(--gray-700)",
-                background: navKey === item.key
-                  ? "color-mix(in srgb, var(--main-color) 6%, var(--gray-0))"
-                  : "transparent",
-                fontWeight: navKey === item.key ? 600 : 450,
-                marginBottom: 2,
-                transition: "background-color 0.2s ease, color 0.2s ease",
-              }}
-              onMouseEnter={(e) => {
-                if (navKey !== item.key) {
-                  e.currentTarget.style.backgroundColor = "var(--main-20)";
-                  e.currentTarget.style.color = "var(--main-color)";
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (navKey !== item.key) {
-                  e.currentTarget.style.backgroundColor = "transparent";
-                  e.currentTarget.style.color = "var(--gray-700)";
-                }
-              }}
-            >
-              <span style={{ fontSize: 18, display: "flex", alignItems: "center" }}>
-                {item.icon}
-              </span>
-              <span>{item.label}</span>
-            </div>
-          </Tooltip>
-        ))}
-      </div>
-
-      {/* Divider — separates action entries from content lists */}
-      <div style={{
-        margin: "6px 20px", borderTop: "1px solid var(--gray-100)", flexShrink: 0,
-      }} />
 
       {/* Workspace section — list + Open Folder */}
       <div style={{ padding: "0 8px 4px", flexShrink: 0 }}>
-        <div style={{
-          display: "flex", alignItems: "center",
-          padding: "2px 12px 4px",
-        }}>
-          <span style={{
-            fontSize: 12, fontWeight: 600, color: "var(--gray-500)", flex: 1,
-          }}>
-            工作区
+        <div style={{ display: "flex", alignItems: "center", paddingRight: 4 }}>
+          <span style={{ flex: 1 }}>
+            <SectionLabel>工作区</SectionLabel>
           </span>
-          <Tooltip title="打开文件夹">
-            <FolderOpen
-              onClick={() => setDirBrowserOpen(true)}
-              style={{
-                fontSize: 14, color: "var(--gray-500)", cursor: "pointer",
-                transition: "color 0.15s ease",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--main-color)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--gray-500)"; }}
-            />
-          </Tooltip>
+          <IconButton
+            icon={<FolderOpen />}
+            title="打开文件夹"
+            size={24}
+            iconSize={14}
+            onClick={() => setDirBrowserOpen(true)}
+          />
         </div>
         {workspaces.length === 0 ? (
           <div
+            className="focus-ring"
+            role="button"
+            tabIndex={0}
             onClick={() => setDirBrowserOpen(true)}
             style={{
-              margin: "0 4px", padding: "8px 10px", borderRadius: 8,
-              cursor: "pointer", fontSize: 12.5, color: "var(--gray-500)",
-              border: "1px dashed var(--gray-150)",
+              margin: "0 4px", padding: "8px 10px",
+              borderRadius: "var(--radius-sm)", cursor: "pointer",
+              fontSize: "var(--text-xs)", color: "var(--text-tertiary)",
+              border: "1px dashed var(--border-default)",
             }}
           >
             <FolderOpen style={{ marginRight: 6 }} />
             打开一个文件夹作为工作区
           </div>
         ) : (
-          <div style={{ maxHeight: 160, overflowY: "auto", padding: "0 4px" }}>
+          <div style={{ maxHeight: 168, overflowY: "auto" }}>
             {workspaces.map((ws) => (
-              <Tooltip key={ws.id} title={ws.path} placement="right">
-                <div
+              <div key={ws.id} style={{ marginBottom: 2 }}>
+                <NavRow
+                  icon={<Monitor />}
+                  label={ws.name}
+                  active={ws.id === activeWorkspaceId}
                   onClick={() => switchWorkspace(ws)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 8,
-                    padding: "0 10px", height: 32, borderRadius: 8,
-                    cursor: "pointer", fontSize: 13,
-                    color: ws.id === activeWorkspaceId ? "var(--main-color)" : "var(--gray-700)",
-                    background: ws.id === activeWorkspaceId
-                      ? "color-mix(in srgb, var(--main-color) 6%, var(--gray-0))"
-                      : "transparent",
-                    fontWeight: ws.id === activeWorkspaceId ? 600 : 450,
-                    marginBottom: 2,
-                  }}
-                >
-                  <Monitor style={{ fontSize: 15 }} />
-                  <span style={{
-                    flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  }}>
-                    {ws.name}
-                  </span>
-                </div>
-              </Tooltip>
+                />
+              </div>
             ))}
           </div>
         )}
       </div>
 
       {/* Divider — separates workspace from thread history */}
-      <div style={{
-        margin: "6px 20px", borderTop: "1px solid var(--gray-100)", flexShrink: 0,
-      }} />
+      <div style={{ margin: "4px 16px", borderTop: "1px solid var(--border-subtle)", flexShrink: 0 }} />
 
-      {/* Thread list */}
-      <div style={{ flex: 1, overflow: "auto", padding: "0 8px" }}>
-        <div style={{
-          fontSize: 12, fontWeight: 600, color: "var(--gray-500)",
-          padding: "4px 12px 6px",
-        }}>
-          对话历史
+      {/* Thread history — the section header stays pinned while only the list
+          scrolls. The scroll container sits inside the same 8px inset as the
+          workspace list above, so both panels' scrollbars align vertically. */}
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", padding: "0 8px 8px" }}>
+        <div style={{ display: "flex", alignItems: "center", paddingRight: 4, flexShrink: 0 }}>
+          <span style={{ flex: 1 }}>
+            <SectionLabel>任务</SectionLabel>
+          </span>
+          <IconButton
+            icon={<MessageSquare />}
+            title="新建任务"
+            size={24}
+            iconSize={14}
+            onClick={handleNewChat}
+          />
         </div>
-        {threads.map((t) => (
-          <div
-            key={t.id}
-            className="thread-item"
-            onClick={() => {
-              setActiveThreadId(t.id);
-              navigate(`/?thread=${t.id}`);
-            }}
-            style={{
-              padding: "0 8px", height: 36, borderRadius: 8,
-              cursor: "pointer", fontSize: 13, lineHeight: "36px",
-              color: t.id === activeThreadId ? "var(--main-color)" : "var(--gray-700)",
-              background: t.id === activeThreadId
-                ? "color-mix(in srgb, var(--main-color) 6%, var(--gray-0))"
-                : "transparent",
-              fontWeight: t.id === activeThreadId ? 600 : 400,
-              marginBottom: 2, overflow: "hidden",
-              textOverflow: "ellipsis", whiteSpace: "nowrap",
-              transition: "background-color 0.2s ease, color 0.2s ease",
-              display: "flex", alignItems: "center", justifyContent: "space-between",
-            }}
-            onMouseEnter={(e) => {
-              if (t.id !== activeThreadId) {
-                e.currentTarget.style.backgroundColor = "var(--main-20)";
-                e.currentTarget.style.color = "var(--main-color)";
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (t.id !== activeThreadId) {
-                e.currentTarget.style.backgroundColor = "transparent";
-                e.currentTarget.style.color = "var(--gray-700)";
-              }
-            }}
-          >
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, display: "flex", alignItems: "center", gap: 6 }}>
-              {/* Running indicator — thread's agent run is still executing
-                  server-side in the background (zcode-style spinner dot). */}
-              {runningThreads[t.id] && (
-                <span
-                  title="正在运行"
-                  style={{
-                    flexShrink: 0, width: 12, height: 12, borderRadius: "50%",
-                    border: "2px solid var(--main-20)",
-                    borderTopColor: "var(--main-color)",
-                    animation: "spin 0.8s linear infinite",
-                  }}
-                />
-              )}
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {t.title}
-              </span>
-            </span>
-            {/* Relative timestamp (always visible, kept as muted secondary text) */}
-            <span style={{
-              flexShrink: 0, marginLeft: 8,
-              fontSize: 11, lineHeight: 1, color: "var(--gray-400)",
-              whiteSpace: "nowrap",
-            }}>
-              {formatRelativeTime(t.createdAt)}
-            </span>
-            {/* Hover-only more-actions trigger */}
-            <Dropdown
-              menu={{ items: menuFor(t) }}
-              trigger={["click"]}
-              placement="bottomRight"
-            >
-              <span
-                className="thread-more"
-                onClick={(e) => e.stopPropagation()}
-                style={{
-                  flexShrink: 0, width: 24, height: 24, borderRadius: 6,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "var(--gray-500)", fontSize: 14,
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = "var(--gray-100)";
-                  e.currentTarget.style.color = "var(--gray-700)";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.color = "var(--gray-500)";
-                }}
-              >
-                <MoreHorizontal />
-              </span>
-            </Dropdown>
-          </div>
-        ))}
+
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
         {threads.length === 0 && (
           <div style={{
-            textAlign: "center", color: "var(--gray-300)",
-            fontSize: 13, paddingTop: 20,
+            textAlign: "center", color: "var(--text-disabled)",
+            fontSize: "var(--text-sm)", paddingTop: 16,
           }}>
             暂无对话
           </div>
         )}
-      </div>
 
-      {/* Footer: User */}
-      <div style={{ flexShrink: 0, padding: "4px 8px 10px" }}>
-        <div style={{
-          display: "flex", alignItems: "center", gap: 8,
-          padding: "0 10px", height: 36, fontSize: 14,
-          color: "var(--gray-700)", fontWeight: 450,
-        }}>
-          <div style={{
-            width: 24, height: 24, borderRadius: "50%",
-            background: "var(--main-200)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-            fontSize: 12, color: "var(--main-700)", fontWeight: 600,
-          }}>
-            O
+        {threadGroups.map(({ group, items }) => (
+          <div key={group}>
+            <div style={{
+              padding: "10px 8px 4px",
+              fontSize: "var(--text-2xs)", fontWeight: 600,
+              color: "var(--text-tertiary)", letterSpacing: "0.04em",
+            }}>
+              {group}
+            </div>
+            {items.map((t) => {
+              const active = t.id === activeThreadId;
+              return (
+                <div
+                  key={t.id}
+                  className={`ui-row thread-item focus-ring${active ? " is-active" : ""}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-current={active ? "page" : undefined}
+                  onClick={() => openThread(t)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openThread(t);
+                    }
+                  }}
+                  style={{ marginBottom: 2 }}
+                >
+                  {/* Running indicator — the thread's agent run is still executing
+                      server-side in the background. */}
+                  {runningThreads[t.id] && (
+                    <span
+                      title="正在运行"
+                      style={{
+                        flexShrink: 0, width: 6, height: 6, borderRadius: "50%",
+                        background: "var(--accent-solid)",
+                        animation: "dotPulse 1.4s var(--ease) infinite",
+                      }}
+                    />
+                  )}
+                  <span className="truncate" style={{ flex: 1, minWidth: 0 }}>
+                    {t.title}
+                  </span>
+                  {/* One slot holds both the timestamp and the actions trigger. */}
+                  <span className="thread-slot">
+                    <span className="thread-time">{formatRelativeTime(t.createdAt)}</span>
+                    <Dropdown
+                      menu={{ items: menuFor(t) }}
+                      trigger={["click"]}
+                      placement="bottomRight"
+                    >
+                      <span
+                        className="thread-more"
+                        role="button"
+                        aria-label="更多操作"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ cursor: "pointer", color: "var(--text-tertiary)", fontSize: 15 }}
+                      >
+                        <MoreHorizontal />
+                      </span>
+                    </Dropdown>
+                  </span>
+                </div>
+              );
+            })}
           </div>
-          <span style={{ flex: 1 }}>octopus</span>
-          <Tooltip title="设置">
-            <Settings
-              onClick={() => navigate("/settings/general")}
-              style={{
-                fontSize: 16, color: "var(--gray-500)", cursor: "pointer",
-                transition: "color 0.15s ease",
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = "var(--main-color)"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = "var(--gray-500)"; }}
-            />
-          </Tooltip>
+        ))}
         </div>
       </div>
 
-      {/* Global search modal */}
+      {/* Footer: user + preferences */}
+      <div style={{ flexShrink: 0, padding: "6px 8px 10px", borderTop: "1px solid var(--border-subtle)" }}>
+        <Dropdown
+          trigger={["click"]}
+          placement="topLeft"
+          menu={{
+            items: [
+              { key: "settings", icon: <Settings />, label: "设置", onClick: () => navigate("/settings/general") },
+              { type: "divider" },
+              {
+                key: "theme",
+                icon: <Sun />,
+                label: "外观",
+                children: THEME_OPTIONS.map((o) => ({
+                  key: `theme-${o.key}`,
+                  icon: o.icon,
+                  label: o.label,
+                  onClick: () => setThemeMode(o.key),
+                })),
+              },
+              { type: "divider" },
+              {
+                key: "logout",
+                icon: <LogOut />,
+                danger: true,
+                label: "退出登录",
+                onClick: () => { sdk.setToken(""); window.location.href = "/"; },
+              },
+            ],
+          }}
+        >
+          <div
+            className="ui-row focus-ring"
+            role="button"
+            tabIndex={0}
+            style={{ height: 36 }}
+          >
+            <span
+              style={{
+                width: 26, height: 26, borderRadius: "var(--radius-full)",
+                background: "var(--bg-muted)", border: "1px solid var(--border-default)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: "var(--text-xs)", color: "var(--text-secondary)", fontWeight: 600,
+                flexShrink: 0,
+              }}
+            >
+              O
+            </span>
+            <span className="truncate" style={{ flex: 1, color: "var(--text-primary)" }}>
+              octopus
+            </span>
+            <span style={{ display: "flex", fontSize: 14, color: "var(--text-disabled)" }}>
+              <MoreHorizontal />
+            </span>
+          </div>
+        </Dropdown>
+      </div>
+
+      {searchModal()}
+      {renameModal()}
+      {deleteConfirm()}
+
+      {/* Open Folder directory browser */}
+      <DirBrowserModal
+        open={dirBrowserOpen}
+        onClose={() => setDirBrowserOpen(false)}
+        onSelect={openFolder}
+      />
+    </div>
+  );
+
+  // --- Modal renderers -----------------------------------------------------
+  // Kept as closures so the collapsed rail and the full sidebar share one
+  // implementation instead of duplicating markup.
+
+  function searchModal() {
+    return (
       <Modal
         open={searchOpen}
         onCancel={closeSearch}
@@ -600,58 +641,36 @@ export function Sidebar() {
         destroyOnHidden
         width={560}
         centered
-        styles={{ body: { padding: 0 } }}
+        styles={{ body: { padding: 0 }, content: { padding: 0, overflow: "hidden" } }}
         title={null}
+        closable={false}
       >
         <div style={{ display: "flex", flexDirection: "column" }}>
-          <Input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onPressEnter={() => {
-              if (filteredFeatures.length > 0) jumpToFeature(filteredFeatures[0].path);
-              else if (filteredThreads.length > 0) jumpToThread(filteredThreads[0]);
-            }}
-            prefix={<Search style={{ color: "var(--gray-400)" }} />}
-            placeholder="搜索功能或对话..."
-            allowClear
-            autoFocus
-            size="large"
-            style={{ borderRadius: 0, fontSize: 15 }}
-            variant="borderless"
-          />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 14px 4px 16px" }}>
+            <Search style={{ color: "var(--text-tertiary)", fontSize: 16, flexShrink: 0 }} />
+            <Input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onPressEnter={() => {
+                if (filteredThreads.length > 0) jumpToThread(filteredThreads[0]);
+                else if (filteredFeatures.length > 0) jumpToFeature(filteredFeatures[0].path);
+              }}
+              placeholder="搜索功能或对话..."
+              allowClear
+              autoFocus
+              style={{ fontSize: "var(--text-md)", padding: "10px 0" }}
+              variant="borderless"
+            />
+          </div>
           <div style={{
-            borderTop: "1px solid var(--gray-100)",
-            maxHeight: 360, overflow: "auto", padding: "6px 8px",
+            borderTop: "1px solid var(--border-subtle)",
+            maxHeight: 380, overflow: "auto", padding: "6px 8px 8px",
           }}>
-            {/* Page features group */}
-            {(filteredFeatures.length > 0 || q) && (
-              <div style={{ padding: "4px 8px 2px" }}>
-                <div style={{
-                  fontSize: 12, fontWeight: 600, color: "var(--gray-500)",
-                  padding: "4px 4px 6px",
-                }}>
-                  页面功能
-                </div>
-                {filteredFeatures.map((f) => (
-                  <SearchResultRow
-                    key={f.path}
-                    icon={f.icon}
-                    label={f.label}
-                    onClick={() => jumpToFeature(f.path)}
-                  />
-                ))}
-                {q && filteredFeatures.length === 0 && <SearchEmpty />}
-              </div>
-            )}
-
             {/* Conversation history group */}
             {q && (
-              <div style={{ padding: "4px 8px 2px" }}>
-                <div style={{
-                  fontSize: 12, fontWeight: 600, color: "var(--gray-500)",
-                  padding: "4px 4px 6px",
-                }}>
-                  对话历史
+              <div>
+                <div style={{ padding: "8px 8px 4px" }}>
+                  <span className="section-label">任务</span>
                 </div>
                 {filteredThreads.map((t) => (
                   <SearchResultRow
@@ -665,26 +684,52 @@ export function Sidebar() {
               </div>
             )}
 
+            {/* Page features group */}
+            {(filteredFeatures.length > 0 || q) && (
+              <div>
+                <div style={{ padding: "8px 8px 4px" }}>
+                  <span className="section-label">页面功能</span>
+                </div>
+                {filteredFeatures.map((f) => (
+                  <SearchResultRow
+                    key={f.path}
+                    icon={f.icon}
+                    label={f.label}
+                    onClick={() => jumpToFeature(f.path)}
+                  />
+                ))}
+                {q && filteredFeatures.length === 0 && <SearchEmpty />}
+              </div>
+            )}
+
             {/* Idle hint when no query */}
             {!q && (
               <div style={{
-                textAlign: "center", color: "var(--gray-300)",
-                fontSize: 13, padding: "24px 0",
+                textAlign: "center", color: "var(--text-disabled)",
+                fontSize: "var(--text-sm)", padding: "24px 0",
               }}>
                 输入关键字搜索功能或对话
               </div>
             )}
           </div>
           <div style={{
-            borderTop: "1px solid var(--gray-100)", padding: "8px 16px",
-            fontSize: 12, color: "var(--gray-400)", textAlign: "right",
+            borderTop: "1px solid var(--border-subtle)", padding: "8px 14px",
+            fontSize: "var(--text-xs)", color: "var(--text-tertiary)",
+            display: "flex", alignItems: "center", gap: 6,
           }}>
-            Ctrl/⌘ + K 快捷打开
+            <span className="kbd">Esc</span>
+            <span>关闭</span>
+            <span style={{ flex: 1 }} />
+            <span className="kbd">Ctrl</span>
+            <span className="kbd">K</span>
           </div>
         </div>
       </Modal>
+    );
+  }
 
-      {/* Rename modal */}
+  function renameModal() {
+    return (
       <Modal
         title="重命名对话"
         open={!!renaming}
@@ -704,8 +749,11 @@ export function Sidebar() {
           maxLength={100}
         />
       </Modal>
+    );
+  }
 
-      {/* Delete confirm — driven by `pendingDelete` via a hidden trigger */}
+  function deleteConfirm() {
+    return (
       <Popconfirm
         title="删除对话"
         description="删除后无法恢复，确定继续吗？"
@@ -722,13 +770,6 @@ export function Sidebar() {
       >
         <span style={{ display: "none" }} />
       </Popconfirm>
-
-      {/* Open Folder directory browser */}
-      <DirBrowserModal
-        open={dirBrowserOpen}
-        onClose={() => setDirBrowserOpen(false)}
-        onSelect={openFolder}
-      />
-    </div>
-  );
+    );
+  }
 }

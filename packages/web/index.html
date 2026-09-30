@@ -5,9 +5,21 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Octopus Agent</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link
+      rel="preload"
+      href="/fonts/inter-latin-variable.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <!-- Pre-hydration paint. The real tokens live in src/styles/theme.css; this only
+         needs to hold the canvas colour so a dark-mode user doesn't get a white
+         flash before the bundle loads (`data-theme` is set by initTheme() in
+         main.tsx). -->
     <style>
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+      *, *::before, *::after { box-sizing: border-box; }
+      body { margin: 0; background: #ffffff; }
+      html[data-theme="dark"] body { background: #0d0e0e; }
     </style>
   </head>
   <body>

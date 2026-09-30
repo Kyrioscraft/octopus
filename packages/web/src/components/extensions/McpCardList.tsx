@@ -7,10 +7,10 @@ import { SettingsCard, SettingsRow, SettingsRows, ListToolbar } from "../shared/
 const sdk = new OctopusClient();
 
 const TRANSPORT_COLORS: Record<string, string> = {
-  stdio: "#52c41a",
-  sse: "#fa8c16",
-  http: "#1677ff",
-  "streamable-http": "#1677ff",
+  stdio: "var(--color-success-700)",
+  sse: "var(--color-warning-700)",
+  http: "var(--color-info-700)",
+  "streamable-http": "var(--color-info-700)",
 };
 
 interface McpCardListProps {

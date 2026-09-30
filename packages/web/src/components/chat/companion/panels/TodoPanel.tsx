@@ -130,7 +130,7 @@ export function TodoRow({ item }: { item: TodoItem }) {
         alignItems: "center",
         gap: 10,
         padding: "8px 4px",
-        borderBottom: "1px solid var(--gray-100)",
+        borderBottom: "1px solid var(--border-subtle)",
       }}
     >
       <span style={{ color, fontSize: 15, flexShrink: 0 }}>{icon}</span>

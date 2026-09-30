@@ -14,19 +14,21 @@
  * top-right corner; each answered question unlocks the next, and the final
  * question's primary button submits the full answer set.
  *
- * Three `kind`, dispatched by QuestionBody:
+ * Four `kind`, dispatched by QuestionBody:
  *   - tool_approval : one row per pending tool call, approve/reject (+ session).
+ *   - plan_approval : the plan (markdown) + approve/reject + optional feedback.
  *   - discussion    : Radio/Checkbox options + optional "Other…" free text.
  *   - clarify       : a TextArea.
  *
- * Styling is deliberately restrained — neutral grayscale palette (no brand
- * green), no drop shadows, just a 1px border + generous spacing so it reads
- * as a first-class part of the input bar rather than a foreign popup.
- * Primary actions use a solid --gray-900 fill; reject uses a red outline.
+ * Styling matches the composer it replaces: the same elevated surface, hairline
+ * border and radius, so the input box visibly becomes the question. Decisions use
+ * the shared `OptionRow` (radio circle + label), and the primary action is the
+ * accent fill — the same green as the send button, since submitting an answer is
+ * the same class of action as sending a message.
  */
 
 import { useState } from "react";
-import { Button, Input, Radio, Checkbox } from "antd";
+import { Input, Radio, Checkbox } from "antd";
 import type {
   AskKind,
   AskQuestion,
@@ -42,33 +44,18 @@ import {
   MessageSquare,
   TriangleAlert,
 } from "lucide-react";
+import { Markdown } from "../../widgets/Markdown.js";
 
 const { TextArea } = Input;
 
-// Button style presets — clean, animated, no antd primary dependency.
-const S = {
-  mainBase: {
-    background: "var(--gray-900)",
-    color: "var(--gray-0)",
-    border: "1px solid var(--gray-900)",
-    boxShadow: "none",
-    transition: "all 0.18s ease",
-  } as React.CSSProperties,
-  mainHover: {
-    background: "var(--gray-700)",
-    border: "1px solid var(--gray-700)",
-    boxShadow: "0 1px 3px var(--shadow-1)",
-  } as React.CSSProperties,
-  mainPress: {
-    background: "var(--gray-600)",
-    border: "1px solid var(--gray-600)",
-    boxShadow: "none",
-  } as React.CSSProperties,
+/** The status dot colour per question kind — a dot instead of a coloured label
+ *  keeps the header quiet while still distinguishing the four kinds. */
+const KIND_META: Record<AskKind, { icon: React.ReactNode; label: string; dot: string }> = {
+  tool_approval: { icon: <TriangleAlert />, label: "需要批准", dot: "var(--color-warning-500)" },
+  plan_approval: { icon: <ClipboardList />, label: "计划审批", dot: "var(--color-info-500)" },
+  discussion: { icon: <MessageSquare />, label: "方案选择", dot: "var(--accent-solid)" },
+  clarify: { icon: <CircleHelp />, label: "需要澄清", dot: "var(--border-strong)" },
 };
-
-/** Merge style objects — later objects override earlier ones. */
-const css = (...styles: (React.CSSProperties | undefined | false)[]): React.CSSProperties =>
-  Object.assign({}, ...styles.filter(Boolean));
 
 interface Props {
   payload: AskUserQuestionPayload;
@@ -205,18 +192,16 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
     !!current.context?.source &&
     sessionAllowlist.has(current.context.source);
 
-  // Hover/press state for the primary action button.
-  const [mainState, setMainState] = useState<"base" | "hover" | "press">("base");
-
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        background: "var(--gray-25)",
-        border: "1px solid var(--gray-150)",
-        borderRadius: 12,
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border-default)",
+        borderRadius: "var(--radius-lg)",
         padding: "14px 16px 12px",
+        boxShadow: "var(--shadow-md)",
       }}
     >
       {/* Header row: kind label (left) + pagination control (right). */}
@@ -231,37 +216,46 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         <AskKindLabel kind={payload.kind} />
         {total > 1 && (
           <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-            <Button
-              type="text"
-              size="small"
-              icon={<ChevronLeft />}
+            <button
+              type="button"
+              className="icon-btn focus-ring"
+              aria-label="上一题"
               disabled={page === 0}
               onClick={() => setPage((p) => Math.max(0, p - 1))}
-              style={{ color: page === 0 ? "var(--gray-200)" : "var(--gray-500)" }}
-            />
+              style={{ width: 26, height: 26, color: page === 0 ? "var(--text-disabled)" : "var(--text-tertiary)" }}
+            >
+              <span style={{ display: "flex", fontSize: 15 }}>
+                <ChevronLeft />
+              </span>
+            </button>
             <span
+              className="tnum"
               style={{
-                fontSize: 12,
+                fontSize: "var(--text-xs)",
                 fontWeight: 500,
-                color: "var(--gray-600)",
-                minWidth: 32,
+                color: "var(--text-secondary)",
+                minWidth: 34,
                 textAlign: "center",
-                fontVariantNumeric: "tabular-nums",
                 userSelect: "none",
               }}
             >
               {page + 1} / {total}
             </span>
-            <Button
-              type="text"
-              size="small"
-              icon={<ChevronRight />}
+            <button
+              type="button"
+              className="icon-btn focus-ring"
+              aria-label="下一题"
               disabled={!canAdvance || isLast}
               onClick={() => setPage((p) => Math.min(total - 1, p + 1))}
               style={{
-                color: !canAdvance || isLast ? "var(--gray-200)" : "var(--gray-500)",
+                width: 26, height: 26,
+                color: !canAdvance || isLast ? "var(--text-disabled)" : "var(--text-tertiary)",
               }}
-            />
+            >
+              <span style={{ display: "flex", fontSize: 15 }}>
+                <ChevronRight />
+              </span>
+            </button>
           </div>
         )}
       </div>
@@ -309,66 +303,38 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
         >
         {isOptionQuestion ? (
           <>
-            <Button
-              size="small"
-              onClick={skipCurrent}
-              style={{ color: "var(--gray-500)", boxShadow: "none" }}
-            >
+            <button type="button" className="ask-ghost focus-ring" onClick={skipCurrent}>
               忽略
-            </Button>
-            <Button
-              size="small"
-              icon={<Check />}
+            </button>
+            <button
+              type="button"
+              className="ask-primary focus-ring"
               disabled={!canAdvance}
               onClick={advanceOrSubmit}
-              style={css(
-                S.mainBase,
-                mainState === "hover" && S.mainHover,
-                mainState === "press" && S.mainPress,
-              )}
-              onMouseEnter={() => setMainState("hover")}
-              onMouseLeave={() => setMainState("base")}
-              onMouseDown={() => setMainState("press")}
-              onMouseUp={() => setMainState("hover")}
             >
+              <Check size={14} />
               提交
-            </Button>
+            </button>
           </>
         ) : isLast ? (
-          <Button
-            size="small"
-            icon={<Check />}
+          <button
+            type="button"
+            className="ask-primary focus-ring"
             disabled={!canAdvance}
             onClick={() => submitAll()}
-            style={css(
-              S.mainBase,
-              mainState === "hover" && S.mainHover,
-              mainState === "press" && S.mainPress,
-            )}
-            onMouseEnter={() => setMainState("hover")}
-            onMouseLeave={() => setMainState("base")}
-            onMouseDown={() => setMainState("press")}
-            onMouseUp={() => setMainState("hover")}
           >
+            <Check size={14} />
             提交
-          </Button>
+          </button>
         ) : (
-          <Button
-            size="small"
+          <button
+            type="button"
+            className="ask-primary focus-ring"
             disabled={!canAdvance}
             onClick={() => setPage((p) => Math.min(total - 1, p + 1))}
-            style={css(
-              S.mainBase,
-              mainState === "hover" && S.mainHover,
-              mainState === "press" && S.mainPress,
-            )}
-            onMouseEnter={() => setMainState("hover")}
-            onMouseLeave={() => setMainState("base")}
-            onMouseDown={() => setMainState("press")}
-            onMouseUp={() => setMainState("hover")}
           >
             下一题
-          </Button>
+          </button>
         )}
         </div>
       )}
@@ -378,34 +344,114 @@ export function AskPanel({ payload, onResolve, sessionAllowlist }: Props) {
 
 // -----------------------------------------------------------------------------
 
-/** Small inline kind label with matching glyph — no background chip. */
+/** Kind label: a status dot + neutral label. The dot carries the kind, so the
+ *  header doesn't turn into a row of coloured text. */
 function AskKindLabel({ kind }: { kind: AskKind }) {
-  const meta = (() => {
-    switch (kind) {
-      case "tool_approval":
-        return { icon: <TriangleAlert />, label: "需要批准", color: "var(--color-warning-500)" };
-      case "plan_approval":
-        return { icon: <ClipboardList />, label: "计划审批", color: "var(--color-info-500)" };
-      case "discussion":
-        return { icon: <MessageSquare />, label: "方案选择", color: "var(--color-info-500)" };
-      case "clarify":
-        return { icon: <CircleHelp />, label: "需要澄清", color: "var(--gray-900)" };
-    }
-  })();
+  const meta = KIND_META[kind];
   return (
     <span
       style={{
         display: "inline-flex",
         alignItems: "center",
-        gap: 6,
-        fontSize: 13,
+        gap: 8,
+        fontSize: "var(--text-sm)",
         fontWeight: 500,
-        color: meta.color,
+        color: "var(--text-primary)",
       }}
     >
-      {meta.icon}
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: meta.dot,
+          flexShrink: 0,
+        }}
+      />
       {meta.label}
     </span>
+  );
+}
+
+/**
+ * The app's one "pick one" row: a radio indicator, label, optional hint.
+ *
+ * Shared by tool approvals and single-select discussion answers, which used to
+ * duplicate this markup. `onClick` fires on the row itself (click-to-send), and
+ * the radio circle makes the affordance obvious in a way a bare ✓ did not.
+ */
+function OptionRow({
+  label,
+  description,
+  selected,
+  danger = false,
+  onClick,
+}: {
+  label: string;
+  description?: string;
+  selected: boolean;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  const accent = danger ? "var(--color-error-500)" : "var(--accent-solid)";
+  return (
+    <div
+      role="radio"
+      aria-checked={selected}
+      tabIndex={0}
+      className={`option-row focus-ring${selected ? " is-selected" : ""}${danger ? " is-danger" : ""}`}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        minHeight: 40,
+        padding: "8px 12px",
+        borderRadius: "var(--radius-md)",
+        border: `1px solid ${selected ? accent : "var(--border-default)"}`,
+        cursor: "pointer",
+      }}
+    >
+      {/* Radio indicator — filled dot when selected. */}
+      <span
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: "50%",
+          border: `1.5px solid ${selected ? accent : "var(--border-strong)"}`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+          transition: "border-color var(--dur-1) var(--ease)",
+        }}
+      >
+        {selected && (
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: accent }} />
+        )}
+      </span>
+      <span
+        style={{
+          fontSize: "var(--text-sm)",
+          fontWeight: 500,
+          color: danger ? "var(--color-error-500)" : "var(--text-primary)",
+          flexShrink: 0,
+        }}
+      >
+        {label}
+      </span>
+      {description && (
+        <span style={{ color: "var(--text-tertiary)", fontSize: "var(--text-xs)", flex: 1 }}>
+          {description}
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -434,7 +480,7 @@ interface BodyProps {
 function QuestionBody(p: BodyProps) {
   // Question text — common header for all kinds.
   const QHeader = (
-    <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-900)", marginBottom: 8 }}>
+    <div style={{ fontSize: "var(--text-base)", fontWeight: 500, color: "var(--text-primary)", marginBottom: 8 }}>
       {p.q.question}
     </div>
   );
@@ -482,16 +528,16 @@ function ToolApprovalBody({
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
         <span
           style={{
-            fontFamily: "monospace",
-            fontSize: 13,
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-sm)",
             fontWeight: 600,
-            color: "var(--gray-900)",
+            color: "var(--text-primary)",
           }}
         >
           {toolName}
         </span>
         {sessionAllowed && (
-          <span style={{ fontSize: 11, color: "var(--gray-400)" }}>· 已自动批准</span>
+          <span style={{ fontSize: "var(--text-2xs)", color: "var(--text-tertiary)" }}>· 已自动批准</span>
         )}
       </div>
       {/* "Why am I being asked" — the matched permission rule, embedded by the
@@ -503,17 +549,17 @@ function ToolApprovalBody({
         return (
           <div
             style={{
-              fontSize: 11,
-              color: "var(--gray-500)",
-              background: "var(--gray-50)",
-              border: "1px solid var(--gray-150)",
-              borderRadius: 6,
+              fontSize: "var(--text-2xs)",
+              color: "var(--text-tertiary)",
+              background: "var(--bg-subtle)",
+              border: "1px solid var(--border-default)",
+              borderRadius: "var(--radius-xs)",
               padding: "3px 8px",
               marginBottom: 6,
               width: "fit-content",
             }}
           >
-            触发规则: <code style={{ fontSize: 11 }}>{m[1]}</code> → {m[2]}
+            触发规则: <code className="mono" style={{ fontSize: "var(--text-2xs)" }}>{m[1]}</code> → {m[2]}
           </div>
         );
       })()}
@@ -523,7 +569,7 @@ function ToolApprovalBody({
         const stripped = (q.question ?? "").replace(/\s*\(matched permission rule "[^"]+" → \w+\)/, "");
         if (!q.question || q.question === `批准执行: ${toolName}?` || !stripped.trim()) return null;
         return (
-          <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-900)", marginBottom: 8 }}>
+          <div style={{ fontSize: "var(--text-base)", fontWeight: 500, color: "var(--text-primary)", marginBottom: 8 }}>
             {stripped}
           </div>
         );
@@ -532,12 +578,13 @@ function ToolApprovalBody({
         <div
           onClick={() => setExpanded((v) => !v)}
           style={{
-            fontFamily: "monospace",
-            fontSize: 12,
-            color: "var(--gray-600)",
-            border: "1px solid var(--gray-150)",
-            borderRadius: 6,
-            padding: "5px 9px",
+            fontFamily: "var(--font-mono)",
+            fontSize: "var(--text-xs)",
+            color: "var(--text-secondary)",
+            background: "var(--bg-subtle)",
+            border: "1px solid var(--border-default)",
+            borderRadius: "var(--radius-sm)",
+            padding: "6px 10px",
             marginBottom: 4,
             cursor: "pointer",
             whiteSpace: expanded ? "pre-wrap" : "nowrap",
@@ -553,13 +600,16 @@ function ToolApprovalBody({
         <pre
           style={{
             margin: "4px 0 0",
-            fontSize: 11,
-            color: "var(--gray-500)",
-            padding: 8,
-            borderRadius: 6,
-            border: "1px solid var(--gray-150)",
+            fontSize: "var(--text-xs)",
+            lineHeight: 1.6,
+            color: "var(--text-secondary)",
+            padding: 10,
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--border-default)",
+            background: "var(--bg-subtle)",
+            fontFamily: "var(--font-mono)",
             overflow: "auto",
-            maxHeight: 140,
+            maxHeight: 160,
           }}
         >
           {JSON.stringify(actionReq.args, null, 2)}
@@ -605,45 +655,16 @@ function ApprovalOptionRows({
   ];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 10 }}>
-      {rows.map((r) => {
-        const selected = approval?.type === r.value;
-        return (
-          <div
-            key={r.value}
-            onClick={() => onPick({ type: r.value })}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "7px 10px",
-              borderRadius: 8,
-              border: `1px solid ${selected ? (r.danger ? "var(--color-error-500)" : "var(--gray-900)") : "var(--gray-150)"}`,
-              background: selected ? "var(--gray-0)" : "transparent",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-            }}
-          >
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: 500,
-                color: r.danger ? "var(--color-error-500)" : "var(--gray-900)",
-              }}
-            >
-              {r.label}
-            </span>
-            {r.hint && (
-              <span style={{ color: "var(--gray-400)", fontSize: 12, flex: 1 }}>{r.hint}</span>
-            )}
-            {selected && (
-              <Check
-                size={14}
-                style={{ color: r.danger ? "var(--color-error-500)" : "var(--gray-900)" }}
-              />
-            )}
-          </div>
-        );
-      })}
+      {rows.map((r) => (
+        <OptionRow
+          key={r.value}
+          label={r.label}
+          description={r.hint}
+          danger={r.danger}
+          selected={approval?.type === r.value}
+          onClick={() => onPick({ type: r.value })}
+        />
+      ))}
     </div>
   );
 }
@@ -658,43 +679,40 @@ function ApprovalOptionRows({
 function PlanApprovalBody({ q, approval, onApproval, text, onText }: BodyProps) {
   return (
     <div style={{ paddingLeft: 2, width: "100%" }}>
-      <pre
+      {/* The plan is markdown (`submit_plan`'s schema asks the agent for it),
+          so it goes through the same renderer as assistant replies. The box
+          stays bounded — a long plan scrolls instead of pushing the composer
+          off screen. */}
+      <div
         style={{
-          margin: 0,
-          fontSize: 13,
-          lineHeight: 1.55,
-          color: "var(--gray-800)",
-          whiteSpace: "pre-wrap",
-          wordBreak: "break-word",
-          fontFamily: "inherit",
           maxHeight: 320,
           overflow: "auto",
-          border: "1px solid var(--gray-150)",
-          borderRadius: 8,
-          padding: "10px 12px",
-          background: "var(--gray-0)",
+          border: "1px solid var(--border-default)",
+          borderRadius: "var(--radius-md)",
+          padding: "12px 14px",
+          background: "var(--bg-muted)",
         }}
       >
-        {q.question}
-      </pre>
+        <Markdown content={q.question} />
+      </div>
       <Radio.Group
         value={approval?.type ?? ""}
         onChange={(e) => onApproval({ type: e.target.value as Approval["type"] })}
-        style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}
+        style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}
       >
         <Radio value="approve">
-          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--gray-900)" }}>
+          <span style={{ fontSize: "var(--text-sm)", fontWeight: 500, color: "var(--text-primary)" }}>
             批准并执行
           </span>
-          <span style={{ color: "var(--gray-400)", marginLeft: 6, fontSize: 12 }}>
+          <span style={{ color: "var(--text-tertiary)", marginLeft: 6, fontSize: "var(--text-xs)" }}>
             切换到 confirm 智能体开始实现
           </span>
         </Radio>
         <Radio value="reject">
-          <span style={{ fontSize: 13, fontWeight: 500, color: "var(--color-error-500)" }}>
+          <span style={{ fontSize: "var(--text-sm)", fontWeight: 500, color: "var(--color-error-500)" }}>
             拒绝并修改
           </span>
-          <span style={{ color: "var(--gray-400)", marginLeft: 6, fontSize: 12 }}>
+          <span style={{ color: "var(--text-tertiary)", marginLeft: 6, fontSize: "var(--text-xs)" }}>
             继续计划模式，按反馈修订
           </span>
         </Radio>
@@ -706,7 +724,7 @@ function PlanApprovalBody({ q, approval, onApproval, text, onText }: BodyProps) 
           placeholder="修改意见（可选）——告诉代理哪里需要调整…"
           autoSize={{ minRows: 2, maxRows: 6 }}
           autoFocus
-          style={{ fontSize: 13, marginTop: 8 }}
+          style={{ fontSize: "var(--text-sm)", marginTop: 8 }}
         />
       )}
     </div>
@@ -749,11 +767,11 @@ function DiscussionBody({
         >
           {options.map((opt) => (
             <Checkbox key={opt.value} value={opt.value}>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "var(--gray-900)" }}>
+              <span style={{ fontSize: "var(--text-sm)", fontWeight: 500, color: "var(--text-primary)" }}>
                 {opt.label}
               </span>
               {opt.description && (
-                <span style={{ color: "var(--gray-400)", marginLeft: 6, fontSize: 12 }}>
+                <span style={{ color: "var(--text-tertiary)", marginLeft: 6, fontSize: "var(--text-xs)" }}>
                   {opt.description}
                 </span>
               )}
@@ -761,46 +779,18 @@ function DiscussionBody({
           ))}
         </Checkbox.Group>
       ) : (
-        /* Single-select — no radio buttons, no confirm step: clicking a row
-            IS the answer (zcode-style click-to-send). */
+        /* Single-select — no confirm step: clicking a row IS the answer
+            (zcode-style click-to-send). */
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {options.map((opt) => {
-            const selected = selection === opt.value;
-            return (
-              <div
-                key={opt.value}
-                onClick={() => onPickOption(opt.value)}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  padding: "7px 10px",
-                  borderRadius: 8,
-                  border: `1px solid ${selected ? "var(--gray-900)" : "var(--gray-150)"}`,
-                  background: selected ? "var(--gray-0)" : "transparent",
-                  cursor: "pointer",
-                  transition: "all 0.15s ease",
-                }}
-              >
-                <span
-                  style={{
-                    fontSize: 13,
-                    fontWeight: 500,
-                    color: "var(--gray-900)",
-                    flex: 1,
-                  }}
-                >
-                  {opt.label}
-                </span>
-                {opt.description && (
-                  <span style={{ color: "var(--gray-400)", fontSize: 12 }}>
-                    {opt.description}
-                  </span>
-                )}
-                {selected && <Check size={14} style={{ color: "var(--gray-900)" }} />}
-              </div>
-            );
-          })}
+          {options.map((opt) => (
+            <OptionRow
+              key={opt.value}
+              label={opt.label}
+              description={opt.description}
+              selected={selection === opt.value}
+              onClick={() => onPickOption(opt.value)}
+            />
+          ))}
         </div>
       )}
       {/* "其他" — a plain textarea with a placeholder, no radio/checkbox and
@@ -812,7 +802,7 @@ function DiscussionBody({
           onKeyDown={onKeyDown}
           placeholder="或输入其他内容…"
           autoSize={{ minRows: 1, maxRows: 4 }}
-          style={{ fontSize: 13, marginTop: 8 }}
+          style={{ fontSize: "var(--text-sm)", marginTop: 8 }}
         />
       )}
     </div>
@@ -834,7 +824,7 @@ function ClarifyBody({ q, text, onText, header }: BodyProps & { header: React.Re
         placeholder="输入你的回答…"
         autoSize={{ minRows: 2, maxRows: 8 }}
         autoFocus
-        style={{ fontSize: 14 }}
+        style={{ fontSize: "var(--text-base)" }}
       />
     </div>
   );

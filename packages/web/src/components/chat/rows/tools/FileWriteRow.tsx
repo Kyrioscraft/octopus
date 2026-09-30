@@ -1,10 +1,9 @@
 import type { ToolCardProps } from "./types.js";
-import { ToolCallRow, ToolResultBlock, DiffStat } from "./ToolCallRow.js";
+import { ToolCallRow, ToolResultBlock, DiffStat, ToolRowHeader } from "./ToolCallRow.js";
 import { basename, countLines } from "./registry.js";
-import { ShimmerText } from "../../ShimmerText.js";
 
 /**
- * write_file row. Header shows the file name + a +N (line count) tag; body
+ * write_file row. Header shows the file name + a +N (line count) stat; body
  * shows the full file content (which is the `content` argument — there's no
  * "before" to diff against for a fresh write).
  */
@@ -20,26 +19,13 @@ export function FileWriteRow({ entry }: ToolCardProps) {
     <ToolCallRow
       entry={entry}
       header={
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          {running ? <ShimmerText text="写入" /> : <span style={{ color: "var(--gray-500)" }}>写入</span>}
-          <span style={{ color: "var(--gray-400)" }}>|</span>
-          <code
-            title={filePath}
-            style={{
-              fontSize: 12,
-              background: "var(--gray-100)",
-              padding: "1px 6px",
-              borderRadius: 4,
-              color: "var(--gray-900)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {fileName || "(unknown)"}
-          </code>
-          <DiffStat added={added} removed={0} />
-        </span>
+        <ToolRowHeader
+          verb="写入"
+          running={running}
+          detail={fileName || "(unknown)"}
+          detailTitle={filePath}
+          tail={<DiffStat added={added} removed={0} />}
+        />
       }
       body={
         content ? (

@@ -129,7 +129,7 @@ export function FilePreview({
           style={{
             width: "100%",
             minHeight: 360,
-            border: "1px solid var(--gray-150)",
+            border: "1px solid var(--border-default)",
             borderRadius: 8,
             padding: 12,
             fontFamily: "'JetBrains Mono', Consolas, monospace",
@@ -176,7 +176,7 @@ export function FilePreview({
                 srcDoc={file.content ?? ""}
                 title={file.name}
                 sandbox="allow-scripts"
-                style={{ width: "100%", height: "70vh", border: "1px solid var(--gray-150)", borderRadius: 6 }}
+                style={{ width: "100%", height: "70vh", border: "1px solid var(--border-default)", borderRadius: "var(--radius-sm)" }}
               />
             )}
           </div>
@@ -278,7 +278,7 @@ export function FilePreview({
 
 const headerStyle: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 4,
-  padding: "8px 12px", borderBottom: "1px solid var(--gray-150)",
+  padding: "8px 12px", borderBottom: "1px solid var(--border-subtle)",
   flexShrink: 0,
 };
 

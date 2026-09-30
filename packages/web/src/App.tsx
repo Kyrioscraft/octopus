@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { ConfigProvider, theme as antdTheme } from "antd";
+import { ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
+import { buildAntdTheme } from "./styles/antdTheme.js";
 import { AppLayout } from "./layouts/AppLayout.js";
 import { ChatPage } from "./pages/Chat.js";
 import { ExtensionsPage } from "./pages/Extensions.js";
@@ -23,35 +24,7 @@ export function App() {
   const isDark = resolved === "dark";
 
   return (
-    <ConfigProvider
-      locale={zhCN}
-      theme={{
-        token: {
-          colorPrimary: "#389e0d",
-          borderRadius: 8,
-          fontFamily:
-            "'HarmonyOS Sans SC', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-        },
-        algorithm: isDark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-        components: {
-          Select: {
-            // Low-saturation neutral-grey selection style — keeps Select
-            // dropdowns in step with the grey/minimal input-bar look rather
-            // than antd's louder default green (derived from colorPrimary).
-            // In dark mode antd's algorithm supplies suitable colors on its
-            // own, so only override in light mode.
-            ...(isDark
-              ? {}
-              : {
-                  optionSelectedBg: "#eff2f2",      // ≈ var(--gray-100)
-                  optionSelectedColor: "#151616",   // ≈ var(--gray-1000)
-                  optionSelectedFontWeight: 600,
-                  optionActiveBg: "#f2f4f4",         // ≈ var(--gray-50)
-                }),
-          },
-        },
-      }}
-    >
+    <ConfigProvider locale={zhCN} theme={buildAntdTheme(isDark)}>
       <BrowserRouter>
         <Routes>
           <Route element={<AppLayout />}>

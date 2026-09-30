@@ -204,13 +204,13 @@ export function DirBrowserModal({ open, onClose, onSelect }: DirBrowserModalProp
 
       {/* Directory list */}
       <div style={{
-        border: "1px solid var(--gray-150)", borderRadius: 8,
-        height: 320, overflow: "auto", background: "var(--gray-0)",
+        border: "1px solid var(--border-default)", borderRadius: "var(--radius-md)",
+        height: 320, overflow: "auto", background: "var(--bg-elevated)", padding: 4,
       }}>
         {loading ? (
           <div style={{ padding: 24, textAlign: "center" }}><Spin /></div>
         ) : !data || data.entries.length === 0 ? (
-          <div style={{ padding: 24, textAlign: "center", color: "var(--gray-400)", fontSize: 13 }}>
+          <div style={{ padding: 24, textAlign: "center", color: "var(--text-tertiary)", fontSize: "var(--text-sm)" }}>
             该目录下没有子目录
           </div>
         ) : (
@@ -221,25 +221,13 @@ export function DirBrowserModal({ open, onClose, onSelect }: DirBrowserModalProp
                 key={e.path}
                 onClick={() => setSelected(e.path)}
                 onDoubleClick={() => enterDir(e.path)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  padding: "0 12px", height: 34, cursor: "pointer", fontSize: 13,
-                  background: isSelected
-                    ? "color-mix(in srgb, var(--main-color) 8%, transparent)"
-                    : "transparent",
-                  color: isSelected ? "var(--main-color)" : "var(--gray-700)",
-                  fontWeight: isSelected ? 600 : 400,
-                  transition: "background-color 0.15s ease",
-                }}
-                onMouseEnter={(ev) => {
-                  if (!isSelected) ev.currentTarget.style.backgroundColor = "var(--main-20)";
-                }}
-                onMouseLeave={(ev) => {
-                  if (!isSelected) ev.currentTarget.style.backgroundColor = "transparent";
-                }}
+                className={`ui-row focus-ring${isSelected ? " is-active" : ""}`}
+                role="button"
+                tabIndex={0}
+                style={{ padding: "0 10px", height: 34, marginBottom: 2 }}
               >
-                <Folder style={{ color: "var(--main-color)" }} />
-                <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <Folder style={{ color: isSelected ? "var(--accent)" : "var(--text-tertiary)" }} />
+                <span className="truncate" style={{ flex: 1 }}>
                   {e.name}
                 </span>
                 {isSelected && <Check style={{ fontSize: 12 }} />}
@@ -251,10 +239,10 @@ export function DirBrowserModal({ open, onClose, onSelect }: DirBrowserModalProp
 
       {/* Selected basename hint (lightweight — full path is shown in the breadcrumb) */}
       <div style={{
-        marginTop: 8, fontSize: 12, color: "var(--gray-500)",
+        marginTop: 8, fontSize: "var(--text-xs)", color: "var(--text-tertiary)",
       }}>
         {selected
-          ? <>已选：<span style={{ color: "var(--gray-700)", fontWeight: 500 }}>{selected.split(/[\\/]/).pop() || selected}</span></>
+          ? <>已选：<span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{selected.split(/[\\/]/).pop() || selected}</span></>
           : "未选择"}
       </div>
     </Modal>

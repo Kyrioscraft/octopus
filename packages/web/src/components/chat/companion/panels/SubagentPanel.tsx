@@ -61,7 +61,7 @@ export function SubagentPanel({ subagents, refId }: CompanionPanelProps) {
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Selector — only in overview mode with more than one run. */}
       {!refRun && pool.length > 1 && (
-        <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--gray-100)" }}>
+        <div style={{ padding: "8px 12px", borderBottom: "1px solid var(--border-subtle)" }}>
           <Segmented
             block
             size="small"

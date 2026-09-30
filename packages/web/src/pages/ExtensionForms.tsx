@@ -18,6 +18,13 @@ import {
   type McpWriteRequest,
 } from "@octopus/tentacle";
 import { SettingsCard } from "../components/shared/SettingsCard.js";
+import {
+  topBarStyle,
+  iconTileStyle,
+  titleStyle,
+  subtitleStyle,
+  iconBtnStyle,
+} from "../components/shared/PageHeader.js";
 
 const sdk = new OctopusClient();
 
@@ -69,7 +76,7 @@ function FormPageShell({
       </div>
 
       {/* Body */}
-      <div style={{ flex: 1, overflow: "auto", background: "var(--gray-10)" }}>
+      <div style={{ flex: 1, overflow: "auto", background: "var(--bg-canvas)" }}>
         <div style={{ maxWidth: 900, margin: "0 auto", padding: "20px" }}>
           <SettingsCard title={title}>
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
@@ -89,23 +96,6 @@ function FormPageShell({
     </div>
   );
 }
-
-const topBarStyle: React.CSSProperties = {
-  height: 45,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "0 16px",
-  borderBottom: "1px solid var(--gray-150)",
-  flexShrink: 0,
-  background: "var(--gray-0)",
-};
-
-const titleStyle: React.CSSProperties = {
-  fontSize: 15,
-  fontWeight: 600,
-  color: "var(--gray-1000)",
-};
 
 /* ------------------------------------------------------------------ */
 /* MCP                                                                 */

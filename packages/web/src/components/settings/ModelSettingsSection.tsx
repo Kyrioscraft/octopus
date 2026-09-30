@@ -21,6 +21,7 @@ import type {
   ModelProviderPatch,
   RemoteModel,
 } from "@octopus/tentacle";
+import { SettingsCard as Card } from "../shared/SettingsCard.js";
 
 interface Props {
   sdk: OctopusClient;
@@ -167,7 +168,7 @@ export function ModelSettingsSection({ sdk }: Props) {
         {providers.length === 0 ? (
           <Empty description={search ? "无匹配供应商" : "暂无供应商"} style={{ padding: "20px 0" }} />
         ) : (
-          <div style={{ display: "flex", flexDirection: "column" }}>
+          <div className="settings-rows">
             {providers.map((p) => (
               <ProviderRow
                 key={p.name}
@@ -241,16 +242,7 @@ function ProviderRow({
     : "var(--gray-500)";
 
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 12,
-        padding: "12px 0",
-        borderBottom: "1px solid var(--gray-100)",
-        opacity: disabled ? 0.6 : 1,
-      }}
-    >
+    <div className="settings-row" style={{ opacity: disabled ? 0.6 : 1 }}>
       <span
         style={{
           fontSize: 18, color: disabled ? "var(--gray-400)" : "var(--main-color)",
@@ -922,45 +914,8 @@ function AddProviderModal({
 }
 
 // =============================================================================
-// Shared card & form field (match General section styling)
+// Form field (shared Card comes from ../shared/SettingsCard.js)
 // =============================================================================
-
-function Card({
-  title, extra, children,
-}: {
-  title: string;
-  extra?: React.ReactNode;
-  children: React.ReactNode;
-}) {
-  return (
-    <div
-      style={{
-        background: "var(--gray-0)",
-        border: "1px solid var(--gray-150)",
-        borderRadius: 12,
-        overflow: "hidden",
-      }}
-    >
-      <div
-        style={{
-          padding: "12px 16px",
-          borderBottom: extra ? "1px solid var(--gray-100)" : "none",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 12,
-          fontSize: 14,
-          fontWeight: 600,
-          color: "var(--gray-1000)",
-        }}
-      >
-        <span>{title}</span>
-        {extra}
-      </div>
-      <div style={{ padding: 16 }}>{children}</div>
-    </div>
-  );
-}
 
 function FormField({
   label, hint, children,

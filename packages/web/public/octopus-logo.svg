@@ -1,29 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
-  <defs>
-    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#237804"/>
-      <stop offset="100%" stop-color="#52c41a"/>
-    </linearGradient>
-  </defs>
-
-  <!-- Tentacles (5, geometric, uniform stroke, rounded caps) -->
-  <g fill="none" stroke="url(#brandGrad)" stroke-width="6.5" stroke-linecap="round">
-    <path d="M 26 60 Q 12 78 12 92"/>
-    <path d="M 39 61 Q 30 80 28 93"/>
-    <path d="M 50 62 Q 50 84 50 94"/>
-    <path d="M 61 61 Q 70 80 72 93"/>
-    <path d="M 74 60 Q 88 78 88 92"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" role="img" aria-label="Octopus logo (monochrome)">
+  <!-- octopus-icon-mono.svg 原样几何，整体放大 1.3 倍居中，减少留白 -->
+  <g transform="translate(48 48.5) scale(1.3) translate(-48 -48.5)">
+    <g stroke="currentColor" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M31 51C31 35 38 25 48 25C58 25 65 35 65 51C65 53.5 63 55 60.5 55C56 56.5 40 56.5 35.5 55C33 55 31 53.5 31 51Z"/>
+      <path d="M33 55C27 60 23 67 25 73"/>
+      <path d="M42 55C41 62 37.5 67 33 70.5"/>
+      <path d="M54 55C55 62 58.5 67 63 70.5"/>
+      <path d="M63 55C69 60 73 67 71 73"/>
+    </g>
+    <circle cx="42.5" cy="41.5" r="2.7" fill="currentColor"/>
+    <circle cx="53.5" cy="41.5" r="2.7" fill="currentColor"/>
   </g>
-
-  <!-- Head: geometric dome outline (open bottom, clipped corners) -->
-  <path d="M 12 38
-           A 38 38 0 0 1 88 38
-           L 88 48
-           Q 88 58 78 58
-           L 22 58
-           Q 12 58 12 48 Z"
-        fill="url(#brandGrad)"/>
-
-  <!-- Minimal accent dot (subtle, non-cartoon) -->
-  <circle cx="50" cy="28" r="4" fill="#ffffff" opacity="0.85"/>
 </svg>

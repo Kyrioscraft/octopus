@@ -5,9 +5,9 @@ import {
   Plug,
   RotateCw,
   Save,
-  Server,
 } from "lucide-react";
 import type { OctopusClient, SandboxSettings } from "@octopus/tentacle";
+import { SettingsCard } from "../shared/SettingsCard.js";
 
 interface Props {
   sdk: OctopusClient;
@@ -88,25 +88,25 @@ export function SandboxSettingsSection({ sdk }: Props) {
   }
 
   return (
-    <div style={{
-      border: "1px solid var(--gray-150)", borderRadius: 10,
-      padding: 16, marginBottom: 16, background: "var(--gray-0)",
-    }}>
-      {/* Header row */}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-        <Server style={{ fontSize: 18, color: "var(--main-color)" }} />
-        <span style={{ fontWeight: 600, fontSize: 14, flex: 1 }}>沙盒环境</span>
-        {data?.hasCredentials ? (
-          <Tag color="success" icon={<CircleCheckBig />}>已配置密钥</Tag>
-        ) : (
-          <Tag color="default">未配置密钥</Tag>
-        )}
-        <Switch checked={data?.enabled === true} onChange={toggleEnabled} />
-      </div>
-
-      <div style={{ fontSize: 12, color: "var(--gray-500)", marginBottom: 12 }}>
-        启用后，选择「沙盒」环境的工作区会在 LangSmith 沙盒中运行（需配置 API Key）。未配置或未启用时，沙盒工作区会回退到本机目录。
-      </div>
+    // Same shape as every other settings block — this used to be a second,
+    // slightly different bordered card (radius 10, own header row).
+    <div style={{ marginBottom: 16 }}>
+      <SettingsCard
+        title="沙盒环境"
+        extra={
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {data?.hasCredentials ? (
+              <Tag color="success" icon={<CircleCheckBig />}>已配置密钥</Tag>
+            ) : (
+              <Tag color="default">未配置密钥</Tag>
+            )}
+            <Switch checked={data?.enabled === true} onChange={toggleEnabled} />
+          </div>
+        }
+      >
+        <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)", marginBottom: 14, lineHeight: 1.6 }}>
+          启用后，选择「沙盒」环境的工作区会在 LangSmith 沙盒中运行（需配置 API Key）。未配置或未启用时，沙盒工作区会回退到本机目录。
+        </div>
 
       {/* Provider (fixed to langsmith for now) */}
       <Field label="服务商">
@@ -154,15 +154,16 @@ export function SandboxSettingsSection({ sdk }: Props) {
       </Field>
 
       {/* Actions */}
-      <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-        <Button
-          type="primary" icon={<Save />}
-          loading={saving} onClick={saveDetails}
-        >
-          保存
-        </Button>
-        <Button icon={<RotateCw />} onClick={load}>刷新</Button>
-      </div>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <Button
+            type="primary" icon={<Save />}
+            loading={saving} onClick={saveDetails}
+          >
+            保存
+          </Button>
+          <Button icon={<RotateCw />} onClick={load}>刷新</Button>
+        </div>
+      </SettingsCard>
     </div>
   );
 }

@@ -1,239 +1,781 @@
+/* =============================================================================
+ * Octopus design tokens.
+ *
+ * Two layers live here:
+ *  1. Legacy scales (`--gray-*`, `--main-*`, `--shadow-*`) — the original names are
+ *     kept so the ~200 existing call sites upgrade automatically; only the values
+ *     were re-tuned. The gray ramp is monotonic and the brand green is a single
+ *     emerald hue (it used to mix antd green + Material green).
+ *  2. Semantic tokens (`--bg-*`, `--border-*`, `--text-*`, `--accent*`, `--radius-*`,
+ *     `--shadow-xs..lg`, motion + type scale) — use these in new/edited components.
+ *
+ * Design rule for the accent: the green is a state colour (selected row, focus
+ * ring, running indicator, send button), never a surface. No green-tinted chrome.
+ * ===========================================================================*/
+
+/* Self-hosted Inter (latin variable subset, ~48KB). CJK intentionally stays on the
+ * system stack — a full CJK webfont would cost megabytes. */
+@font-face {
+  font-family: "Inter";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/inter-latin-variable.woff2") format("woff2-variations");
+}
+
 :root {
-  /* ===== Brand colors ===== */
-  --main-color: #237804;
-  --main-700: #237804;
-  --main-600: #389e0d;
-  --main-500: #4caf50;
-  --main-400: #66d66a;
-  --main-200: #a5e8a7;
-  --main-100: #c8f0ca;
-  --main-50: #e6ffe6;
-  --main-20: #f6fff0;
-  --main-10: #fafff5;
-  --main-5: #fcfff5;
+  /* ===== Gray scale (monotonic, light) ===== */
+  --gray-0: #ffffff;      /* canvas / cards */
+  --gray-10: #fbfbfa;     /* sidebar surface, zebra rows */
+  --gray-25: #f6f7f6;     /* code + secondary surface */
+  --gray-50: #f0f1f0;     /* fills: hover, chips, user bubble */
+  --gray-100: #e9eaea;    /* dividers, inline-code background */
+  --gray-150: #e3e4e3;    /* container borders (hairline) */
+  --gray-200: #d5d7d6;    /* strong borders, scrollbar thumb */
+  --gray-300: #b2b5b4;    /* placeholders, disabled */
+  --gray-400: #8a8e8d;    /* decorative icons */
+  --gray-500: #6b6f6e;    /* tertiary text */
+  --gray-600: #565a59;    /* secondary text */
+  --gray-700: #3f4342;
+  --gray-800: #2b2d2c;
+  --gray-900: #1b1d1c;    /* body text */
+  --gray-1000: #0f1110;   /* headings */
 
-  /* ===== Gray scale ===== */
-  --gray-0: #ffffff;
-  --gray-10: #fbfcfc;
-  --gray-25: #f7f9f9;
-  --gray-50: #f2f4f4;
-  --gray-100: #eff2f2;
-  --gray-150: #eef0f0;
-  --gray-200: #dfe1e1;
-  --gray-300: #b6b9b9;
-  --gray-400: #bdbfbf;
-  --gray-500: #979999;
-  --gray-600: #6c6e6e;
-  --gray-700: #4c4d4d;
-  --gray-900: #1e1f1f;
-  --gray-1000: #151616;
+  /* ===== Brand green — one emerald hue, not three ===== */
+  --main-color: #047857;  /* accent text/icons on light (5.1:1 on white) */
+  --main-700: #047857;
+  --main-600: #059669;    /* solid fills; also antd colorPrimary */
+  --main-500: #10b981;
+  --main-400: #34d399;
+  --main-200: #a2e0c9;
+  --main-100: #cdeee1;
+  --main-50: #e6f6ef;
+  --main-20: #eaf8f2;
+  --main-10: #f2fbf7;
+  --main-5: #f7fdfa;
 
-  /* ===== Shadow stack (black at varying opacity) ===== */
-  --shadow-0: rgba(0, 0, 0, 0.02);
-  --shadow-1: rgba(0, 0, 0, 0.05);
-  --shadow-2: rgba(0, 0, 0, 0.08);
-  --shadow-3: rgba(0, 0, 0, 0.12);
+  /* ===== Semantic surfaces ===== */
+  /* The window backdrop behind the chrome. The sidebar sits directly on it and the
+     content region floats above it as a card, so this is deliberately one step away
+     from --bg-canvas in both directions (lighter tint in light, deeper in dark). */
+  --bg-app: #fbfbfa;
+  --bg-canvas: var(--gray-0);
+  --bg-sidebar: var(--bg-app);
+  --bg-elevated: var(--gray-0);   /* cards, modals, composer */
+  --bg-subtle: var(--gray-25);    /* code blocks, secondary panels */
+  --bg-muted: var(--gray-50);     /* fills: user bubble, chips, hover */
+  --bg-hover: var(--gray-50);
+  --bg-overlay: rgba(15, 17, 16, 0.32);
+
+  /* ===== Semantic borders ===== */
+  --border-subtle: var(--gray-100);
+  --border-default: var(--gray-150);
+  --border-strong: var(--gray-200);
+
+  /* ===== Semantic text ===== */
+  --text-primary: var(--gray-900);
+  --text-secondary: var(--gray-600);
+  --text-tertiary: var(--gray-500);
+  --text-disabled: var(--gray-300);
+  --text-inverse: #ffffff;
+
+  /* ===== Accent (state colour only) ===== */
+  --accent: #047857;
+  --accent-solid: #059669;
+  --accent-hover: #047857;
+  --accent-contrast: #ffffff;
+  --accent-soft: #e6f6ef;
+  --accent-ring: rgba(5, 150, 105, 0.16);
 
   /* ===== Error colors ===== */
   --color-error-50: #fff2f0;
   --color-error-100: #ffccc7;
-  --color-error-500: #ff4d4f;
-  --color-error-700: #cf1322;
+  --color-error-200: #ffa39e;
+  --color-error-500: #d92d20;
+  --color-error-700: #b42318;
 
   /* ===== Success colors ===== */
-  --color-success-50: #f6ffed;
-  --color-success-100: #d9f7be;
-  --color-success-500: #52c41a;
-  --color-success-700: #389e0d;
+  --color-success-50: #ecfdf3;
+  --color-success-100: #d1fadf;
+  --color-success-500: #12b76a;
+  --color-success-700: #027a48;
 
   /* ===== Warning colors ===== */
-  --color-warning-50: #fffbe6;
-  --color-warning-100: #ffe58f;
-  --color-warning-500: #faad14;
-  --color-warning-700: #d48806;
+  --color-warning-50: #fffaeb;
+  --color-warning-100: #fef0c7;
+  --color-warning-500: #f79009;
+  --color-warning-700: #b54708;
 
   /* ===== Info colors ===== */
-  --color-info-50: #e6f7ff;
-  --color-info-100: #bae7ff;
-  --color-info-700: #096dd9;
+  --color-info-50: #eff8ff;
+  --color-info-100: #d1e9ff;
+  --color-info-500: #2e90fa;
+  --color-info-700: #175cd3;
 
-  /* ===== Sizes ===== */
+  /* Legacy alias — some components reference --danger-color directly. */
+  --danger-color: var(--color-error-500);
+
+  /* ===== Elevation (layered, not a single black wash) ===== */
+  --shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-sm: 0 1px 3px rgba(16, 24, 40, 0.07), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --shadow-md: 0 4px 14px rgba(16, 24, 40, 0.08), 0 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.14), 0 3px 10px rgba(16, 24, 40, 0.06);
+  /* Legacy single-alpha stack, kept for the few call sites that compose their own. */
+  --shadow-0: rgba(16, 24, 40, 0.04);
+  --shadow-1: rgba(16, 24, 40, 0.06);
+  --shadow-2: rgba(16, 24, 40, 0.10);
+  --shadow-3: rgba(16, 24, 40, 0.16);
+
+  /* ===== Radii ===== */
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-full: 999px;
+
+  /* ===== Motion ===== */
+  --dur-1: 120ms;
+  --dur-2: 160ms;
+  --dur-3: 240ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* ===== Type ===== */
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text",
+    "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Noto Sans SC", Roboto, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --text-2xs: 11px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 22px;
+  --lh-ui: 1.5;
+  --lh-prose: 1.75;
+
+  /* ===== Layout ===== */
   --sidebar-width: 252px;
-  --header-height: 45px;
-
-  /* ===== Typography ===== */
-  font-family: -apple-system, BlinkMacSystemFont, 'Noto Sans SC', Roboto,
-    'HarmonyOS Sans SC', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --sidebar-w: 252px;
+  --sidebar-w-collapsed: 60px;
+  --header-height: 52px;
+  /* Short alias used by the header/page-header components. */
+  --header-h: 52px;
+  --content-max: 760px;
 }
 
 /* =============================================================================
  * Dark theme — applied when <html data-theme="dark"> (set by stores/theme.ts).
- * Only the variables that need to change are redefined; brand hue stays green
- * but is brightened so text-on-background contrast holds on dark surfaces.
- * Gray scale is inverted: --gray-0 (was white) becomes the deepest background,
- * --gray-1000 (was near-black) becomes the lightest text.
+ * Neutral (no green tint) with real separation between surface steps; the accent
+ * brightens so it still reads as green on dark.
  * ===========================================================================*/
 [data-theme="dark"] {
-  /* Gray scale (inverted + tuned for ~AA contrast on dark surfaces) */
-  --gray-0: #151616;     /* primary background */
-  --gray-10: #1a1b1b;
-  --gray-25: #1e1f1f;    /* code block / secondary surface */
-  --gray-50: #232424;    /* card / elevated surface */
-  --gray-100: #2a2b2b;   /* borders / dividers */
-  --gray-150: #303232;
-  --gray-200: #3a3c3c;   /* scrollbar thumb */
-  --gray-300: #4c4e4e;
-  --gray-400: #6c6e6e;
-  --gray-500: #9a9c9c;   /* secondary text */
-  --gray-600: #b8baba;
-  --gray-700: #dadcdc;   /* primary-ish text on muted surfaces */
-  --gray-800: #eef0f0;   /* (was missing in :root — InfoRow relies on it) */
-  --gray-900: #f2f4f4;   /* body text */
-  --gray-1000: #fbfcfc;  /* headings / strong text */
+  --gray-0: #0d0e0e;      /* canvas */
+  --gray-10: #121313;     /* sidebar */
+  --gray-25: #161717;     /* code + secondary surface */
+  --gray-50: #1b1c1c;     /* fills: hover, chips, user bubble */
+  --gray-100: #232424;    /* dividers */
+  --gray-150: #292a2a;    /* container borders */
+  --gray-200: #343636;    /* strong borders, scrollbar */
+  --gray-300: #494c4b;
+  --gray-400: #6d706f;
+  --gray-500: #9a9d9c;
+  --gray-600: #b3b6b5;
+  --gray-700: #cccfce;
+  --gray-800: #dfe2e1;
+  --gray-900: #ecf0ef;    /* body text */
+  --gray-1000: #f7f9f8;
 
-  /* Shadows: stronger black overlays (subtle on white, need weight on dark) */
-  --shadow-0: rgba(0, 0, 0, 0.20);
-  --shadow-1: rgba(0, 0, 0, 0.32);
-  --shadow-2: rgba(0, 0, 0, 0.44);
-  --shadow-3: rgba(0, 0, 0, 0.56);
+  --main-color: #34d399;
+  --main-700: #6ee7b7;
+  --main-600: #34d399;
+  --main-500: #10b981;
+  --main-400: #6ee7b7;
+  --main-200: #1d4a3a;
+  --main-100: #163a2e;
+  --main-50: #12271f;
+  --main-20: #0f1f19;
+  --main-10: #0d1a15;
+  --main-5: #0c1713;
 
-  /* Brand: brighten greens so they read well on dark backgrounds */
-  --main-color: #52c41a;
-  --main-700: #95de64;
-  --main-600: #73d13d;
-  --main-500: #5cb85c;
-  --main-400: #7bd882;
-  --main-200: #2e5e2e;
-  --main-100: #1f4a1f;
-  --main-50: #182d18;
-  --main-20: #15241a;
-  --main-10: #141f18;
-  --main-5: #131d16;
+  /* Backdrop sits one step *deeper* than the content card, so the card reads as
+     raised (in light mode it is one step lighter instead). */
+  --bg-app: #0a0b0b;
+  --bg-elevated: #161717;
+  --bg-subtle: var(--gray-25);
+  --bg-muted: var(--gray-50);
+  --bg-hover: var(--gray-50);
+  --bg-overlay: rgba(0, 0, 0, 0.56);
 
-  /* Semantic: dark backgrounds + light text per antd dark palette convention */
+  --text-inverse: #0d0e0e;
+
+  --accent: #34d399;
+  --accent-solid: #10b981;
+  --accent-hover: #34d399;
+  --accent-contrast: #06281c;
+  --accent-soft: #12271f;
+  --accent-ring: rgba(16, 185, 129, 0.24);
+
   --color-error-50: #2a1215;
-  --color-error-100: #58181c;
+  --color-error-100: #54161b;
+  --color-error-200: #7a2226;
   --color-error-500: #ff7875;
   --color-error-700: #ffa39e;
 
-  --color-success-50: #162312;
-  --color-success-100: #23480f;
-  --color-success-500: #73d13d;
-  --color-success-700: #95de64;
+  --color-success-50: #12261c;
+  --color-success-100: #1b3d2c;
+  --color-success-500: #4ade80;
+  --color-success-700: #86efac;
 
-  --color-warning-50: #2b2111;
-  --color-warning-100: #594214;
-  --color-warning-500: #ffc53d;
-  --color-warning-700: #ffd666;
+  --color-warning-50: #2a1f0f;
+  --color-warning-100: #4a3512;
+  --color-warning-500: #fbbf24;
+  --color-warning-700: #fcd34d;
 
-  --color-info-50: #111d2c;
-  --color-info-100: #15395b;
-  --color-info-700: #69b1ff;
-}
+  --color-info-50: #101d2e;
+  --color-info-100: #15325a;
+  --color-info-500: #60a5fa;
+  --color-info-700: #93c5fd;
 
-/* Let native controls (form inputs, scrollbars) render in dark mode too */
-[data-theme="dark"] {
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 14px rgba(0, 0, 0, 0.55), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.7), 0 3px 10px rgba(0, 0, 0, 0.5);
+  --shadow-0: rgba(0, 0, 0, 0.3);
+  --shadow-1: rgba(0, 0, 0, 0.4);
+  --shadow-2: rgba(0, 0, 0, 0.55);
+  --shadow-3: rgba(0, 0, 0, 0.7);
+
+  /* Native controls (form inputs, scrollbars) follow the OS dark scheme. */
   color-scheme: dark;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  color: var(--gray-900);
-  background: var(--gray-0);
-  font-size: 15px;
-  line-height: 1.6;
+  color: var(--text-primary);
+  background: var(--bg-canvas);
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--lh-ui);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ===== Scrollbar (4px thin) ===== */
-::-webkit-scrollbar { width: 4px; height: 4px; }
+/* ===== Scrollbars: 6px, only visible on the scrollable surface ===== */
+::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--gray-200); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: var(--gray-300); }
+::-webkit-scrollbar-thumb {
+  background: var(--gray-200);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: var(--radius-full);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--gray-300); background-clip: padding-box; }
+::-webkit-scrollbar-corner { background: transparent; }
+* { scrollbar-width: thin; scrollbar-color: var(--gray-200) transparent; }
 
-/* ===== Tool call cards: constrain width so long commands wrap, not overflow =====
-   Ant Design <Collapse> defaults to display:block with no max-width, so a long
-   command line in the header (nowrap spans) inflates the whole card beyond its
-   column. Force the card + collapse chain to respect the parent column width. */
-.tool-call-card { max-width: 100%; min-width: 0; }
-.tool-call-card > .ant-collapse { max-width: 100%; }
-.tool-call-card .ant-collapse-header { max-width: 100%; min-width: 0; }
-.tool-call-card .ant-collapse-header-text { max-width: 100%; min-width: 0; overflow: hidden; }
+::selection { background: color-mix(in srgb, var(--accent-solid) 22%, transparent); }
 
-/* ===== Generating wave animation (shimmer through text) ===== */
+/* ===== Focus: one ring for the whole app ===== */
+:focus-visible {
+  outline: 2px solid var(--accent-solid);
+  outline-offset: 1px;
+}
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-ring);
+}
+
+/* ===== Animations ===== */
 @keyframes waveFlash {
   0% { background-position: 200% center; }
   100% { background-position: -200% center; }
 }
-
-/* Spinning loader (tool rows, message-list running indicator, empty-content
-   placeholder). Previously referenced but never defined — loaders appeared
-   frozen. */
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
-
 @keyframes dotPulse {
-  0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
-  40% { transform: scale(1.1); opacity: 1; }
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50% { opacity: 1; transform: scale(1); }
 }
-
 @keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(10px); }
+  from { opacity: 0; transform: translateY(4px); }
   to { opacity: 1; transform: translateY(0); }
 }
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
 
-/* ===== Shared utility classes ===== */
-.sidebar-item {
+/* =============================================================================
+ * Shared utility classes — used by the hand-rolled surfaces (sidebar rows, tool
+ * rows, option rows) that have no antd equivalent. Keeps hover/focus behaviour in
+ * CSS so it is keyboard-visible and consistent, instead of JS onMouseEnter swaps.
+ * ===========================================================================*/
+
+/* Interactive row: 32px, radius 8, neutral hover, no colour shift. */
+.ui-row {
   display: flex;
   align-items: center;
-  padding: 0 10px;
-  height: 36px;
-  border-radius: 8px;
+  gap: 8px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 450;
-  color: var(--gray-700);
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
 }
-.sidebar-item:hover {
-  background-color: var(--main-20);
-  color: var(--main-color);
+.ui-row:hover { background: var(--bg-hover); color: var(--text-primary); }
+.ui-row.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
 }
-.sidebar-item.active {
-  background-color: color-mix(in srgb, var(--main-color) 6%, var(--gray-0));
-  color: var(--main-color);
+.ui-row[aria-disabled="true"] { color: var(--text-disabled); pointer-events: none; }
+
+/* Icon-only square button (header actions, composer actions). */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+.icon-btn.is-active { background: var(--accent-soft); color: var(--accent); }
+
+/* Sidebar / list section label. The explicit line-height keeps the box height
+   deterministic, so a trailing icon can centre on the text reliably. */
+.section-label {
+  display: inline-block;
+  font-size: var(--text-2xs);
   font-weight: 600;
+  letter-spacing: 0.06em;
+  line-height: 16px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
 }
 
-/* ===== Thread list item: reveal more-actions only on row hover ===== */
-.thread-more { opacity: 0; transition: opacity 0.15s ease; }
-.thread-item:hover .thread-more { opacity: 1; }
+/* Neutral pill (badges, counts). */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-full);
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
 
-/* ===== Collapsible rows: reveal the expand/collapse arrow on hover (fade).
-   Applies to tool-call rows and tool-group bars. The arrow sits right after
-   the header content (antd expandIconPosition="end" with a non-stretching
-   header), and stays hidden until the user hovers the row — unless the row is
-   already expanded, in which case the arrow stays visible so the user can see
-   how to collapse it. Fade in/out via opacity transition. */
+/* =============================================================================
+ * Panel — a bordered, flat section: the shape used for grouped blocks *inside* the
+ * content card (settings groups, extension cards).
+ *
+ * Deliberately has no shadow: the content region is the app's only elevated
+ * surface, so anything nested in it stays flat. Previously the app carried three
+ * near-identical card implementations that had drifted apart (radius 10/12/14, two
+ * backgrounds, with and without a shadow); they now all use this class.
+ * ===========================================================================*/
+.panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* Keyboard hint chip. */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-xs);
+  background: var(--bg-subtle);
+  color: var(--text-tertiary);
+  font-family: var(--font-sans);
+  font-size: var(--text-2xs);
+  line-height: 1;
+}
+
+.mono { font-family: var(--font-mono); }
+.tnum { font-variant-numeric: tabular-nums; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ===== Thread list: the trailing 28px slot cross-fades timestamp ⇄ actions =====
+   One fixed-width slot holds both, so the title never reflows on hover. */
+.thread-slot {
+  position: relative;
+  flex-shrink: 0;
+  width: 28px;
+  height: 24px;
+}
+.thread-slot > * {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  transition: opacity var(--dur-1) var(--ease);
+}
+.thread-time { opacity: 1; color: var(--text-disabled); font-size: var(--text-2xs); line-height: 1; white-space: nowrap; }
+/* `pointer-events: none` while hidden — an invisible-but-clickable control would
+   swallow clicks meant for the row (here: the timestamp area). */
+.thread-more { opacity: 0; pointer-events: none; }
+.thread-item:hover .thread-time,
+.thread-item:focus-within .thread-time { opacity: 0; }
+.thread-item:hover .thread-more,
+.thread-item:focus-within .thread-more { opacity: 1; pointer-events: auto; }
+.thread-more:hover { color: var(--text-primary); }
+
+/* ===== Collapsible rows: reveal the expand arrow on hover =====
+   Applies to tool-call rows and tool-group bars. The arrow sits after the header
+   content (antd expandIconPosition="end"), and stays hidden until hover — unless
+   the row is already expanded, so the collapse affordance stays visible. */
 .collapsible-row .ant-collapse-arrow {
   opacity: 0;
-  transition: opacity 0.15s ease;
-  /* Keep the arrow in flow (not display:none) so the fade works and layout
-     doesn't shift on hover. */
+  transition: opacity var(--dur-1) var(--ease);
 }
 .collapsible-row:hover .ant-collapse-arrow,
-.collapsible-row.is-expanded .ant-collapse-arrow {
-  opacity: 1;
+.collapsible-row.is-expanded .ant-collapse-arrow { opacity: 1; }
+.collapsible-row .ant-collapse-header-text { flex: 0 1 auto; }
+/* Whole-row hover fill so a tool row reads as one clickable target rather than
+   only its text label being live. */
+.collapsible-row .ant-collapse-header {
+  border-radius: var(--radius-sm);
+  transition: background-color var(--dur-1) var(--ease);
 }
-/* Ensure the arrow hugs the header content instead of being pushed to the row's
-   right edge. antd's header-text defaults to flex:auto (stretches), which would
-   shove the arrow all the way right; override so it only takes content width. */
-.collapsible-row .ant-collapse-header-text {
-  flex: 0 1 auto;
+.collapsible-row .ant-collapse-header:hover { background: var(--bg-hover); }
+
+/* antd rounds the last collapse item's header as `0 0 lg lg` with a four-class
+   selector (`:where(...).ant-collapse > .ant-collapse-item:last-child >
+   .ant-collapse-header`), which beat the rule above and left these rows with square
+   top corners and round bottom ones. This selector is five classes deep, so it wins
+   on specificity rather than needing `!important`. */
+.trace-block .collapsible-row .ant-collapse > .ant-collapse-item > .ant-collapse-header {
+  border-radius: var(--radius-sm);
+}
+
+/* =============================================================================
+ * Agent trace — the execution log (reasoning + tool calls) of one turn.
+ *
+ * Folded, a block is a single quiet line. Expanded, the entries hang off a
+ * hairline rail. The rail is drawn by `.trace-body` at the dot column's centre
+ * (x = 3px) and the dots are ordinary flex children sitting at x = 0..6, so the
+ * dots are *geometrically* on the line — the previous version positioned both with
+ * hand-computed negative offsets from two different containing blocks, which left
+ * the summary dots 17px off the rail.
+ * ===========================================================================*/
+.trace-block { display: flex; flex-direction: column; }
+
+/* Folded header: chevron in the gutter, label at the same 16px inset as the
+   entries' text, so toggling never shifts the text. The whole line is the target. */
+.trace-summary {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  text-align: left;
+  transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.trace-summary:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.trace-summary .chev {
+  flex: 0 0 11px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-disabled);
+}
+
+/* The rail: one continuous line spanning the entries, inset at both ends so it
+   connects the first and last dots instead of overshooting them. */
+.trace-body {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+.trace-body::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 12px;
+  bottom: 12px;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.trace-entry {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.trace-entry-body { flex: 1; min-width: 0; }
+
+.trace-dot {
+  position: relative;
+  z-index: 1; /* paints the dot over the rail */
+  flex: 0 0 6px;
+  width: 6px;
+  height: 6px;
+  /* Centres the dot on the row's first text line (header text centre ≈ 15px). */
+  margin-top: 12px;
+  border-radius: var(--radius-full);
+  background: var(--border-strong);
+}
+.trace-dot.is-running {
+  background: var(--accent-solid);
+  animation: dotPulse 1.4s var(--ease) infinite;
+}
+.trace-dot.is-error { background: var(--color-error-500); }
+
+/* Row header: hover fills the row so it reads as clickable. */
+.trace-head {
+  border-radius: var(--radius-sm);
+  transition: background-color var(--dur-1) var(--ease);
+}
+.trace-head:hover { background: var(--bg-hover); }
+
+/* Trailing chevron on rows that open a panel — only on hover, so the resting
+   state of the trace stays quiet. */
+.row-chevron { opacity: 0; pointer-events: none; transition: opacity var(--dur-1) var(--ease); }
+.trace-head:hover .row-chevron,
+.focus-ring:focus-visible .row-chevron { opacity: 1; pointer-events: auto; }
+
+/* Per-message actions (copy, …) — revealed on hover/focus of the message row. */
+.msg-actions { opacity: 0; pointer-events: none; transition: opacity var(--dur-1) var(--ease); }
+.msg-row:hover .msg-actions,
+.msg-row:focus-within .msg-actions { opacity: 1; pointer-events: auto; }
+
+/* =============================================================================
+ * Composer (chat input). One elevated surface with a focus ring, plus the
+ * drag-and-drop state. The send button is the app's single solid accent control.
+ * ===========================================================================*/
+.composer {
+  transition: border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease),
+    background-color var(--dur-2) var(--ease);
+}
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--accent-solid) 55%, var(--border-default));
+  box-shadow: var(--shadow-md), 0 0 0 3px var(--accent-ring);
+}
+.composer.is-dragging {
+  border-color: var(--accent-solid);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--accent-solid) 4%, var(--bg-elevated));
+}
+.composer-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border-radius: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  /* Token-based so it is legible in dark mode (was a hard-coded white wash). */
+  background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  pointer-events: none;
+}
+
+.send-btn {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border: none;
+  padding: 0;
+  border-radius: var(--radius-full);
+  background: var(--accent-solid);
+  color: var(--accent-contrast);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+  transition: background-color var(--dur-1) var(--ease), transform var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+.send-btn:hover:not(:disabled) { background: var(--accent-hover); }
+.send-btn:active:not(:disabled) { transform: scale(0.95); }
+.send-btn:disabled {
+  background: var(--bg-muted);
+  color: var(--text-disabled);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+/* Stop state: neutral, so "stop" doesn't read as the primary action. */
+.send-btn.is-stop { background: var(--text-primary); color: var(--bg-canvas); }
+.send-btn.is-stop:hover:not(:disabled) { background: var(--text-secondary); }
+
+/* Composer toolbar selects behave like chips: flat until hovered. */
+.chip-select .ant-select-selector { border-radius: var(--radius-sm) !important; }
+.chip-select:hover .ant-select-selector { background: var(--bg-hover) !important; }
+
+/* Attachment thumbnails in the transcript: slight lift on hover to signal zoom. */
+.attachment-thumb { transition: transform var(--dur-2) var(--ease-out), box-shadow var(--dur-2) var(--ease-out); }
+.attachment-thumb:hover { transform: scale(1.012); box-shadow: var(--shadow-md); }
+
+/* Suggestion cards on the start screen. */
+.suggestion-card:hover {
+  border-color: color-mix(in srgb, var(--accent-solid) 45%, var(--border-default));
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+}
+.suggestion-card:hover span:first-child {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* Selectable option rows in the AskPanel (approvals, single-select answers):
+   one row shape for every "pick one" decision in the app. */
+.option-row {
+  transition: background-color var(--dur-1) var(--ease), border-color var(--dur-1) var(--ease);
+}
+.option-row:hover {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+}
+.option-row.is-selected {
+  background: var(--accent-soft);
+  border-color: var(--accent-solid);
+}
+.option-row.is-selected:hover { background: var(--accent-soft); }
+.option-row.is-danger { border-color: var(--color-error-500); background: var(--color-error-50); }
+.option-row.is-danger:hover { background: var(--color-error-50); }
+
+/* Primary button inside the AskPanel footer. */
+.ask-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 14px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent-solid);
+  color: var(--accent-contrast);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease);
+}
+.ask-primary:hover:not(:disabled) { background: var(--accent-hover); }
+.ask-primary:disabled { background: var(--bg-muted); color: var(--text-disabled); cursor: not-allowed; }
+
+.ask-ghost {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-family: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
+}
+.ask-ghost:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* =============================================================================
+ * Page header (settings / extensions): sticky + translucent so content scrolls
+ * under it. The blur is confined to this thin bar — never the transcript.
+ * ===========================================================================*/
+.page-header {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  flex-shrink: 0;
+  height: var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 20px;
+  background: color-mix(in srgb, var(--bg-canvas) 88%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.page-header-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+/* Leading icon tile on settings/extension rows. */
+.settings-row-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-muted);
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  flex-shrink: 0;
+}
+
+/* ===== Settings / extension list rows =====
+   The container draws the hairline BETWEEN rows instead of each row drawing its
+   own bottom border. A row that sets `border-bottom` inline can never drop its
+   trailing divider — inline styles outrank stylesheet rules, so a
+   `:last-child { border-bottom: none }` rule could not take effect. */
+.settings-rows {
+  display: flex;
+  flex-direction: column;
+}
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  min-height: 64px;
+}
+.settings-rows > .settings-row + .settings-row {
+  border-top: 1px solid var(--border-subtle);
 }
 
 /* ===== Lucide icons: align with antd's 1em sizing convention ===== */
@@ -241,17 +783,16 @@ body {
    antd icons use 1em so they scale with font-size. Forcing lucide to 1em keeps
    the two libraries visually consistent when icons are passed into antd
    components (Button icon=, Menu items icon:, etc.). */
-.lucide {
-  width: 1em;
-  height: 1em;
-}
+.lucide { width: 1em; height: 1em; }
+.lucide-loader-circle { animation: spin 1s linear infinite; }
+.lucide-spin { animation: spin 1s linear infinite; }
 
-/* antd's LoadingOutlined spins on its own; lucide's LoaderCircle is a static
-   SVG, so we re-add the spin animation here. */
-.lucide-loader-circle {
-  animation: lucide-spin 1s linear infinite;
-}
-@keyframes lucide-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
+/* =============================================================================
+ * antd adjustments — the few details antd's tokens can't express.
+ * Everything else is configured in styles/antdTheme.ts.
+ * ===========================================================================*/
+.ant-segmented .ant-segmented-thumb,
+.ant-segmented .ant-segmented-item-selected { box-shadow: var(--shadow-xs); }
+.ant-segmented .ant-segmented-item-label { font-size: var(--text-sm); }
+.ant-collapse-arrow { font-size: 12px !important; color: var(--text-disabled) !important; }
+.ant-select-item-option-content { font-size: var(--text-sm); }

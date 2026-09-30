@@ -68,13 +68,13 @@ export function SlashCommandMenu({
         left: 0,
         right: 0,
         bottom: "100%",
-        marginBottom: 6,
+        marginBottom: 8,
         maxHeight: 320,
         overflowY: "auto",
-        background: "var(--gray-0)",
-        border: "1px solid var(--gray-150)",
-        borderRadius: 12,
-        boxShadow: "0 8px 24px var(--shadow-2), 0 2px 6px var(--shadow-1)",
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border-default)",
+        borderRadius: "var(--radius-lg)",
+        boxShadow: "var(--shadow-lg)",
         zIndex: 100,
         padding: 6,
       }}
@@ -96,7 +96,7 @@ export function SlashCommandMenu({
       {promptCmds.length > 0 && (
         <>
           {systemCmds.length > 0 && (
-            <div style={{ borderTop: "1px solid var(--gray-100)", margin: "4px 0" }} />
+            <div style={{ borderTop: "1px solid var(--border-subtle)", margin: "4px 0" }} />
           )}
           <CommandGroup
             label="自定义"
@@ -135,10 +135,10 @@ function CommandGroup({
     <div>
       <div
         style={{
-          padding: "5px 10px 3px",
-          fontSize: 10,
+          padding: "6px 10px 4px",
+          fontSize: "var(--text-2xs)",
           fontWeight: 600,
-          color: "var(--gray-400)",
+          color: "var(--text-tertiary)",
           letterSpacing: "0.08em",
           textTransform: "uppercase",
         }}
@@ -165,22 +165,20 @@ function CommandGroup({
               gap: 10,
               padding: "7px 10px",
               cursor: "pointer",
-              borderRadius: 7,
-              background: isActive
-                ? "color-mix(in srgb, var(--main-color) 9%, var(--gray-0))"
-                : "transparent",
-              transition: "background-color 0.12s ease",
+              borderRadius: "var(--radius-sm)",
+              background: isActive ? "var(--bg-hover)" : "transparent",
+              transition: "background-color var(--dur-1) var(--ease)",
             }}
           >
             {/* Command name — the primary identifier */}
             <span
+              className="mono"
               style={{
-                fontSize: 13,
+                fontSize: "var(--text-sm)",
                 fontWeight: 500,
-                color: isActive ? "var(--main-color)" : "var(--gray-1000)",
+                color: isActive ? "var(--accent)" : "var(--gray-1000)",
                 lineHeight: 1.2,
                 flexShrink: 0,
-                fontVariantNumeric: "tabular-nums",
               }}
             >
               /{cmd.name}
@@ -190,8 +188,8 @@ function CommandGroup({
             {cmd.description && (
               <span
                 style={{
-                  fontSize: 12,
-                  color: "var(--gray-500)",
+                  fontSize: "var(--text-xs)",
+                  color: "var(--text-tertiary)",
                   lineHeight: 1.2,
                   whiteSpace: "nowrap",
                   overflow: "hidden",
@@ -209,11 +207,11 @@ function CommandGroup({
               <span
                 style={{
                   flexShrink: 0,
-                  fontSize: 10,
+                  fontSize: "var(--text-2xs)",
                   padding: "1px 6px",
-                  borderRadius: 4,
-                  color: "var(--gray-500)",
-                  background: "var(--gray-50)",
+                  borderRadius: "var(--radius-xs)",
+                  color: "var(--text-tertiary)",
+                  background: "var(--bg-subtle)",
                   lineHeight: 1.4,
                 }}
               >

@@ -1,14 +1,15 @@
-import { Input, Button, Tooltip, Select, Spin } from "antd";
+import { Input, Tooltip, Select, Spin } from "antd";
 import {
   ArrowUp, Square,
   FileWarning,
   Plus,
-  Zap, X, FileText,
+  X, FileText, Upload,
 } from "lucide-react";
 import { ACCESS_MODES, MODE_ORDER, type AccessMode } from "../constants.js";
 import { SlashCommandMenu } from "./SlashCommandMenu.js";
 import type { SlashCommandEntry } from "@octopus/tentacle";
-import { useState, useCallback, useRef, useEffect } from "react";
+import { useState, useCallback, useRef } from "react";
+import { openImage } from "../../../stores/lightbox.js";
 
 const { TextArea } = Input;
 
@@ -29,6 +30,25 @@ function formatBytes(n: number): string {
   return `${(n / 1048576).toFixed(1)}MB`;
 }
 
+/** Mode glyph in a flex box of its own. The lucide svg is an inline element, so
+ *  dropped straight into the chip it sits on the text baseline and reads a
+ *  couple of pixels high; a flex box centres it on the text instead. */
+function ModeIcon({ mode }: { mode: { icon: React.ReactNode; dangerous: boolean } }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        lineHeight: 1,
+        color: mode.dangerous ? "var(--accent)" : "var(--text-secondary)",
+      }}
+    >
+      {mode.icon}
+    </span>
+  );
+}
+
 /** One attachment chip: image thumbnail (click to enlarge) or file card,
  *  hover-revealed remove, upload spinner / error retry states. */
 function AttachmentChip({
@@ -45,37 +65,47 @@ function AttachmentChip({
         position: "relative", flexShrink: 0,
         display: "flex", alignItems: "center", gap: 6,
         height: 46, padding: isImage ? 0 : "4px 8px 4px 6px",
-        borderRadius: 8,
-        border: att.status === "error" ? "1px solid var(--danger-color, #f5222d)" : "1px solid var(--gray-150)",
-        background: "var(--gray-0)",
+        borderRadius: "var(--radius-md)",
+        border: att.status === "error"
+          ? "1px solid var(--color-error-500)"
+          : "1px solid var(--border-default)",
+        background: "var(--bg-elevated)",
         overflow: "hidden",
       }}
-      className="attachment-chip"
     >
       {isImage && att.previewUrl ? (
         <img
           src={att.previewUrl}
           alt={att.name}
-          style={{ width: 58, height: 46, objectFit: "cover", borderRadius: 8, display: "block", cursor: "zoom-in" }}
-          onClick={() => window.open(att.previewUrl, "_blank")}
+          className="attachment-thumb"
+          style={{
+            width: 58, height: 46, objectFit: "cover",
+            borderRadius: "var(--radius-md)", display: "block", cursor: "zoom-in",
+          }}
+          onClick={() => openImage(att.previewUrl!, { alt: att.name, downloadName: att.name })}
         />
       ) : (
         <>
           {att.status === "error"
-            ? <FileWarning size={18} style={{ color: "var(--danger-color, #f5222d)", flexShrink: 0 }} />
-            : <FileText size={18} style={{ color: "var(--gray-600)", flexShrink: 0 }} />}
+            ? <FileWarning size={18} style={{ color: "var(--color-error-500)", flexShrink: 0 }} />
+            : <FileText size={18} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />}
           <div style={{ display: "flex", flexDirection: "column", minWidth: 0, maxWidth: 150 }}>
-            <span style={{ fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            <span style={{ fontSize: "var(--text-xs)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {att.name}
             </span>
-            <span style={{ fontSize: 11, color: "var(--gray-500, #999)" }}>
+            <span className="tnum" style={{ fontSize: "var(--text-2xs)", color: "var(--text-tertiary)" }}>
               {att.status === "error" ? "上传失败" : formatBytes(att.size)}
             </span>
           </div>
         </>
       )}
       {att.status === "uploading" && (
-        <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(255,255,255,0.6)", borderRadius: 8 }}>
+        <div style={{
+          position: "absolute", inset: 0,
+          display: "flex", alignItems: "center", justifyContent: "center",
+          background: "color-mix(in srgb, var(--bg-elevated) 70%, transparent)",
+          borderRadius: "var(--radius-md)",
+        }}>
           <Spin size="small" />
         </div>
       )}
@@ -89,13 +119,14 @@ function AttachmentChip({
             else onRemove(att.id);
           }}
           style={{
-            position: "absolute", top: 2, right: 2,
-            width: 16, height: 16, borderRadius: "50%",
+            position: "absolute", top: 3, right: 3,
+            width: 17, height: 17, borderRadius: "50%",
             border: "none", padding: 0, cursor: "pointer",
             display: "flex", alignItems: "center", justifyContent: "center",
-            background: "rgba(0,0,0,0.55)", color: "#fff",
+            background: "color-mix(in srgb, var(--gray-1000) 62%, transparent)",
+            color: "#fff",
+            fontSize: 11, lineHeight: 1,
           }}
-          className="attachment-chip-x"
         >
           {att.status === "error" ? "↻" : <X size={10} />}
         </button>
@@ -105,19 +136,18 @@ function AttachmentChip({
 }
 
 /**
- * The shared input bar — a bordered card with a textarea on top and a bottom
- * toolbar row (attachments popover, access-mode select, model select, send/stop
- * button).
+ * The shared composer — an elevated card with a textarea on top and a bottom
+ * toolbar row (attach, access-mode chip, model chip, send/stop button).
  *
- * This component is reused in two places: the start screen and the bottom
- * input slot. It owns NO state — everything (text, busy, accessMode, model,
+ * This component is reused in two places: the start screen and the floating
+ * bottom slot. It owns NO state — everything (text, busy, accessMode, model,
  * attachments, handlers) is passed in via props so the parent (Chat.tsx)
  * stays the single source of truth for input state.
  *
  * Attachments enter three ways (opencode parity): paste into the textarea,
- * drag & drop onto the card, and the + popover's two pickers (image / any
- * file). The hidden inputs are rendered here and triggered programmatically;
- * the actual upload state machine lives in useChat.addFiles.
+ * drag & drop onto the card, and the + button's file picker. The hidden input
+ * is rendered here and triggered programmatically; the actual upload state
+ * machine lives in useChat.addFiles.
  */
 export function InputBar({
   text,
@@ -162,12 +192,6 @@ export function InputBar({
   onSlashSelect: (cmd: SlashCommandEntry) => void;
   onSystemCommand: (cmd: SlashCommandEntry) => void;
 }) {
-  const iconBtnStyle: React.CSSProperties = {
-    height: 28, borderRadius: 8, flexShrink: 0,
-    color: "var(--gray-600)", transition: "color 0.2s ease",
-    display: "flex", alignItems: "center",
-  };
-
   // ---- Slash-command state ----
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
   const [slashQuery, setSlashQuery] = useState("");
@@ -255,6 +279,7 @@ export function InputBar({
 
   const hasReadyAttachment = attachments.some((a) => a.status === "ready");
   const uploadingCount = attachments.filter((a) => a.status === "uploading").length;
+  const canSend = (!text.trim() && !hasReadyAttachment) || uploadingCount > 0;
 
   return (
     <div
@@ -263,14 +288,15 @@ export function InputBar({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      className={`composer${dragging ? " is-dragging" : ""}`}
       style={{
         position: "relative",
         display: "flex", flexDirection: "column",
-        background: "var(--gray-25)",
-        border: dragging ? "2px dashed var(--main-500)" : "1px solid var(--gray-150)",
-        borderRadius: 13, padding: dragging ? "9px 9px 7px" : "10px 10px 8px",
-        boxShadow: "0 2px 8px var(--shadow-1)",
-        transition: "box-shadow 0.3s ease, border-color 0.15s ease",
+        background: "var(--bg-elevated)",
+        border: "1px solid var(--border-default)",
+        borderRadius: "var(--radius-lg)",
+        padding: "10px 10px 8px",
+        boxShadow: "var(--shadow-md)",
       }}
     >
       {/* Slash-command autocomplete menu (above the textarea) */}
@@ -283,38 +309,9 @@ export function InputBar({
 
       {/* Drop overlay */}
       {dragging && (
-        <div style={{
-          position: "absolute", inset: 0, zIndex: 5, borderRadius: 13,
-          display: "flex", alignItems: "center", justifyContent: "center",
-          background: "rgba(255,255,255,0.85)", pointerEvents: "none",
-          fontSize: 14, color: "var(--main-600, #16a34a)", fontWeight: 500,
-        }}>
+        <div className="composer-drop">
+          <Upload size={15} />
           释放以添加附件
-        </div>
-      )}
-
-      {/* High-privilege banner: surfaces the risk whenever an autonomous mode
-          is armed so the user knows changes will apply without per-step
-          approval. `auto` still redirects shell file-writes to edit/write_file;
-          `full` runs everything unchecked, including those. */}
-      {accessMode === "auto" && !busy && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 6,
-          fontSize: 12, color: "var(--main-color)",
-          padding: "2px 6px", marginBottom: 6,
-          background: "var(--main-50)", borderRadius: 6,
-        }}>
-          <Zap /> 自动模式：将直接执行文件变更，不再逐步确认
-        </div>
-      )}
-      {accessMode === "full" && !busy && (
-        <div style={{
-          display: "flex", alignItems: "center", gap: 6,
-          fontSize: 12, color: "var(--danger-color, #f5222d)",
-          padding: "2px 6px", marginBottom: 6,
-          background: "rgba(245, 34, 45, 0.08)", borderRadius: 6,
-        }}>
-          <Zap /> 完全控制：连安全命令也将自动执行，不再审核，请谨慎
         </div>
       )}
 
@@ -331,7 +328,7 @@ export function InputBar({
         </div>
       )}
 
-      {/* Textarea (taller) */}
+      {/* Textarea */}
       <TextArea
         value={text} onChange={(e) => handleTextChange(e.target.value)}
         onKeyDown={onKey}
@@ -341,8 +338,8 @@ export function InputBar({
         disabled={busy}
         variant="borderless"
         style={{
-          flex: 1, resize: "none", fontSize: 15, fontFamily: "inherit",
-          lineHeight: 1.5, padding: "2px 4px", background: "transparent",
+          flex: 1, resize: "none", fontSize: "var(--text-md)", fontFamily: "inherit",
+          lineHeight: 1.6, padding: "2px 4px", background: "transparent",
         }}
         autoFocus
       />
@@ -355,12 +352,17 @@ export function InputBar({
         {/* Left group: + attachments (unified picker — images, docs, anything),
             access mode */}
         <Tooltip title="添加附件（图片 / 文件）" mouseEnterDelay={0.8}>
-          <Button type="text" size="small"
-            icon={<Plus />}
+          <button
+            type="button"
+            className="icon-btn focus-ring"
+            aria-label="添加附件"
             onClick={() => attachInputRef.current?.click()}
-            style={{ ...iconBtnStyle }}
-            className="hover-green"
-          />
+            style={{ width: 28, height: 28 }}
+          >
+            <span style={{ display: "flex", fontSize: 16 }}>
+              <Plus />
+            </span>
+          </button>
         </Tooltip>
 
         {/* Access mode — icon in the trigger, two-line (name + hint) options,
@@ -368,17 +370,16 @@ export function InputBar({
         <Tooltip title="Shift+Tab 切换模式" mouseEnterDelay={0.8}>
           <Select<AccessMode>
             size="small" variant="borderless"
+            className="chip-select"
             value={accessMode}
             onChange={(v) => setAccessMode(v)}
-            style={{ minWidth: 110, fontSize: 12 }}
+            style={{ minWidth: 104, fontSize: "var(--text-xs)" }}
             popupMatchSelectWidth={false}
             labelRender={(p) => {
               const m = ACCESS_MODES[p.value as AccessMode];
               return (
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ color: m.dangerous ? "var(--main-color)" : "var(--gray-600)" }}>
-                    {m.icon}
-                  </span>
+                  <ModeIcon mode={m} />
                   {m.label}
                 </span>
               );
@@ -386,13 +387,13 @@ export function InputBar({
             optionRender={(opt) => {
               const m = ACCESS_MODES[opt.value as AccessMode];
               return (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "2px 0" }}>
-                  <span style={{ color: m.dangerous ? "var(--main-color)" : "var(--gray-600)" }}>
-                    {m.icon}
-                  </span>
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontSize: 13 }}>{m.label}</span>
-                    <span style={{ fontSize: 11, color: "var(--gray-600)" }}>{m.hint}</span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <ModeIcon mode={m} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                    <span style={{ fontSize: "var(--text-sm)", lineHeight: 1.5 }}>{m.label}</span>
+                    <span style={{ fontSize: "var(--text-2xs)", lineHeight: 1.45, color: "var(--text-tertiary)" }}>
+                      {m.hint}
+                    </span>
                   </div>
                 </div>
               );
@@ -407,9 +408,10 @@ export function InputBar({
         {/* Right group: model + send */}
         <Select
           size="small" variant="borderless"
+          className="chip-select"
           value={selectedModel ?? "__default__"}
           onChange={(v) => setSelectedModel(v === "__default__" ? null : v)}
-          style={{ width: 150, fontSize: 12 }}
+          style={{ width: 148, fontSize: "var(--text-xs)" }}
           popupMatchSelectWidth={false}
           options={[
             { label: "默认模型", value: "__default__" },
@@ -417,31 +419,16 @@ export function InputBar({
           ]}
         />
 
-        <Tooltip title={busy ? "停止回答" : uploadingCount > 0 ? "附件上传中…" : ""}>
-          <Button
-            type="text" shape="circle"
-            icon={busy ? <Square size={14} /> : <ArrowUp />}
+        <Tooltip title={busy ? "停止回答" : canSend ? "" : "发送"}>
+          <button
+            type="button"
+            className={`send-btn focus-ring${busy ? " is-stop" : ""}`}
+            aria-label={busy ? "停止回答" : "发送"}
             onClick={busy ? onStop : onSend}
-            disabled={(!text.trim() && !hasReadyAttachment && !busy) || uploadingCount > 0}
-            style={{
-              width: 32, height: 32, flexShrink: 0, border: "none",
-              background: "var(--main-500)", color: "var(--gray-0)",
-              boxShadow: "0 2px 6px var(--shadow-2)",
-              transition: "all 0.2s ease",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              padding: 0,
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "var(--main-color)";
-              e.currentTarget.style.color = "var(--gray-0)";
-              e.currentTarget.style.boxShadow = "0 4px 8px var(--shadow-3)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "var(--main-500)";
-              e.currentTarget.style.color = "var(--gray-0)";
-              e.currentTarget.style.boxShadow = "0 2px 6px var(--shadow-2)";
-            }}
-          />
+            disabled={!busy && canSend}
+          >
+            {busy ? <Square size={13} /> : <ArrowUp size={16} />}
+          </button>
         </Tooltip>
       </div>
 

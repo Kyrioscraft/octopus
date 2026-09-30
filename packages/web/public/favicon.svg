@@ -1,24 +1,24 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none" role="img" aria-label="Octopus favicon">
   <defs>
-    <linearGradient id="brandGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#237804"/>
-      <stop offset="100%" stop-color="#52c41a"/>
+    <linearGradient id="fav" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0A7B5B"/>
+      <stop offset="100%" stop-color="#00E6A7"/>
     </linearGradient>
   </defs>
 
-  <!-- Tentacles (geometric, uniform stroke, rounded caps) -->
-  <g fill="none" stroke="url(#brandGrad)" stroke-width="2.4" stroke-linecap="round">
-    <path d="M 10 19 Q 6 25 5 28"/>
-    <path d="M 16 20 Q 16 26 16 28.5"/>
-    <path d="M 22 19 Q 26 25 27 28"/>
-  </g>
+  <!-- Full-bleed gradient circle: guaranteed contrast on light/dark tab bars -->
+  <circle cx="48" cy="48" r="48" fill="url(#fav)"/>
 
-  <!-- Head: geometric dome outline (open bottom) -->
-  <path d="M 5 13
-           A 11 11 0 0 1 27 13
-           L 27 16
-           Q 27 19 24 19
-           L 8 19
-           Q 5 19 5 16 Z"
-        fill="url(#brandGrad)"/>
+  <!-- octopus-icon-mono.svg geometry, untouched; scaled 1.25, white -->
+  <g transform="translate(48 48.5) scale(1.25) translate(-48 -48.5)">
+    <g stroke="#FFFFFF" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M31 51C31 35 38 25 48 25C58 25 65 35 65 51C65 53.5 63 55 60.5 55C56 56.5 40 56.5 35.5 55C33 55 31 53.5 31 51Z"/>
+      <path d="M33 55C27 60 23 67 25 73"/>
+      <path d="M42 55C41 62 37.5 67 33 70.5"/>
+      <path d="M54 55C55 62 58.5 67 63 70.5"/>
+      <path d="M63 55C69 60 73 67 71 73"/>
+    </g>
+    <circle cx="42.5" cy="41.5" r="2.7" fill="#FFFFFF"/>
+    <circle cx="53.5" cy="41.5" r="2.7" fill="#FFFFFF"/>
+  </g>
 </svg>

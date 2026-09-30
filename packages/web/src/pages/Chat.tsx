@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
-import { Button, Spin } from "antd";
+import { Spin } from "antd";
 import { useSearchParams } from "react-router-dom";
 import { OctopusClient } from "@octopus/tentacle";
 import { useChatStore } from "../stores/chat.js";
@@ -146,10 +146,10 @@ export function ChatPage() {
         subagents={chat.allSubagents}
       />
 
-      {/* Body — horizontal flex: the LEFT column (messages + input bar stacked)
+      {/* Body — horizontal flex: the LEFT column (transcript + floating composer)
           and the RIGHT column (companion panel) sit side by side below the header. */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
           <div ref={scrollContainerRef} style={{ flex: 1, overflowY: "auto", overflowX: "hidden", position: "relative" }}>
             {chat.loading ? (
               // Thread switch in flight — the list was optimistically blanked;
@@ -175,53 +175,59 @@ export function ChatPage() {
 
           </div>
 
-          {/* Bottom input bar (only when messages exist). Lives inside the LEFT
-              column so its width shrinks with the message list when the
+          {/* Floating composer (only when messages exist). It overlays the bottom
+              of the transcript — which fades out beneath it via the gradient —
+              instead of occupying its own flex row. Absolute (rather than sticky)
+              so messages genuinely scroll *under* the surface; MessageList adds
+              the matching bottom inset so the last line can clear it. Lives
+              inside the LEFT column so it shrinks with the transcript when the
               companion panel opens. */}
           {!chat.showStart && !chat.loading && (
             <div style={{
-              padding: "12px 20px",
-              background: "var(--gray-0)", flexShrink: 0,
-              position: "relative",
+              position: "absolute",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 5,
+              padding: "0 24px 14px",
+              background:
+                "linear-gradient(to top, var(--bg-canvas) 72%, transparent 100%)",
+              // Let clicks through the gradient's transparent region.
+              pointerEvents: "none",
             }}>
-              {/* "Back to bottom" pill — floats centered just above the input
-                  bar when the user has scrolled up. Clicking it smoothly
-                  scrolls back down and re-enables auto-follow. */}
+              {/* "Back to bottom" pill — floats centered just above the composer
+                  when the user has scrolled up. */}
               {!isStuck && (
-                <Button
-                  size="small"
+                <button
+                  type="button"
+                  className="icon-btn focus-ring"
                   onClick={() => scrollToBottom({ force: true, smooth: true })}
-                  style={{
-                    position: "absolute",
-                    top: -14,
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    zIndex: 10,
-                    height: 26,
-                    width: 44,
-                    padding: 0,
-                    borderRadius: 13,
-                    background: "var(--gray-0)",
-                    border: "none",
-                    boxShadow: "0 2px 8px rgba(0,0,0,0.12)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "var(--gray-500)",
-                  }}
                   aria-label="回到底部"
                   title="回到底部"
+                  style={{
+                    position: "absolute",
+                    top: -10,
+                    left: "50%",
+                    transform: "translateX(-50%)",
+                    width: 34,
+                    height: 28,
+                    borderRadius: "var(--radius-full)",
+                    background: "var(--bg-elevated)",
+                    border: "1px solid var(--border-default)",
+                    boxShadow: "var(--shadow-md)",
+                    pointerEvents: "auto",
+                  }}
                 >
                   {/* Inline down-arrow SVG (project uses custom SVG icons, not @ant-design/icons) */}
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="6 9 12 15 18 9" />
                   </svg>
-                </Button>
+                </button>
               )}
-              <div style={{ maxWidth: 800, margin: "0 auto" }}>
+              <div style={{ maxWidth: "var(--content-max)", margin: "0 auto", pointerEvents: "auto" }}>
                 {inputArea}
-                <div style={{ padding: "4px 0 0 4px" }}>
-                  <span style={{ fontSize: 12, color: "var(--gray-300)" }}>
+                <div style={{ textAlign: "center", paddingTop: 7 }}>
+                  <span style={{ fontSize: "var(--text-2xs)", color: "var(--text-tertiary)" }}>
                     当前智能体：ChatbotAgent · 请注意辨别内容的可靠性
                   </span>
                 </div>

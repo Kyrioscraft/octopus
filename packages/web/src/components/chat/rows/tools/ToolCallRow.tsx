@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from "react";
-import { Collapse, Tag } from "antd";
+import { Collapse } from "antd";
 import {
   CircleX,
 } from "lucide-react";
@@ -9,9 +9,9 @@ import { ShimmerText } from "../../ShimmerText.js";
 
 /**
  * Universal skeleton for a single tool-call ROW (lightweight, single-line
- * header + collapsible body). Replaces the former "card" framing: the row is
- * deliberately low-weight — no border or background of its own, relying on the
- * parent timeline's left rail to tie events together.
+ * header + collapsible body). The row is deliberately low-weight — no border or
+ * background of its own: the surrounding trace rail ties the entries together
+ * and the whole header is a hover-fill target.
  *
  * Specialized rows compose this and override the `header` / `body` slots.
  *
@@ -21,8 +21,8 @@ import { ShimmerText } from "../../ShimmerText.js";
  *
  * Visual weight:
  *   - Normal: just the header line (status icon + tool icon + summary).
- *   - Error: the whole row gets a subtle error-tinted background + a 2px
- *     error-colored left bar, so failures stand out at a glance.
+ *   - Error: a subtle error-tinted background + a 2px error bar on the left, so
+ *     failures stand out at a glance.
  */
 export interface ToolCallRowProps {
   entry: ToolCallEntry;
@@ -37,15 +37,14 @@ export interface ToolCallRowProps {
 /**
  * Single-slot icon for a tool row.
  *
- * The tool's own type icon is ALWAYS shown (gray-400 while done/settled;
- * normal color while running — the running state is already signalled by the
- * shimmer text effect on the tool name, so no spinner here). Error → CircleX
- * (failures must pop).
+ * The tool's own type icon is ALWAYS shown (muted while done/settled — the
+ * running state is signalled by the shimmer on the tool name and the rail's
+ * pulsing dot, so no spinner here). Error → CircleX.
  */
 function RowIcon({ name, status }: { name: string; status: ToolCallEntry["status"] }) {
   if (status === "error") return <CircleX style={{ color: "var(--color-error-500)" }} />;
   return (
-    <span style={{ color: "var(--gray-400)", display: "inline-flex", alignItems: "center" }}>
+    <span style={{ color: "var(--text-tertiary)", display: "inline-flex", alignItems: "center" }}>
       {getToolIcon(name)}
     </span>
   );
@@ -70,10 +69,9 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
         display: "flex",
         alignItems: "center",
         gap: 8,
-        fontSize: 12,
+        fontSize: 12.5,
         fontWeight: 500,
-        color: "var(--gray-500)",
-        letterSpacing: "0.025em",
+        color: "var(--text-tertiary)",
         minWidth: 0,
         // NOTE: deliberately NO `flex: 1`. With flex:1 the header would stretch
         // to fill the row, pushing antd's expand arrow (expandIconPosition="end")
@@ -88,7 +86,7 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
         // Running/pending: shimmer the tool name so the active row stands out;
         // done/error: plain label.
         entry.status === "running" || entry.status === "pending" ? (
-          <ShimmerText text={displayName} />
+          <ShimmerText text={displayName} fontSize={12.5} />
         ) : (
           <span>{displayName}</span>
         )
@@ -100,8 +98,6 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
     <div
       className={`tool-call-row collapsible-row${expanded ? " is-expanded" : ""}`}
       style={{
-        // No own left rail — border-free reduces visual weight (the old card
-        // drew a 2nd rail here, doubling up).
         maxWidth: "100%",
         minWidth: 0,
         // Error emphasis: a subtle error-tinted background + a 2px error bar on
@@ -109,9 +105,9 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
         ...(isError
           ? {
               background: "var(--color-error-50)",
-              borderLeft: "2px solid var(--color-error-200, var(--color-error-100))",
+              borderLeft: "2px solid var(--color-error-500)",
               paddingLeft: 8,
-              borderRadius: 4,
+              borderRadius: "var(--radius-xs)",
             }
           : {}),
       }}
@@ -134,40 +130,99 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
   );
 }
 
+/** The label style shared by the collapsed body panels' captions ("参数"/"结果"). */
+const bodyLabelStyle: React.CSSProperties = {
+  fontSize: "var(--text-2xs)",
+  fontWeight: 500,
+  color: "var(--text-tertiary)",
+  marginBottom: 4,
+};
+
+/**
+ * The header shared by the specialized tool rows: `<verb> · <detail>` where the
+ * detail is a monospace path/command. One implementation for bash / read / write
+ * / edit, so their headers can't drift apart.
+ */
+export function ToolRowHeader({
+  verb,
+  running = false,
+  detail,
+  detailTitle,
+  tail,
+}: {
+  verb: string;
+  running?: boolean;
+  /** Monospace detail (a file name, a command). */
+  detail?: string;
+  /** Tooltip for the detail — usually the untruncated path. */
+  detailTitle?: string;
+  /** Extra trailing content (diff stats, line counts). */
+  tail?: ReactNode;
+}) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+      {running ? (
+        <ShimmerText text={verb} fontSize={12.5} />
+      ) : (
+        <span style={{ color: "var(--text-tertiary)" }}>{verb}</span>
+      )}
+      <span style={{ color: "var(--text-disabled)" }}>·</span>
+      {detail && (
+        <code
+          title={detailTitle ?? detail}
+          className="mono"
+          style={{
+            fontSize: 12.5,
+            color: "var(--text-primary)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {detail}
+        </code>
+      )}
+      {tail}
+    </span>
+  );
+}
+
+/** The shared mono surface used by args / results / command blocks. */
+export function codeSurfaceStyle(accent?: "error"): React.CSSProperties {
+  const isError = accent === "error";
+  return {
+    fontSize: 12,
+    lineHeight: 1.6,
+    color: isError ? "var(--color-error-700)" : "var(--text-secondary)",
+    background: isError ? "var(--color-error-50)" : "var(--bg-subtle)",
+    borderRadius: "var(--radius-md)",
+    padding: "10px 12px",
+    border: `1px solid ${isError ? "var(--color-error-100)" : "var(--border-default)"}`,
+    margin: 0,
+    fontFamily: "var(--font-mono)",
+    whiteSpace: "pre-wrap",
+    wordBreak: "break-word",
+  };
+}
+
 /**
  * Fallback body: render args as pretty JSON and the result as preformatted text.
  */
 export function DefaultCardBody({ entry }: { entry: ToolCallEntry }) {
   const hasArgs = entry.args && Object.keys(entry.args).length > 0;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingTop: 4 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: "4px 0 4px" }}>
       {hasArgs && (
         <div>
-          <div style={{ fontSize: 11, color: "var(--gray-500)", marginBottom: 4 }}>参数</div>
-          <pre
-            style={{
-              fontSize: 12,
-              color: "var(--gray-700)",
-              background: "var(--gray-25)",
-              borderRadius: 6,
-              padding: "8px 10px",
-              border: "1px solid var(--gray-150)",
-              margin: 0,
-              fontFamily:
-                "SFMono-Regular, Consolas, Menlo, monospace",
-              whiteSpace: "pre-wrap",
-              wordBreak: "break-word",
-              maxHeight: 300,
-              overflow: "auto",
-            }}
-          >
+          <div style={bodyLabelStyle}>参数</div>
+          <pre style={{ ...codeSurfaceStyle(), maxHeight: 300, overflow: "auto" }}>
             {JSON.stringify(entry.args, null, 2)}
           </pre>
         </div>
       )}
       {entry.result !== undefined && (
         <div>
-          <div style={{ fontSize: 11, color: "var(--gray-500)", marginBottom: 4 }}>结果</div>
+          <div style={bodyLabelStyle}>结果</div>
           <ToolResultBlock result={entry.result} status={entry.status} />
         </div>
       )}
@@ -192,16 +247,7 @@ export function ToolResultBlock({
   return (
     <pre
       style={{
-        fontSize: 12,
-        color: "var(--gray-700)",
-        background: isError ? "var(--color-error-50)" : "var(--gray-25)",
-        borderRadius: 6,
-        padding: "8px 10px",
-        border: `1px solid ${isError ? "var(--color-error-100)" : "var(--gray-150)"}`,
-        margin: 0,
-        fontFamily: "SFMono-Regular, Consolas, Menlo, monospace",
-        whiteSpace: "pre-wrap",
-        wordBreak: "break-word",
+        ...codeSurfaceStyle(isError ? "error" : undefined),
         maxHeight,
         overflow: "auto",
       }}
@@ -212,21 +258,14 @@ export function ToolResultBlock({
 }
 
 /**
- * Small +N/-M tag pair for file-edit summaries.
+ * Small +N/-M pair for file-edit summaries — plain coloured monospace rather
+ * than filled tags, so a diff stat reads as metadata instead of a badge.
  */
 export function DiffStat({ added, removed }: { added: number; removed: number }) {
   return (
-    <span style={{ display: "inline-flex", gap: 4, marginLeft: 4 }}>
-      {added > 0 && (
-        <Tag color="success" style={{ margin: 0, fontSize: 11, lineHeight: "18px" }}>
-          +{added}
-        </Tag>
-      )}
-      {removed > 0 && (
-        <Tag color="error" style={{ margin: 0, fontSize: 11, lineHeight: "18px" }}>
-          -{removed}
-        </Tag>
-      )}
+    <span className="mono tnum" style={{ display: "inline-flex", gap: 6, marginLeft: 4, fontSize: 11.5 }}>
+      {added > 0 && <span style={{ color: "var(--color-success-700)" }}>+{added}</span>}
+      {removed > 0 && <span style={{ color: "var(--color-error-700)" }}>-{removed}</span>}
     </span>
   );
 }

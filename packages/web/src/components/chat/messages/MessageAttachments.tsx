@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { FileText } from "lucide-react";
 import { OctopusClient } from "@octopus/tentacle";
 import type { MsgAttachment } from "../types.js";
+import { openImage } from "../../../stores/lightbox.js";
 
 const sdk = new OctopusClient();
 
@@ -36,10 +37,10 @@ function fetchPreviewUrl(att: MsgAttachment, workspaceId: string | undefined): P
 }
 
 /**
- * Render a user message's attachments: image thumbnails (click to open) and
- * file cards. Previews prefer the locally-carried object URL (optimistic /
- * live turns); history messages lazily fetch bytes via the workspace
- * download API.
+ * Render a user message's attachments: image thumbnails (click opens the
+ * in-app lightbox) and file cards. Previews prefer the locally-carried object
+ * URL (optimistic / live turns); history messages lazily fetch bytes via the
+ * workspace download API.
  */
 export function MessageAttachments({
   attachments,
@@ -82,19 +83,20 @@ function AttachmentThumb({ att, workspaceId }: { att: MsgAttachment; workspaceId
         src={url}
         alt={att.name}
         title={att.name}
-        onClick={() => window.open(url, "_blank")}
+        className="attachment-thumb"
+        onClick={() => openImage(url, { alt: att.name, downloadName: att.name })}
         style={{
           width: 140, maxHeight: 140, objectFit: "cover",
-          borderRadius: 8, border: "1px solid var(--gray-150)",
+          borderRadius: "var(--radius-md)", border: "1px solid var(--border-default)",
           cursor: "zoom-in", display: "block",
         }}
       />
     ) : (
       <div style={{
-        width: 140, height: 90, borderRadius: 8,
-        border: "1px solid var(--gray-150)", background: "var(--gray-50)",
+        width: 140, height: 90, borderRadius: "var(--radius-md)",
+        border: "1px solid var(--border-default)", background: "var(--bg-muted)",
         display: "flex", alignItems: "center", justifyContent: "center",
-        fontSize: 12, color: "var(--gray-500, #999)",
+        fontSize: "var(--text-xs)", color: "var(--text-tertiary)",
       }}>
         {att.name}
       </div>
@@ -105,17 +107,17 @@ function AttachmentThumb({ att, workspaceId }: { att: MsgAttachment; workspaceId
       title={att.name}
       style={{
         display: "flex", alignItems: "center", gap: 8,
-        padding: "6px 10px", borderRadius: 8,
-        border: "1px solid var(--gray-150)", background: "var(--gray-0)",
+        padding: "6px 10px", borderRadius: "var(--radius-md)",
+        border: "1px solid var(--border-default)", background: "var(--bg-elevated)",
         maxWidth: 220,
       }}
     >
-      <FileText size={18} style={{ color: "var(--gray-600)", flexShrink: 0 }} />
+      <FileText size={18} style={{ color: "var(--text-tertiary)", flexShrink: 0 }} />
       <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <span style={{ fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span style={{ fontSize: "var(--text-sm)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {att.name}
         </span>
-        <span style={{ fontSize: 11, color: "var(--gray-500, #999)" }}>
+        <span className="tnum" style={{ fontSize: "var(--text-2xs)", color: "var(--text-tertiary)" }}>
           {att.size !== undefined
             ? att.size < 1024 * 1024 ? `${Math.ceil(att.size / 1024)}KB` : `${(att.size / 1048576).toFixed(1)}MB`
             : ""}

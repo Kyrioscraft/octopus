@@ -9,6 +9,7 @@ import {
   LogOut,
   Palette,
   BrainCircuit,
+  ListChecks,
 } from "lucide-react";
 import type { OctopusClient, GeneralSettingsResponse, User } from "@octopus/tentacle";
 import { SandboxSettingsSection } from "./SandboxSettingsSection.js";
@@ -132,20 +133,11 @@ export function GeneralSettingsSection({ sdk }: Props) {
 
       {/* Tool toggles */}
       <Card title="工具开关">
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <div className="settings-rows">
           {TOOL_FIELDS.map((f) => {
             const checked = data.effective[f.key] ?? false;
             return (
-              <div
-                key={f.key}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 12,
-                  padding: "12px 0",
-                  borderBottom: "1px solid var(--gray-100)",
-                }}
-              >
+              <div key={f.key} className="settings-row">
                 <span style={{ fontSize: 18, color: "var(--main-color)", width: 24, textAlign: "center" }}>
                   {f.icon}
                 </span>
@@ -179,18 +171,20 @@ export function GeneralSettingsSection({ sdk }: Props) {
           <div
             style={{
               width: 40, height: 40, borderRadius: "50%",
-              background: "var(--main-200)", display: "flex",
+              background: "var(--bg-muted)",
+              border: "1px solid var(--border-default)",
+              display: "flex",
               alignItems: "center", justifyContent: "center",
-              fontSize: 16, color: "var(--main-700)", fontWeight: 600,
+              fontSize: 16, color: "var(--text-secondary)", fontWeight: 600,
             }}
           >
             {(me?.username ?? "O").charAt(0).toUpperCase()}
           </div>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "var(--gray-1000)" }}>
+            <div style={{ fontSize: "var(--text-base)", fontWeight: 600, color: "var(--gray-1000)" }}>
               {me?.username ?? "octopus"}
             </div>
-            <div style={{ fontSize: 12, color: "var(--gray-500)" }}>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
               角色：{me?.role ?? "superadmin"}
             </div>
           </div>
@@ -233,18 +227,18 @@ function AppearanceCard({
   // Pure client-side display preference (messageStreamShowReasoning 语义).
   const showFullReasoning = useDisplaySettingsStore((s) => s.showFullReasoning);
   const setShowFullReasoning = useDisplaySettingsStore((s) => s.setShowFullReasoning);
+  const autoCollapseTrace = useDisplaySettingsStore((s) => s.autoCollapseTrace);
+  const setAutoCollapseTrace = useDisplaySettingsStore((s) => s.setAutoCollapseTrace);
   return (
     <Card title="外观">
-      <div style={{ display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 0" }}>
-          <span style={{ fontSize: 18, color: "var(--main-color)", width: 24, textAlign: "center" }}>
-            <Palette />
-          </span>
+      <div className="settings-rows">
+        <div className="settings-row">
+          <span className="settings-row-icon"><Palette /></span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-1000)" }}>
+            <div style={{ fontSize: "var(--text-base)", fontWeight: 500, color: "var(--gray-1000)" }}>
               主题模式
             </div>
-            <div style={{ fontSize: 12, color: "var(--gray-500)" }}>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
               选择界面配色，或跟随系统
             </div>
           </div>
@@ -253,29 +247,19 @@ function AppearanceCard({
             value={mode}
             onChange={(v) => onChange(v)}
             options={[
-              { label: "☀ 浅色", value: "light" },
-              { label: "🌙 深色", value: "dark" },
-              { label: "🖥 系统", value: "system" },
+              { label: "浅色", value: "light" },
+              { label: "深色", value: "dark" },
+              { label: "系统", value: "system" },
             ]}
           />
         </div>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "12px 0",
-            borderTop: "1px solid var(--gray-100)",
-          }}
-        >
-          <span style={{ fontSize: 18, color: "var(--main-color)", width: 24, textAlign: "center" }}>
-            <BrainCircuit />
-          </span>
+        <div className="settings-row">
+          <span className="settings-row-icon"><BrainCircuit /></span>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: "var(--gray-1000)" }}>
+            <div style={{ fontSize: "var(--text-base)", fontWeight: 500, color: "var(--gray-1000)" }}>
               展示完整思考内容
             </div>
-            <div style={{ fontSize: 12, color: "var(--gray-500)" }}>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
               在消息流中展示完整的模型思考内容；关闭时每轮仍展示第一次思考
             </div>
           </div>
@@ -283,6 +267,22 @@ function AppearanceCard({
             size="small"
             checked={showFullReasoning}
             onChange={(v) => setShowFullReasoning(v)}
+          />
+        </div>
+        <div className="settings-row">
+          <span className="settings-row-icon"><ListChecks /></span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: "var(--text-base)", fontWeight: 500, color: "var(--gray-1000)" }}>
+              完成后折叠执行过程
+            </div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
+              智能体工作时展开工具调用与思考，结束时收成一行「已完成 · N 步」摘要
+            </div>
+          </div>
+          <Switch
+            size="small"
+            checked={autoCollapseTrace}
+            onChange={(v) => setAutoCollapseTrace(v)}
           />
         </div>
       </div>

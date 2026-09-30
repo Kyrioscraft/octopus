@@ -1,7 +1,6 @@
 import type { ToolCardProps } from "./types.js";
-import { ToolCallRow, ToolResultBlock } from "./ToolCallRow.js";
+import { ToolCallRow, ToolResultBlock, ToolRowHeader } from "./ToolCallRow.js";
 import { basename } from "./registry.js";
-import { ShimmerText } from "../../ShimmerText.js";
 
 /**
  * read_file row. Header shows the file name; body shows the file contents
@@ -18,25 +17,12 @@ export function FileReadRow({ entry }: ToolCardProps) {
     <ToolCallRow
       entry={entry}
       header={
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-          {running ? <ShimmerText text="读取" /> : <span style={{ color: "var(--gray-500)" }}>读取</span>}
-          <span style={{ color: "var(--gray-400)" }}>|</span>
-          <code
-            title={filePath}
-            style={{
-              fontSize: 12,
-              background: "var(--gray-100)",
-              padding: "1px 6px",
-              borderRadius: 4,
-              color: "var(--gray-900)",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {fileName || "(unknown)"}
-          </code>
-        </span>
+        <ToolRowHeader
+          verb="读取"
+          running={running}
+          detail={fileName || "(unknown)"}
+          detailTitle={filePath}
+        />
       }
       body={
         entry.result ? (

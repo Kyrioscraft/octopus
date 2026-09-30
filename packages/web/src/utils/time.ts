@@ -19,3 +19,42 @@ export function formatRelativeTime(iso: string | null | undefined): string {
   if (!d.isValid()) return "—";
   return d.fromNow();
 }
+
+/** The buckets the conversation list is grouped into, in display order. */
+export type DayGroup = "今天" | "昨天" | "过去 7 天" | "更早";
+
+const DAY_GROUPS: DayGroup[] = ["今天", "昨天", "过去 7 天", "更早"];
+
+/**
+ * Bucket a timestamp into one of the conversation-list groups. Day boundaries are
+ * calendar-based (not "N * 24h ago") so an item created at 23:59 is "昨天" rather
+ * than "今天" the next morning.
+ */
+export function dayGroupOf(iso: string | null | undefined): DayGroup {
+  const d = dayjs(iso);
+  if (!iso || !d.isValid()) return "更早";
+  const now = dayjs();
+  const startOfToday = now.startOf("day");
+  if (!d.isBefore(startOfToday)) return "今天";
+  if (!d.isBefore(startOfToday.subtract(1, "day"))) return "昨天";
+  if (!d.isBefore(startOfToday.subtract(6, "day"))) return "过去 7 天";
+  return "更早";
+}
+
+/** Group items by `dayGroupOf`, dropping empty buckets and keeping group order. */
+export function groupByDay<T>(
+  items: T[],
+  getIso: (item: T) => string | null | undefined,
+): { group: DayGroup; items: T[] }[] {
+  const buckets = new Map<DayGroup, T[]>();
+  for (const item of items) {
+    const group = dayGroupOf(getIso(item));
+    const bucket = buckets.get(group);
+    if (bucket) bucket.push(item);
+    else buckets.set(group, [item]);
+  }
+  return DAY_GROUPS.filter((g) => buckets.has(g)).map((g) => ({
+    group: g,
+    items: buckets.get(g)!,
+  }));
+}

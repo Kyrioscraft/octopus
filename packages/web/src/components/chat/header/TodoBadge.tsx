@@ -8,10 +8,10 @@ import type { TodoItem } from "../companion/types.js";
  * `write_todos` is no longer rendered as a tool card in the conversation
  * timeline; instead, the latest todo list is surfaced here — a compact badge
  * in the chat header, to the left of the companion-panel toggle. The badge
- * shows an icon + "done/total" count and color-codes by progress (all done =
- * green, in progress = blue, none done = gray). Clicking it opens the
- * right-side companion panel and auto-activates the "待办" tab (see
- * CompanionPanel / TodoPanel).
+ * shows a status dot + "done/total" count; the dot carries the state (green =
+ * all done, blue = in progress, grey = none done) while the pill itself stays
+ * neutral so the header doesn't turn into a traffic light. Clicking it opens
+ * the right-side companion panel and auto-activates the "待办" tab.
  *
  * Data source: the caller derives the latest `write_todos` call's args.todos
  * from the active/last assistant turn's events[].
@@ -25,12 +25,12 @@ export function TodoBadge({ todos }: { todos: TodoItem[] }) {
   const done = todos.filter((t) => t.status === "completed").length;
   const allDone = done === total;
 
-  // Badge color by progress.
-  const color = allDone
-    ? "var(--color-success-700)"
+  // Status dot by progress.
+  const dot = allDone
+    ? "var(--color-success-500)"
     : done > 0
-      ? "var(--color-info-700)"
-      : "var(--gray-500)";
+      ? "var(--color-info-500)"
+      : "var(--border-strong)";
 
   const title = allDone ? "待办已全部完成" : `待办 · ${done}/${total}`;
 
@@ -43,22 +43,14 @@ export function TodoBadge({ todos }: { todos: TodoItem[] }) {
       type="button"
       title={title}
       onClick={openCompanion}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 5,
-        fontSize: 12,
-        lineHeight: "20px",
-        padding: "0 8px",
-        borderRadius: 4,
-        border: "1px solid var(--gray-200)",
-        background: "transparent",
-        color,
-        cursor: "pointer",
-      }}
+      className="pill focus-ring"
+      style={{ cursor: "pointer" }}
     >
-      <CheckSquare style={{ fontSize: 13 }} />
-      <span>
+      <span
+        style={{ width: 6, height: 6, borderRadius: "50%", background: dot, flexShrink: 0 }}
+      />
+      <CheckSquare style={{ fontSize: 13, color: "var(--text-tertiary)" }} />
+      <span className="tnum">
         {done}/{total}
       </span>
     </button>

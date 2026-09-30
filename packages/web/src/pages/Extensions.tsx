@@ -3,6 +3,7 @@ import { Input } from "antd";
 import {
   Search,
 } from "lucide-react";
+import { PageHeader } from "../components/shared/PageHeader.js";
 import {
   OctopusClient,
   type SkillEntry,
@@ -20,8 +21,8 @@ const sdk = new OctopusClient();
 export type ExtensionsTab = "skills" | "mcp" | "subagents" | "commands";
 
 const TAB_TITLES: Record<ExtensionsTab, string> = {
-  skills: "Skills",
-  mcp: "MCP",
+  skills: "技能",
+  mcp: "MCP 服务器",
   subagents: "子智能体",
   commands: "斜杠命令",
 };
@@ -104,18 +105,14 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Scrollable content: title + search live inside the content area
-          (no separate top nav bar on sub-feature pages). */}
-      <div style={{ flex: 1, overflow: "auto", padding: "20px 20px 40px" }}>
-        <div style={{ maxWidth: 900, margin: "0 auto" }}>
-          {/* Title */}
-          <div style={{ fontWeight: 600, fontSize: 20, color: "var(--gray-1000)", marginBottom: 16 }}>
-            {TAB_TITLES[tab]}
-          </div>
+      <PageHeader title={TAB_TITLES[tab]} />
+      {/* Scrollable content: the search sits under the sticky header. */}
+      <div style={{ flex: 1, overflow: "auto", padding: "20px 20px 48px" }}>
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
           {/* Search */}
           <Input
             allowClear
-            prefix={<Search style={{ color: "var(--gray-400)" }} />}
+            prefix={<Search style={{ color: "var(--text-tertiary)" }} />}
             placeholder={
               tab === "skills" ? "搜索 Skill..." :
               tab === "mcp" ? "搜索 MCP..." :
@@ -123,7 +120,8 @@ export function ExtensionsPage({ tab }: ExtensionsPageProps) {
             }
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            style={{ width: "100%", borderRadius: 8, marginBottom: 16, height: 40 }}
+            size="large"
+            style={{ width: "100%", borderRadius: "var(--radius-sm)", marginBottom: 16 }}
           />
           {tab === "skills" ? (
             <SkillCardList
