@@ -6,7 +6,6 @@ import { useChatStore } from "../stores/chat.js";
 import { useChat } from "../hooks/useChat.js";
 import { useStickToBottom } from "../hooks/useStickToBottom.js";
 import { AskPanel } from "../components/chat/input/AskPanel.js";
-import { Companion, CompanionDivider } from "../components/chat/companion/index.js";
 import { ChatHeader } from "../components/chat/ChatHeader.js";
 import { StartScreen } from "../components/chat/input/StartScreen.js";
 import { MessageList } from "../components/chat/messages/MessageList.js";
@@ -236,9 +235,9 @@ export function ChatPage() {
           )}
         </div>
 
-        <CompanionDivider />
-
-        <Companion subagents={chat.allSubagents} todos={chat.todos} />
+        {/* The companion panel is NOT rendered here anymore — it is a layout-level
+            sibling of the whole chat page (mounted in AppLayout, chat routes only),
+            with its own header and the same slide animation as the left sidebar. */}
       </div>
     </div>
   );

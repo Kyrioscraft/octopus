@@ -4,6 +4,7 @@ import { Sidebar } from "../components/sidebars/Sidebar.js";
 import { ExtensionsSidebar } from "../components/sidebars/ExtensionsSidebar.js";
 import { SettingsSidebar } from "../components/sidebars/SettingsSidebar.js";
 import { ImageLightbox } from "../components/widgets/ImageLightbox.js";
+import { Companion, CompanionDivider } from "../components/chat/companion/index.js";
 import { useUiStore } from "../stores/ui.js";
 import "../styles/theme.css";
 import "../styles/markdown.css";
@@ -27,6 +28,11 @@ export function AppLayout() {
 
   const isSettings = location.pathname.startsWith("/settings");
   const isExtensions = location.pathname.startsWith("/extensions");
+  // The companion panel is a peer of the chat page and only exists on chat
+  // routes — settings/extensions have their own full-width content. Unmounting
+  // (rather than animating to 0) on those routes leaves no width residue; the
+  // store keeps open/tabs/width, so returning to a chat route restores it.
+  const isChatRoute = !isSettings && !isExtensions;
 
   const sidebar = isSettings ? (
     <SettingsSidebar collapsed={collapsed} />
@@ -77,13 +83,22 @@ export function AppLayout() {
           flexDirection: "column",
         }}
       >
-        <Outlet />
+        {/* Horizontal row: the routed page (left) and, on chat routes only, the
+            companion panel (right) as a layout-level peer with its own header.
+            The divider animates to 0 alongside the panel's rail. The row wrapper
+            is required — Content is itself a column. */}
+        {isChatRoute ? (
+          <div style={{ flex: 1, minWidth: 0, display: "flex", overflow: "hidden" }}>
+            <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+              <Outlet />
+            </div>
+            <CompanionDivider />
+            <Companion />
+          </div>
+        ) : (
+          <Outlet />
+        )}
       </Content>
-      {/*
-        The right-side secondary surface (workspace files / subagents / todos)
-        is the generic Companion panel (components/chat/companion), rendered inside
-        ChatPage (it needs message-derived data).
-      */}
 
       {/* One global image viewer for every thumbnail in the app. */}
       <ImageLightbox />

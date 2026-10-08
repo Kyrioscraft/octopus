@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { Thread, Workspace } from "@octopus/tentacle";
+import type { Msg } from "../components/chat/types.js";
 
 // Persist the active workspace id so it survives the hard navigation used when
 // switching conversations (window.location.href). Without this, the in-memory
@@ -82,6 +83,15 @@ interface ChatState {
   /** Clamp helper used by the drag handle. */
   readonly minCompanionWidth: number;
   readonly maxCompanionWidth: number;
+
+  // ---- Message projection for the layout-level companion panel ----
+  // The companion is mounted in AppLayout (sibling of the chat page), so it
+  // cannot read the `useChat` hook's local `msgs` state. `useChat` mirrors
+  // every message-list update here (same array reference — no copying), and
+  // the panel derives todos/subagents from this projection.
+  /** Latest message list of the active conversation (mirror of useChat's msgs). */
+  companionMsgs: Msg[];
+  setCompanionMsgs: (msgs: Msg[]) => void;
 }
 
 export const useChatStore = create<ChatState>((set) => ({
@@ -177,4 +187,8 @@ export const useChatStore = create<ChatState>((set) => ({
     }),
   minCompanionWidth: MIN_COMPANION_WIDTH,
   maxCompanionWidth: MAX_COMPANION_WIDTH,
+
+  // Mirrored by useChat's updateMsgs (same reference, no copy).
+  companionMsgs: [],
+  setCompanionMsgs: (msgs) => set({ companionMsgs: msgs }),
 }));

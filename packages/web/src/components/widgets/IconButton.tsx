@@ -18,6 +18,7 @@ export function IconButton({
   onClick,
   href,
   target,
+  style,
 }: {
   icon: ReactNode;
   /** Tooltip + accessible name. */
@@ -29,9 +30,10 @@ export function IconButton({
   onClick?: MouseEventHandler;
   href?: string;
   target?: string;
+  /** Layout-only tweaks from the parent (e.g. bottom alignment in a header row). */
+  style?: React.CSSProperties;
 }) {
   const className = `icon-btn focus-ring${active ? " is-active" : ""}`;
-  const style = { width: size, height: size };
   const inner = (
     <span style={{ display: "flex", alignItems: "center", fontSize: iconSize, lineHeight: 1 }}>
       {icon}
@@ -43,7 +45,7 @@ export function IconButton({
       {href ? (
         <a
           className={className}
-          style={style}
+          style={{ width: size, height: size, ...style }}
           href={href}
           target={target}
           rel={target === "_blank" ? "noopener noreferrer" : undefined}
@@ -52,7 +54,12 @@ export function IconButton({
           {inner}
         </a>
       ) : (
-        <button className={className} style={style} onClick={onClick} aria-label={title}>
+        <button
+          className={className}
+          style={{ width: size, height: size, ...style }}
+          onClick={onClick}
+          aria-label={title}
+        >
           {inner}
         </button>
       )}

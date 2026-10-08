@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Dropdown } from "antd";
 import type { MenuProps } from "antd";
-import { X, Plus } from "lucide-react";
+import { X, Plus, PanelRightClose } from "lucide-react";
 import { useChatStore } from "../../../stores/chat.js";
 import type { CompanionTabEntry, CompanionTabKind } from "../../../stores/chat.js";
+import { useCompanionData } from "../../../hooks/useCompanionData.js";
 import { TAB_META, type CompanionPanelProps } from "./types.js";
 import { FilesPanel } from "./panels/FilesPanel.js";
 import { SubagentPanel } from "./panels/SubagentPanel.js";
 import { TodoPanel } from "./panels/TodoPanel.js";
+import { IconButton } from "../../widgets/IconButton.js";
 
 /**
  * Panel registry — each tab kind maps to a single panel component. Adding a new
@@ -21,41 +23,40 @@ const PANELS: Record<CompanionTabKind, (props: CompanionPanelProps) => React.Rea
 };
 
 /**
- * Generic in-conversation companion panel — the app's shared secondary surface.
+ * The companion panel — the app's shared secondary surface, mounted at the
+ * layout level as a sibling of the chat page (it has its own header, and the
+ * chat header governs only the chat column).
  *
- * Lives BELOW the chat header, to the RIGHT of the message list (a flex sibling
- * inside the chat body). It occupies real layout space (not an overlay): when
- * open, it narrows the message list + input bar. Width is drag-adjustable and
- * persisted.
+ * The root is a persistent "rail" that animates exactly like the left sidebar
+ * (AppLayout's Sider): `flex-basis` + `max/min-width` transition between 0 and
+ * `companionWidth` with the same duration/easing tokens. It renders
+ * unconditionally — closing animates the rail to zero width rather than
+ * unmounting, so open/close slides instead of popping. The inner content box
+ * keeps the target width during the animation, so nothing reflows mid-slide.
  *
- * Tabs are browser-style: each has a close (×) button; a "+" menu at the end of
- * the tab strip adds a new tab (文件 / 子智能体 / 待办). Multiple subagent tabs
- * can be open at once (one per run); files/todos are singletons.
+ * Tabs are browser-style: each has a close (×) button; a "+" menu adds a new
+ * tab (文件 / 子智能体 / 待办); the header's right side carries the panel's own
+ * collapse button. State (open tabs, active tab, width) lives in `useChatStore`
+ * so any trigger (header buttons, subagent chips, todo badge) can open a tab.
  *
- * This component is purely a CONTAINER — it owns the tab strip + drag-resize +
- * panel routing. What renders inside a tab is decided by `PANELS` + the
- * per-panel component, keeping the container reusable for any future panels.
- *
- * State (open tabs, active tab, width) lives in `useChatStore` so any trigger
- * (header buttons, subagent chips, todo badge) can open the companion panel to a tab.
+ * Data: todos/subagents are derived from `companionMsgs` — the message
+ * projection `useChat` mirrors into the store (see useCompanionData).
  */
-export function Companion(props: CompanionPanelProps) {
+export function Companion() {
   const open = useChatStore((s) => s.companionOpen);
   const tabs = useChatStore((s) => s.companionTabs);
   const activeId = useChatStore((s) => s.activeCompanionTabId);
   const setActive = useChatStore((s) => s.setActiveCompanionTab);
   const closeTab = useChatStore((s) => s.closeCompanionTab);
   const openTab = useChatStore((s) => s.openCompanionTab);
+  const setOpen = useChatStore((s) => s.setCompanionOpen);
   const width = useChatStore((s) => s.companionWidth);
+  const { todos, subagents } = useCompanionData();
 
-  // Width is driven by the sibling <CompanionDivider /> (industry-standard
-  // independent divider, not an in-panel absolute handle). It writes directly
-  // to the store, so this component just reads `width` — no local drag state.
-
-  if (!open || tabs.length === 0) return null;
+  const panelProps: CompanionPanelProps = { todos, subagents };
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? tabs[tabs.length - 1];
-  const ActivePanel = PANELS[activeTab.kind];
+  const ActivePanel = activeTab ? PANELS[activeTab.kind] : undefined;
 
   // "+" menu — the available kinds to add as a new tab.
   const addMenuItems: MenuProps["items"] = (
@@ -71,33 +72,59 @@ export function Companion(props: CompanionPanelProps) {
     onClick: () => openTab(kind),
   }));
 
+  const hasContent = open && tabs.length > 0 && activeTab !== undefined;
+
   return (
-    // Flush pane inside the app's content card — the resizer's hairline is its
-    // only boundary, so a nested card here would read as a card-in-card.
+    // The rail: always mounted, width animates 0 ⇄ companionWidth with the same
+    // tokens as AppLayout's sidebar. Animated on `width` (not flex-basis): antd's
+    // Layout stylesheet sets `flex` on layout children, and a shorthand-vs-inline
+    // interaction swallowed the flex-basis animation in testing (computed stayed
+    // 0px while the inline style said 420px).
     <div
+      aria-hidden={!hasContent}
       style={{
-        width: width,
+        width: hasContent ? width : 0,
+        flex: "none",
         flexShrink: 0,
-        background: "var(--bg-canvas)",
-        display: "flex",
-        flexDirection: "column",
         overflow: "hidden",
-        position: "relative",
+        transition:
+          "width var(--dur-3) var(--ease-out)",
+        // Zero width must mean zero footprint — no stray border/shadow pixels.
+        borderLeft: hasContent ? "1px solid var(--border-subtle)" : "none",
       }}
     >
-      {/* Browser-style tab strip. */}
-      <TabStrip
-        tabs={tabs}
-        activeId={activeTab.id}
-        onSelect={setActive}
-        onClose={closeTab}
-        addMenuItems={addMenuItems}
-      />
+      {/* Content box renders at the FINAL width, clipped by the rail while the
+          animation runs — no mid-slide text reflow. */}
+      <div
+        style={{
+          width: width,
+          height: "100%",
+          display: "flex",
+          flexDirection: "column",
+          background: "var(--bg-canvas)",
+          overflow: "hidden",
+          position: "relative",
+        }}
+      >
+        {hasContent && (
+          <>
+            {/* The panel's own header: tabs + this panel's collapse button. */}
+            <TabStrip
+              tabs={tabs}
+              activeId={activeTab.id}
+              onSelect={setActive}
+              onClose={closeTab}
+              addMenuItems={addMenuItems}
+              onClosePanel={() => setOpen(false)}
+            />
 
-      {/* Active panel content. */}
-      <div style={{ flex: 1, overflow: "hidden" }}>
-        {ActivePanel && (
-          <ActivePanel {...props} refId={activeTab.refId} />
+            {/* Active panel content. */}
+            <div style={{ flex: 1, overflow: "hidden" }}>
+              {ActivePanel && (
+                <ActivePanel {...panelProps} refId={activeTab.refId} />
+              )}
+            </div>
+          </>
         )}
       </div>
     </div>
@@ -126,6 +153,8 @@ export function CompanionDivider() {
   const setWidth = useChatStore((s) => s.setCompanionWidth);
   const minW = useChatStore((s) => s.minCompanionWidth);
   const maxW = useChatStore((s) => s.maxCompanionWidth);
+
+  const visible = open && tabs.length > 0;
 
   const [dragging, setDragging] = useState(false);
   const dragState = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -169,13 +198,10 @@ export function CompanionDivider() {
     };
   }, [dragging, setWidth, minW, maxW]);
 
-  // Hidden when the panel is closed — no orphan line next to the message list.
-  if (!open || tabs.length === 0) return null;
-
   const lineColor = dragging ? "var(--accent-solid)" : "var(--border-subtle)";
   return (
     <div
-      onMouseDown={onHandleDown}
+      onMouseDown={visible ? onHandleDown : undefined}
       onMouseEnter={(e) => {
         if (!dragging) e.currentTarget.style.background = "var(--bg-hover)";
       }}
@@ -183,14 +209,19 @@ export function CompanionDivider() {
         if (!dragging) e.currentTarget.style.background = "transparent";
       }}
       style={{
-        width: 6,
+        // Persistent: collapses to 0 alongside the panel rail (same transition),
+        // so the divider slides out with the panel instead of popping away.
+        width: visible ? 6 : 0,
         flexShrink: 0,
-        cursor: "col-resize",
+        overflow: "hidden",
+        cursor: visible ? "col-resize" : "default",
+        pointerEvents: visible ? "auto" : "none",
         position: "relative",
         zIndex: 5,
-        transition: "background var(--dur-1) var(--ease)",
+        transition:
+          "width var(--dur-3) var(--ease-out), background var(--dur-1) var(--ease)",
       }}
-      title="拖拽调整宽度"
+      title={visible ? "拖拽调整宽度" : undefined}
     >
       {/* The 1px visible line, centered in the 6px hit area. */}
       <div
@@ -221,23 +252,30 @@ function TabStrip({
   onSelect,
   onClose,
   addMenuItems,
+  onClosePanel,
 }: {
   tabs: CompanionTabEntry[];
   activeId: string;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
   addMenuItems: MenuProps["items"];
+  /** Collapse the whole panel (the companion header's own toggle). */
+  onClosePanel: () => void;
 }) {
   return (
+    // Same height as the chat header (--header-h), so the two panels' headers
+    // read as one aligned band across the content card.
     <div
       style={{
         display: "flex",
-        alignItems: "center",
+        alignItems: "flex-end",
         gap: 2,
-        padding: "6px 6px 0",
+        height: "var(--header-h)",
+        padding: "0 6px",
         borderBottom: "1px solid var(--border-default)",
         flexShrink: 0,
         overflowX: "auto",
+        overflowY: "hidden",
       }}
     >
       {tabs.map((t) => {
@@ -288,13 +326,26 @@ function TabStrip({
           className="icon-btn focus-ring"
           title="添加标签页"
           aria-label="添加标签页"
-          style={{ width: 26, height: 26, marginLeft: 2 }}
+          style={{ width: 26, height: 26, marginLeft: 2, marginBottom: 5 }}
         >
           <span style={{ display: "flex", fontSize: 14 }}>
             <Plus />
           </span>
         </button>
       </Dropdown>
+
+      {/* The panel's own collapse control — the companion header is independent
+          of the chat header, so it carries its own close affordance. */}
+      <span style={{ flex: 1 }} />
+      <IconButton
+        icon={<PanelRightClose />}
+        title="收起伴侣面板"
+        size={26}
+        iconSize={15}
+        onClick={onClosePanel}
+        // Bottom-align with the tabs (the header row itself is flex-end).
+        style={{ marginBottom: 5 }}
+      />
     </div>
   );
 }

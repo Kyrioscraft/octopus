@@ -238,6 +238,21 @@ export function useChat({
   scrollToBottom: (opts?: { force?: boolean; smooth?: boolean }) => void;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  // Every message-list mutation must go through `updateMsgs`, which mirrors the
+  // new array into the global chat store (`companionMsgs`) for the layout-level
+  // companion panel (it cannot read this hook's local state). Direct `setMsgs`
+  // calls would leave the companion with stale todos/subagents.
+  const setCompanionMsgs = useChatStore((s) => s.setCompanionMsgs);
+  const updateMsgs = useCallback(
+    (action: Msg[] | ((prev: Msg[]) => Msg[])) => {
+      setMsgs((prev) => {
+        const next = typeof action === "function" ? action(prev) : action;
+        setCompanionMsgs(next);
+        return next;
+      });
+    },
+    [setCompanionMsgs],
+  );
   /** Snapshot fetch in flight (thread switch) — shows a centered spinner
    *  instead of the misleading welcome screen while the list is blanked. */
   const [loading, setLoading] = useState(false);
@@ -322,7 +337,7 @@ export function useChat({
 
   // Clear messages on workspace change.
   useEffect(() => {
-    setMsgs([]);
+    updateMsgs([]);
   }, [activeWorkspaceId]);
 
   // ---- Thread history loading ----
@@ -334,7 +349,7 @@ export function useChat({
     // Optimistically blank the list SYNCHRONOUSLY on switch — the snapshot
     // fetch takes ~a second; without this the PREVIOUS thread's messages stay
     // on screen (looking like the wrong conversation) until it lands.
-    setMsgs([]);
+    updateMsgs([]);
     setLoading(true);
     hydratingRef.current.add(tid);
     try {
@@ -370,7 +385,7 @@ export function useChat({
       } catch { /* snapshot alone is enough for the main path */ }
 
       const { msgs, openAcc } = projectSnapshot(tid, snap.events, normalized);
-      setMsgs(msgs.length > 0 ? msgs : normalized);
+      updateMsgs(msgs.length > 0 ? msgs : normalized);
       // Jump to the latest message once the batch renders.
       pendingScrollRef.current = {};
       // Stateless cursor: the SERVER's maxSeq is authoritative (covers
@@ -397,7 +412,7 @@ export function useChat({
         reattachRef.current(tid);
       }
     } catch {
-      setMsgs([]);
+      updateMsgs([]);
     } finally {
       setLoading(false);
       hydratingRef.current.delete(tid);
@@ -557,7 +572,7 @@ export function useChat({
    *  and are intentionally preserved. */
   const clearMsgs = useCallback(() => {
     detachLocal();
-    setMsgs([]);
+    updateMsgs([]);
     turnAcc.current = null;
   }, []);
 
@@ -569,7 +584,7 @@ export function useChat({
       const acc = turnAcc.current;
       if (!acc) return;
       const events = acc.snapshot();
-      setMsgs((prev) => {
+      updateMsgs((prev) => {
         const c = [...prev];
         const last = c[c.length - 1];
         if (!(last?.role === "assistant" && last?.status === "streaming")) return prev;
@@ -580,7 +595,7 @@ export function useChat({
     /** Freeze the turn's work timer: prefer the server-reported duration,
      *  else the local startedAtMs elapsed. */
     const freezeTimer = (durationMs?: number) =>
-      setMsgs((prev) => {
+      updateMsgs((prev) => {
         const c = [...prev];
         const last = c[c.length - 1];
         if (last?.role !== "assistant") return prev;
@@ -616,7 +631,7 @@ export function useChat({
             // and settle any still-streaming bubble.
             setThreadRunning(tid, false);
             freezeTimer(undefined);
-            setMsgs((prev) => {
+            updateMsgs((prev) => {
               const c = [...prev];
               const last = c[c.length - 1];
               if (last?.role === "assistant" && last.status === "streaming") {
@@ -631,7 +646,7 @@ export function useChat({
             // Calibrate the WorkTimer from the run's true start time (matters
             // for re-attach: the run began before this client connected).
             if (ev.runStartedAt !== undefined) {
-              setMsgs((prev) => {
+              updateMsgs((prev) => {
                 const c = [...prev];
                 const last = c[c.length - 1];
                 if (last?.role === "assistant" && last.status === "streaming") {
@@ -716,7 +731,7 @@ export function useChat({
             freezeTimer(ev.durationMs);
             turnAcc.current?.finalizeDone();
             patchEvents();
-            setMsgs((prev) => {
+            updateMsgs((prev) => {
               const c = [...prev];
               const last = c[c.length - 1];
               if (last?.role === "assistant") {
@@ -734,7 +749,7 @@ export function useChat({
             freezeTimer(ev.durationMs);
             turnAcc.current?.finalizeDone();
             patchEvents();
-            setMsgs((prev) => {
+            updateMsgs((prev) => {
               const c = [...prev];
               const last = c[c.length - 1];
               if (last?.role === "assistant") {
@@ -750,7 +765,7 @@ export function useChat({
             freezeTimer(undefined);
             turnAcc.current?.finalizeError();
             patchEvents();
-            setMsgs((prev) => {
+            updateMsgs((prev) => {
               const c = [...prev];
               const last = c[c.length - 1];
               if (last?.role === "assistant") {
@@ -776,7 +791,7 @@ export function useChat({
       useChatStore.getState().setThreadRunning(tid, false);
       turnAcc.current?.finalizeError();
       patchEvents();
-      setMsgs((prev) => {
+      updateMsgs((prev) => {
         const c = [...prev];
         const last = c[c.length - 1];
         if (last?.role === "assistant") {
@@ -798,7 +813,7 @@ export function useChat({
   // turn.started hasn't been observed yet).
   const reattachRef = useRef<(tid: string) => void>(() => {});
   const reattach = useCallback(async (tid: string) => {
-    setMsgs((prev) => {
+    updateMsgs((prev) => {
       // Don't double-append if the last bubble is already a streaming turn.
       const last = prev[prev.length - 1];
       if (last?.role === "assistant" && last.status === "streaming") return prev;
@@ -844,7 +859,7 @@ export function useChat({
       id: `a_${Date.now()}`, role: "assistant", content: "", status: "streaming", events: [],
       startedAtMs: Date.now(),
     };
-    setMsgs((p) => [...p, u, a]);
+    updateMsgs((p) => [...p, u, a]);
     setBusy(true);
     setAsk(null);
     if (activeThreadId) useChatStore.getState().setThreadRunning(activeThreadId, true);
@@ -879,7 +894,7 @@ export function useChat({
       // another client). Roll back the optimistic user/assistant bubbles and
       // surface the conflict instead of leaving a phantom streaming turn.
       if (err?.status === 409 || /thread_busy|正在执行/i.test(String(err?.message ?? ""))) {
-        setMsgs((prev) => {
+        updateMsgs((prev) => {
           // Drop the trailing assistant placeholder we appended; keep the
           // user's text visible but mark the turn errored with the reason.
           const c = [...prev];
@@ -929,7 +944,7 @@ export function useChat({
       }
       turnAcc.current?.resolveAsk(body);
       const resolvedEvents = turnAcc.current?.snapshot();
-      setMsgs((prev) => {
+      updateMsgs((prev) => {
         const c = [...prev];
         const last = c[c.length - 1];
         if (last?.role === "assistant" && resolvedEvents) {
@@ -986,7 +1001,7 @@ export function useChat({
       useChatStore.getState().setThreadRunning(tid, false);
       sdk.stopThreadRun(tid).catch(() => { /* server may already be done */ });
     }
-    setMsgs((prev) => {
+    updateMsgs((prev) => {
       const c = [...prev];
       const last = c[c.length - 1];
       if (last?.role === "assistant" && last?.status === "streaming") {
@@ -1137,7 +1152,7 @@ export function useChat({
       // String actions
       switch (action as string) {
         case "clear":
-          setMsgs([]);
+          updateMsgs([]);
           setActiveThreadId(undefined);
           break;
         case "theme": {
