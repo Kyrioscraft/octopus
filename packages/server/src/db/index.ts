@@ -70,6 +70,8 @@ export interface WorkspaceRow {
   updatedAt: string;
   /** Timestamp the user last opened this workspace (drives the recents list). */
   lastOpenedAt?: string | null;
+  /** Soft-removed from the sidebar list; row + thread bindings are kept. */
+  hidden?: boolean;
 }
 
 /** A user-defined skill row (origin="user-defined", Phase F). */
@@ -264,6 +266,7 @@ function getDb(): BetterSQLite3Database<typeof schema> {
       created_at     TEXT NOT NULL,
       updated_at     TEXT NOT NULL,
       last_opened_at TEXT,
+      hidden         INTEGER NOT NULL DEFAULT 0,
       UNIQUE(user_id, name)
     );
     CREATE INDEX IF NOT EXISTS idx_workspaces_user_id ON workspaces(user_id);
@@ -307,6 +310,14 @@ function getDb(): BetterSQLite3Database<typeof schema> {
   }
   try {
     sqlite.exec(`ALTER TABLE workspaces ADD COLUMN last_opened_at TEXT;`);
+  } catch (err: any) {
+    if (!/duplicate column/i.test(err?.message ?? "")) throw err;
+  }
+  try {
+    // Soft removal: hidden workspaces keep their row + thread bindings (history
+    // survives, reopening the folder restores them) but are excluded from the
+    // sidebar list. 0/1, defaulting to visible.
+    sqlite.exec(`ALTER TABLE workspaces ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0;`);
   } catch (err: any) {
     if (!/duplicate column/i.test(err?.message ?? "")) throw err;
   }
@@ -397,6 +408,7 @@ function mapWorkspace(w: typeof schema.workspaces.$inferSelect): WorkspaceRow {
     createdAt: w.createdAt,
     updatedAt: w.updatedAt,
     lastOpenedAt: w.lastOpenedAt ?? null,
+    hidden: w.hidden === 1,
   };
   if (w.description != null) row.description = w.description;
   return row;
@@ -999,12 +1011,16 @@ export function upsertBuiltinSubagentOverride(
 // =============================================================================
 
 export function listWorkspaces(userId: string): WorkspaceRow[] {
+  // The sidebar recents list: soft-removed (hidden) workspaces are excluded.
+  // getWorkspace / getWorkspaceByPath deliberately do NOT filter on hidden —
+  // cwd resolution (resolveAgentCwd) and Open-Folder dedupe must keep seeing
+  // the row, or removed workspaces would silently fall back to DemoProject.
   // Order by last-opened (recents), then created, so the recents list surfaces
   // recently-used workspaces first. NULL last_opened_at sorts last on SQLite.
   return getDb()
     .select()
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.userId, userId))
+    .where(and(eq(schema.workspaces.userId, userId), eq(schema.workspaces.hidden, 0)))
     .orderBy(desc(schema.workspaces.lastOpenedAt), desc(schema.workspaces.createdAt))
     .all()
     .map(mapWorkspace);
@@ -1053,9 +1069,23 @@ export function insertWorkspace(row: WorkspaceRow): WorkspaceRow {
       createdAt: row.createdAt ?? now,
       updatedAt: now,
       lastOpenedAt: row.lastOpenedAt ?? null,
+      hidden: row.hidden ? 1 : 0,
     })
     .run();
   return { ...row, environment, createdAt: row.createdAt ?? now, updatedAt: now };
+}
+
+/**
+ * Flip a workspace's soft-removal flag. Does NOT touch threads or the bound
+ * directory — the row (and every thread's workspace_id) stays intact, so
+ * reopening the folder (same path → same row) restores the full history.
+ */
+export function setWorkspaceHidden(userId: string, id: string, hidden: boolean): void {
+  getDb()
+    .update(schema.workspaces)
+    .set({ hidden: hidden ? 1 : 0, updatedAt: new Date().toISOString() })
+    .where(and(eq(schema.workspaces.userId, userId), eq(schema.workspaces.id, id)))
+    .run();
 }
 
 export function updateWorkspace(

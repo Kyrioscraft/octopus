@@ -22,6 +22,7 @@ export function NavRow({
   collapsed = false,
   onClick,
   trail,
+  className,
 }: {
   icon: ReactNode;
   label: string;
@@ -30,10 +31,12 @@ export function NavRow({
   onClick?: () => void;
   /** Optional right-aligned content (counts, hover actions) — ignored when collapsed. */
   trail?: ReactNode;
+  /** Extra class for row-scoped CSS (e.g. `ws-item` for hover-revealed actions). */
+  className?: string;
 }) {
   const row = (
     <div
-      className={`ui-row focus-ring${active ? " is-active" : ""}`}
+      className={`ui-row focus-ring${className ? ` ${className}` : ""}${active ? " is-active" : ""}`}
       role="button"
       tabIndex={0}
       aria-current={active ? "page" : undefined}

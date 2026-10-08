@@ -636,9 +636,20 @@ export class OctopusClient {
     return res.workspace;
   }
 
-  /** Delete a workspace (threads are kept, their binding is cleared). */
+  /**
+   * Delete a workspace — DESTRUCTIVE: recursively deletes the bound directory
+   * and clears the bound threads' workspace_id, so reopening the folder will
+   * NOT restore the old history. Use {@link removeWorkspace} for the sidebar's
+   * 移除 action, which keeps everything.
+   */
   async deleteWorkspace(id: string): Promise<void> {
     await this.#delete(`/api/workspace/${encodeURIComponent(id)}`);
+  }
+
+  /** Remove a workspace from the sidebar list (soft): row, thread history and
+   *  the bound directory are all kept; reopening the folder restores it. */
+  async removeWorkspace(id: string): Promise<void> {
+    await this.#post(`/api/workspace/${encodeURIComponent(id)}/remove`, {});
   }
 
   /** List a directory inside a workspace. */

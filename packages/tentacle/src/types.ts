@@ -626,6 +626,9 @@ export interface Workspace {
   updatedAt: string;
   /** Timestamp the user last opened this workspace (recents ordering). */
   lastOpenedAt?: string | null;
+  /** Soft-removed from the sidebar list; the row and its thread history are
+   *  kept, and reopening the folder un-hides it. */
+  hidden?: boolean;
 }
 
 /** Create/update workspace request body. */

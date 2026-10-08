@@ -32,6 +32,7 @@ import {
   insertWorkspace,
   listWorkspaces,
   reassignThreadsWorkspace,
+  setWorkspaceHidden,
   touchWorkspaceLastOpened,
   updateWorkspace,
 } from "../db/index.js";
@@ -374,6 +375,11 @@ export function updateWorkspaceMeta(
 /**
  * Delete a workspace: null-out bound threads' workspace_id (keep threads),
  * rmtree the directory, then remove the row.
+ *
+ * DESTRUCTIVE — `existing.path` may be the user's real host folder (bound via
+ * Open Folder), and thread bindings are cleared so reopening that folder would
+ * NOT restore the old history. The sidebar's 移除 action must use
+ * {@link removeWorkspace} instead.
  */
 export function deleteWorkspace(userId: string, id: string): void {
   const existing = getWorkspace(userId, id);
@@ -386,6 +392,19 @@ export function deleteWorkspace(userId: string, id: string): void {
   }
   deleteWorkspaceRow(userId, id);
   logger.info(`Workspace deleted: ${id} (user=${userId})`);
+}
+
+/**
+ * Remove a workspace from the sidebar list WITHOUT destroying anything:
+ * the row keeps its thread bindings and its bound directory is untouched, so
+ * reopening the same folder (path dedupe → same row, un-hidden) shows the
+ * workspace's full conversation history again.
+ */
+export function removeWorkspace(userId: string, id: string): void {
+  const existing = getWorkspace(userId, id);
+  if (!existing) throw new NotFoundError();
+  setWorkspaceHidden(userId, id, true);
+  logger.info(`Workspace removed (soft): ${id} (user=${userId})`);
 }
 
 /**
@@ -426,6 +445,9 @@ export function openOrCreateWorkspace(userId: string, hostPath: string): Workspa
   // Dedupe by path: reopen the existing workspace instead of creating a dup.
   const existing = getWorkspaceByPath(userId, bound);
   if (existing) {
+    // Re-opening an explicitly removed workspace restores it to the list. Unhide
+    // BEFORE the touch so the returned row doesn't carry a stale hidden flag.
+    if (existing.hidden) setWorkspaceHidden(userId, existing.id, false);
     const touched = touchWorkspaceLastOpened(userId, existing.id);
     return touched ?? existing;
   }

@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { ConfigProvider } from "antd";
+import { App as AntdApp, ConfigProvider } from "antd";
 import zhCN from "antd/locale/zh_CN";
 import { buildAntdTheme } from "./styles/antdTheme.js";
 import { AppLayout } from "./layouts/AppLayout.js";
@@ -25,7 +25,10 @@ export function App() {
 
   return (
     <ConfigProvider locale={zhCN} theme={buildAntdTheme(isDark)}>
-      <BrowserRouter>
+      {/* antd App context: lets components call App.useApp() for message/modal
+          that inherit this provider's theme + locale. */}
+      <AntdApp>
+        <BrowserRouter>
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/" element={<ChatPage />} />
@@ -58,6 +61,7 @@ export function App() {
           <Route path="*" element={<ChatPage />} />
         </Routes>
       </BrowserRouter>
+      </AntdApp>
     </ConfigProvider>
   );
 }

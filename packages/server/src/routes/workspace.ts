@@ -28,6 +28,7 @@ import {
   listTree,
   openOrCreateWorkspace,
   readFile,
+  removeWorkspace,
   updateWorkspaceMeta,
   uploadFile,
   writeFile,
@@ -118,6 +119,22 @@ workspaceRouter.put("/:id", getOptionalUser, async (c) => {
     const ws = updateWorkspaceMeta(userId, c.req.param("id"), body as WorkspaceUpdateInput);
     if (!ws) return c.json({ error: "not_found", message: "工作区不存在" }, 404);
     return c.json({ workspace: ws });
+  } catch (err) {
+    return handleError(c, err);
+  }
+});
+
+/**
+ * Remove a workspace from the sidebar list (soft): the row, its thread bindings
+ * and the bound directory are all kept, so reopening the folder restores the
+ * workspace with its full conversation history. Use DELETE /:id for the
+ * destructive variant (rmtree + unbind).
+ */
+workspaceRouter.post("/:id/remove", getOptionalUser, (c) => {
+  const userId = c.var.user.sub;
+  try {
+    removeWorkspace(userId, c.req.param("id"));
+    return c.json({ success: true });
   } catch (err) {
     return handleError(c, err);
   }

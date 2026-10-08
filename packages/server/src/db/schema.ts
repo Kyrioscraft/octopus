@@ -69,6 +69,10 @@ export const workspaces = sqliteTable(
     updatedAt: text("updated_at").notNull(),
     // Timestamp of the last time the user opened this workspace (recents list).
     lastOpenedAt: text("last_opened_at"),
+    // Soft removal: hidden rows keep their row + thread bindings (so reopening the
+    // same folder restores the workspace id and its full history) but are excluded
+    // from the sidebar's recents list. 0/1 — mirrors the user_subagents convention.
+    hidden: integer("hidden").notNull().default(0),
   },
   (t) => ({
     uniq: uniqueIndex("ws_user_name").on(t.userId, t.name),

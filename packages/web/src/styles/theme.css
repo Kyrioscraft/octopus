@@ -437,14 +437,33 @@ body {
   transition: opacity var(--dur-1) var(--ease);
 }
 .thread-time { opacity: 1; color: var(--text-disabled); font-size: var(--text-2xs); line-height: 1; white-space: nowrap; }
-/* `pointer-events: none` while hidden — an invisible-but-clickable control would
-   swallow clicks meant for the row (here: the timestamp area). */
-.thread-more { opacity: 0; pointer-events: none; }
+/* ===== Hover-revealed row actions (the "…") =====
+   Shared by thread rows (`.thread-item`) and workspace rows (`.ws-item`).
+   `pointer-events: none` while hidden — an invisible-but-clickable control would
+   swallow clicks meant for the row. */
+.thread-more,
+.row-actions { opacity: 0; pointer-events: none; }
 .thread-item:hover .thread-time,
 .thread-item:focus-within .thread-time { opacity: 0; }
 .thread-item:hover .thread-more,
-.thread-item:focus-within .thread-more { opacity: 1; pointer-events: auto; }
-.thread-more:hover { color: var(--text-primary); }
+.thread-item:focus-within .thread-more,
+.ws-item:hover .row-actions,
+.ws-item:focus-within .row-actions { opacity: 1; pointer-events: auto; }
+.thread-more:hover,
+.row-actions:hover { color: var(--text-primary); }
+
+/* Workspace row's trailing slot: always-reserved 20px so the hover-revealed
+   "…" never reflows the label — a reflow between mousedown and antd's document
+   click listener makes the Dropdown close the instant it opens (the anchor node
+   gets replaced by React). Mirrors the thread rows' fixed 28px `.thread-slot`. */
+.ws-slot {
+  flex-shrink: 0;
+  width: 20px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
 
 /* ===== Collapsible rows: reveal the expand arrow on hover =====
    Applies to tool-call rows and tool-group bars. The arrow sits after the header

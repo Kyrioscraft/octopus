@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import type { ReactNode } from "react";
-import { Dropdown, Modal, Input, Popconfirm, message as antdMessage } from "antd";
+import { App, Dropdown, Modal, Input, Popconfirm, message as antdMessage } from "antd";
 import type { MenuProps } from "antd";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
@@ -99,6 +99,9 @@ const THEME_OPTIONS: { key: ThemeMode; label: string; icon: ReactNode }[] = [
  * identify it — expand to browse history.
  */
 export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
+  // App.useApp (not the static Modal.confirm) so the dialog inherits the
+  // ConfigProvider theme/locale.
+  const { modal } = App.useApp();
   const {
     threads, setThreads, activeThreadId, setActiveThreadId,
     workspaces, setWorkspaces, activeWorkspaceId, setActiveWorkspaceId,
@@ -277,6 +280,55 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
   const [pendingDelete, setPendingDelete] = useState<Thread | null>(null);
   const startDelete = (t: Thread) => setPendingDelete(t);
 
+  // --- Workspace remove (soft) ----------------------------------------------
+  // Confirm via Modal.confirm — NOT the hidden-trigger Popconfirm the thread
+  // deletion uses: that trigger has no geometry (display:none), so antd parks the
+  // popconfirm off-screen and the user never sees it (the menu item's click did
+  // nothing visible, which read as "no effect").
+
+  const menuForWorkspace = (ws: Workspace): MenuProps["items"] => [
+    {
+      key: "remove",
+      icon: <Trash2 />,
+      danger: true,
+      label: "移除",
+      onClick: ({ domEvent }) => {
+        domEvent.stopPropagation();
+        modal.confirm({
+          title: "移除工作区",
+          content: `从列表移除「${ws.name}」。对话记录会保留，下次打开该文件夹可继续查看。`,
+          okText: "移除",
+          okButtonProps: { danger: true },
+          cancelText: "取消",
+          onOk: () => handleRemoveWorkspace(ws),
+        });
+      },
+    },
+  ];
+
+  const handleRemoveWorkspace = async (ws: Workspace) => {
+    try {
+      // 1. Hide on the server (row + thread bindings + directory all kept).
+      await sdk.removeWorkspace(ws.id);
+      // 2. Refresh the list FIRST — setting the active id to undefined while the
+      //    stale list still holds the removed row would let the auto-select
+      //    effect immediately re-select it.
+      const next = await sdk.listWorkspaces();
+      setWorkspaces(next);
+      // 3. If the removed one was active, fall back to the recents head; the
+      //    reactive loadThreads effect then refetches for the new scope (same
+      //    mechanism as switchWorkspace).
+      if (ws.id === activeWorkspaceId) {
+        setActiveWorkspaceId(next[0]?.id);
+        setActiveThreadId(undefined);
+        navigate("/agent");
+      }
+      antdMessage.success(`已移除「${ws.name}」`);
+    } catch (err: any) {
+      antdMessage.error(err?.message ?? "移除失败");
+    }
+  };
+
   const handleNewChat = () => {
     setActiveThreadId(undefined);
     navigate("/agent");
@@ -447,10 +499,36 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
             {workspaces.map((ws) => (
               <div key={ws.id} style={{ marginBottom: 2 }}>
                 <NavRow
+                  className="ws-item"
                   icon={<Monitor />}
                   label={ws.name}
                   active={ws.id === activeWorkspaceId}
                   onClick={() => switchWorkspace(ws)}
+                  trail={
+                    /* Fixed-width slot — same trick as the thread rows' 28px
+                       `.thread-slot`. Without it, the "…" appearing on hover
+                       reflows the label; the mousedown then lands on a replaced
+                       DOM node and antd's Dropdown closes the instant it opens
+                       (its document-level listener sees the anchor vanish). */
+                    <span className="ws-slot">
+                      <Dropdown
+                        menu={{ items: menuForWorkspace(ws) }}
+                        trigger={["click"]}
+                        placement="bottomRight"
+                      >
+                        <span
+                          className="row-actions"
+                          role="button"
+                          aria-label="更多操作"
+                          title="更多操作"
+                          onClick={(e) => e.stopPropagation()}
+                          style={{ cursor: "pointer", color: "var(--text-tertiary)", fontSize: 15 }}
+                        >
+                          <MoreHorizontal />
+                        </span>
+                      </Dropdown>
+                    </span>
+                  }
                 />
               </div>
             ))}
@@ -772,4 +850,5 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
       </Popconfirm>
     );
   }
+
 }
