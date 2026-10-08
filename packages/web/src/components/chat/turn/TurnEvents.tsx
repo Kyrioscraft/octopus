@@ -158,6 +158,13 @@ function TraceBlock({
 
   const steps = countSteps(items);
   const failed = countFailures(items);
+  const cancelled = countCancelled(items);
+  // Per-entry liveness: only when THIS block still has an in-flight entry
+  // (a tool awaiting its result, an open reasoning episode, a streaming
+  // subagent) does the block read "执行中". A block whose work is done reads
+  // 已完成 even while the turn keeps streaming (e.g. the model is writing the
+  // final answer) — the old whole-turn flag kept every block "running".
+  const running = blockRunning(items);
 
   return (
     <div className="trace-block">
@@ -168,11 +175,11 @@ function TraceBlock({
         onClick={() => setOverride(!expanded)}
       >
         <span className="chev">{expanded ? <ChevronDown /> : <ChevronRight />}</span>
-        {isActive ? (
+        {running ? (
           <ShimmerText text="执行中" fontSize={12.5} fontWeight={500} />
         ) : (
           <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>
-            {failed > 0 ? "已结束" : "已完成"}
+            {failed > 0 ? "已结束" : cancelled > 0 ? "已中断" : "已完成"}
           </span>
         )}
         <span style={{ color: "var(--text-disabled)" }}>·</span>
@@ -182,6 +189,14 @@ function TraceBlock({
             <span style={{ color: "var(--text-disabled)" }}>·</span>
             <span className="tnum" style={{ color: "var(--color-error-500)" }}>
               {failed} 个失败
+            </span>
+          </>
+        )}
+        {cancelled > 0 && (
+          <>
+            <span style={{ color: "var(--text-disabled)" }}>·</span>
+            <span className="tnum" style={{ color: "var(--text-tertiary)" }}>
+              {cancelled} 个已取消
             </span>
           </>
         )}
@@ -211,15 +226,7 @@ function TraceEntry({
   if (item.kind === "tool-group") {
     return (
       <div className="trace-entry">
-        <span
-          className={`trace-dot${
-            item.tools.some((t) => t.entry.status === "error")
-              ? " is-error"
-              : item.tools.some((t) => t.entry.status !== "done" && t.entry.status !== "error")
-                ? " is-running"
-                : ""
-          }`}
-        />
+        <span className={`trace-dot${groupDotClass(item.tools)}`} />
         <div className="trace-entry-body">
           <ToolGroupBar tools={item.tools} />
         </div>
@@ -230,16 +237,24 @@ function TraceEntry({
   const event = item.event;
   if (event.type === "text") return null;
 
-  const dotClass =
-    event.type === "tool"
-      ? event.entry.status === "error"
-        ? " is-error"
-        : event.entry.status !== "done"
-          ? " is-running"
-          : ""
-      : event.type === "reasoning" && isActive
+  // Per-entry status: each dot reflects THAT entry's own lifecycle, never the
+  // whole turn's. A closed reasoning episode / settled tool / done subagent
+  // reads settled even while the turn is still streaming elsewhere.
+  let dotClass = "";
+  if (event.type === "tool") {
+    dotClass = toolDotClass(event.entry.status);
+  } else if (event.type === "subagent") {
+    dotClass =
+      event.status === "streaming"
         ? " is-running"
-        : "";
+        : event.status === "cancelled"
+          ? " is-cancelled"
+          : "";
+  } else if (event.type === "reasoning") {
+    // Live only while the episode is open (endedAt unset). The old rule
+    // pulsed every reasoning dot for the whole streaming turn.
+    dotClass = event.endedAt === undefined ? " is-running" : "";
+  }
 
   return (
     <div className="trace-entry">
@@ -249,6 +264,52 @@ function TraceEntry({
       </div>
     </div>
   );
+}
+
+/** Dot class for a single tool entry status. */
+function toolDotClass(status: string): string {
+  if (status === "error") return " is-error";
+  if (status === "cancelled") return " is-cancelled";
+  if (status !== "done") return " is-running";
+  return "";
+}
+
+/** Dot class for a contiguous exploration group: worst-case of its members. */
+function groupDotClass(tools: { entry: { status: string } }[]): string {
+  if (tools.some((t) => t.entry.status === "error")) return " is-error";
+  if (tools.some((t) => t.entry.status === "cancelled")) return " is-cancelled";
+  if (tools.some((t) => t.entry.status !== "done" && t.entry.status !== "error")) return " is-running";
+  return "";
+}
+
+/** Does this block still have an in-flight entry? Drives the summary line. */
+function blockRunning(items: TurnItem[]): boolean {
+  for (const item of items) {
+    if (item.kind === "tool-group") {
+      if (item.tools.some((t) => t.entry.status !== "done" && t.entry.status !== "error" && t.entry.status !== "cancelled")) return true;
+      continue;
+    }
+    const e = item.event;
+    if (e.type === "tool" && e.entry.status !== "done" && e.entry.status !== "error" && e.entry.status !== "cancelled") return true;
+    if (e.type === "subagent" && e.status === "streaming") return true;
+    if (e.type === "reasoning" && e.endedAt === undefined) return true;
+  }
+  return false;
+}
+
+/** Number of user-cancelled entries in this block (tools + subagents). */
+function countCancelled(items: TurnItem[]): number {
+  let n = 0;
+  for (const item of items) {
+    if (item.kind === "tool-group") {
+      n += item.tools.filter((t) => t.entry.status === "cancelled").length;
+    } else if (item.event.type === "tool" && item.event.entry.status === "cancelled") {
+      n += 1;
+    } else if (item.event.type === "subagent" && item.event.status === "cancelled") {
+      n += 1;
+    }
+  }
+  return n;
 }
 
 /* ---------------------------------------------------------------------------

@@ -83,7 +83,9 @@ function normalizeHistory(rows: any[]): Msg[] {
       if (lastEvent?.type === "tool") {
         lastEvent.entry = {
           ...lastEvent.entry,
-          status: "done",
+          // The turn was interrupted here — the tool never completed, so it
+          // reads 已取消 rather than done (matches the live stopped state).
+          status: "cancelled",
           result: lastEvent.entry.result
             ? lastEvent.entry.result
             : m.content,
@@ -242,17 +244,22 @@ export function useChat({
   // new array into the global chat store (`companionMsgs`) for the layout-level
   // companion panel (it cannot read this hook's local state). Direct `setMsgs`
   // calls would leave the companion with stale todos/subagents.
+  //
+  // The mirror happens in an EFFECT, not inside the setState updater: updaters
+  // must be pure (React StrictMode invokes them twice, and side effects there
+  // fire double store writes / can loop). The effect runs once per committed
+  // msgs change — cheap (reference pass), and the companion only needs the
+  // settled list, not per-token intermediate arrays.
   const setCompanionMsgs = useChatStore((s) => s.setCompanionMsgs);
   const updateMsgs = useCallback(
     (action: Msg[] | ((prev: Msg[]) => Msg[])) => {
-      setMsgs((prev) => {
-        const next = typeof action === "function" ? action(prev) : action;
-        setCompanionMsgs(next);
-        return next;
-      });
+      setMsgs(action);
     },
-    [setCompanionMsgs],
+    [],
   );
+  useEffect(() => {
+    setCompanionMsgs(msgs);
+  }, [msgs, setCompanionMsgs]);
   /** Snapshot fetch in flight (thread switch) — shows a centered spinner
    *  instead of the misleading welcome screen while the list is blanked. */
   const [loading, setLoading] = useState(false);
@@ -292,6 +299,9 @@ export function useChat({
   // resolveRef always points at the latest `resolve` callback. doStream reaches
   // for resolve via this ref to avoid a circular useCallback dependency.
   const resolveRef = useRef<(body: ResumeRequestBody, meta?: { approveForSession?: boolean }) => void>(() => {});
+  // patchEventsRef serves the same bridge for `stop` (declared before
+  // doStream): it flushes the accumulator snapshot into the last bubble.
+  const patchEventsRef = useRef<(() => void) | null>(null);
   // Mirror of sessionAllowlist for use inside doStream's auto-approve fast path.
   const sessionAllowlistRef = useRef<Set<string>>(new Set());
 
@@ -503,7 +513,9 @@ export function useChat({
             settleTurn({ workDurationMs: ev.durationMs }, (a) => a.finalizeDone());
             break;
           case "turn.interrupted":
-            settleTurn({ workDurationMs: ev.durationMs }, (a) => a.finalizeDone());
+            // A replayed interruption = the user cancelled that run; in-flight
+            // entries read 已取消 (same as the live path).
+            settleTurn({ workDurationMs: ev.durationMs }, (a) => a.finalizeCancelled());
             break;
           case "turn.error":
             settleTurn({}, (a) => a.finalizeError());
@@ -579,19 +591,44 @@ export function useChat({
   // ---- Stream consumer ----
   const doStream = useCallback(async (stream: AsyncGenerator<StreamEvent>, tid: string) => {
     const setThreadRunning = useChatStore.getState().setThreadRunning;
-    /** Patch the last assistant bubble's events from the accumulator snapshot. */
+    // Streaming renders are throttled to ~20 commits/sec: token events arrive
+    // faster than React can commit, and every patch re-renders the transcript
+    // (each commit re-parses the accumulating markdown — O(n) per commit).
+    // The accumulator still consumes EVERY event (no data loss); only the
+    // React commit is coalesced. Terminal events flush immediately so the
+    // final state is always exact.
+    let lastPatchAt = 0;
+    let patchTimer: ReturnType<typeof setTimeout> | null = null;
+    const PATCH_INTERVAL = 50;
     const patchEvents = () => {
       const acc = turnAcc.current;
       if (!acc) return;
-      const events = acc.snapshot();
-      updateMsgs((prev) => {
-        const c = [...prev];
-        const last = c[c.length - 1];
-        if (!(last?.role === "assistant" && last?.status === "streaming")) return prev;
-        c[c.length - 1] = { ...last, events, content: contentFromEvents(events) };
-        return c;
-      });
+      const flush = () => {
+        patchTimer = null;
+        lastPatchAt = Date.now();
+        const events = acc.snapshot();
+        updateMsgs((prev) => {
+          const c = [...prev];
+          const last = c[c.length - 1];
+          if (!(last?.role === "assistant" && last?.status === "streaming")) return prev;
+          c[c.length - 1] = { ...last, events, content: contentFromEvents(events) };
+          return c;
+        });
+      };
+      const since = Date.now() - lastPatchAt;
+      if (since >= PATCH_INTERVAL) {
+        flush();
+      } else if (!patchTimer) {
+        patchTimer = setTimeout(flush, PATCH_INTERVAL - since);
+      }
     };
+    /** Flush any pending throttled patch immediately (turn lifecycle events). */
+    const flushPatch = () => {
+      if (patchTimer) { clearTimeout(patchTimer); patchTimer = null; }
+      lastPatchAt = 0;
+    };
+    // Keep the bridge current on every doStream invocation.
+    patchEventsRef.current = () => { flushPatch(); patchEvents(); };
     /** Freeze the turn's work timer: prefer the server-reported duration,
      *  else the local startedAtMs elapsed. */
     const freezeTimer = (durationMs?: number) =>
@@ -727,6 +764,7 @@ export function useChat({
             break;
           }
           case "turn.finished": {
+            flushPatch();
             setThreadRunning(tid, false);
             freezeTimer(ev.durationMs);
             turnAcc.current?.finalizeDone();
@@ -745,9 +783,11 @@ export function useChat({
           }
           case "turn.interrupted": {
             // Explicit stop (server saved partial output + emitted this).
+            // The user cancelled: in-flight tools/subagents read 已取消, not done.
+            flushPatch();
             setThreadRunning(tid, false);
             freezeTimer(ev.durationMs);
-            turnAcc.current?.finalizeDone();
+            turnAcc.current?.finalizeCancelled();
             patchEvents();
             updateMsgs((prev) => {
               const c = [...prev];
@@ -761,6 +801,7 @@ export function useChat({
             break;
           }
           case "turn.error": {
+            flushPatch();
             setThreadRunning(tid, false);
             freezeTimer(undefined);
             turnAcc.current?.finalizeError();
@@ -783,7 +824,7 @@ export function useChat({
         }
       }
     } catch (err: any) {
-      if (err?.name === "AbortError") return;
+      if (err?.name === "AbortError") { if (patchTimer) { clearTimeout(patchTimer); patchTimer = null; } return; }
       // Transport failure (server restart / network drop mid-stream). The
       // run's fate is unknown — clear the local running flag so the sidebar
       // spinner doesn't spin forever (the next /threads poll or re-entry
@@ -1001,6 +1042,11 @@ export function useChat({
       useChatStore.getState().setThreadRunning(tid, false);
       sdk.stopThreadRun(tid).catch(() => { /* server may already be done */ });
     }
+    // Finalize the timeline AS CANCELLED: tools that never returned a result
+    // were interrupted by the user — they must not read "done". Patching here
+    // gives immediate feedback; the server's turn.interrupted then confirms.
+    turnAcc.current?.finalizeCancelled();
+    patchEventsRef.current?.();
     updateMsgs((prev) => {
       const c = [...prev];
       const last = c[c.length - 1];

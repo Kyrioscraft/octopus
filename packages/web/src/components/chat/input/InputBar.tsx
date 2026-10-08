@@ -427,7 +427,7 @@ export function InputBar({
             onClick={busy ? onStop : onSend}
             disabled={!busy && canSend}
           >
-            {busy ? <Square size={13} /> : <ArrowUp size={16} />}
+            {busy ? <Square size={13} fill="currentColor" /> : <ArrowUp size={16} />}
           </button>
         </Tooltip>
       </div>

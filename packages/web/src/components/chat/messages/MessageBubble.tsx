@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Copy, Check } from "lucide-react";
 import { message as antdMessage } from "antd";
 import { TurnEvents } from "../turn/TurnEvents.js";
@@ -21,8 +21,13 @@ import type { Msg } from "../types.js";
  *
  * Hovering a row reveals its copy action. Also renders the legacy error hint
  * below the bubble when present.
+ *
+ * Memoized: during streaming every token patch changes only the LAST message's
+ * identity — memo lets the (potentially hundreds of) finished messages skip
+ * re-rendering entirely, which is the difference between a smooth and a
+ * melting transcript on long conversations.
  */
-export function MessageBubble({
+export const MessageBubble = memo(function MessageBubble({
   msg,
   onOpenSubagent,
   workspaceId,
@@ -97,8 +102,11 @@ export function MessageBubble({
         </div>
       )}
 
-      {/* Copy action — revealed on row hover. */}
-      <MessageActions msg={msg} />
+      {/* Copy action — finished messages only: revealed on row hover. During
+          streaming the turn is still changing, so no actions row at all. */}
+      {!(msg.role === "assistant" && msg.status === "streaming") && (
+        <MessageActions msg={msg} />
+      )}
 
       {/* Error hint */}
       {msg.error && (
@@ -114,7 +122,7 @@ export function MessageBubble({
       )}
     </div>
   );
-}
+});
 
 /** The text a copy action should put on the clipboard for this message. */
 function copyPayload(msg: Msg): string {
@@ -128,7 +136,8 @@ function copyPayload(msg: Msg): string {
 
 /**
  * Per-message actions. Currently copy — the extension point for regenerate /
- * edit later. Hidden until the row is hovered (or focused) so the transcript
+ * edit later. Rendered only for FINISHED messages (the caller gates on turn
+ * status) and hidden until the row is hovered (or focused) so the transcript
  * stays quiet; the CSS lives in theme.css (`.msg-actions`).
  */
 function MessageActions({ msg }: { msg: Msg }) {
@@ -138,7 +147,7 @@ function MessageActions({ msg }: { msg: Msg }) {
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const payload = copyPayload(msg);
-  if (!payload.trim()) return null;
+  const copyable = !!payload.trim();
 
   const onCopy = () => {
     navigator.clipboard?.writeText(payload).then(
@@ -158,6 +167,7 @@ function MessageActions({ msg }: { msg: Msg }) {
       style={{
         display: "flex",
         gap: 2,
+        height: 26,
         marginTop: 6,
         justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
       }}
@@ -168,6 +178,7 @@ function MessageActions({ msg }: { msg: Msg }) {
         style={{ width: 26, height: 26 }}
         title="复制"
         aria-label="复制"
+        disabled={!copyable}
         onClick={onCopy}
       >
         <span style={{ display: "flex", fontSize: 13 }}>

@@ -22,6 +22,7 @@ export function FileWriteRow({ entry }: ToolCardProps) {
         <ToolRowHeader
           verb="写入"
           running={running}
+          cancelled={entry.status === "cancelled"}
           detail={fileName || "(unknown)"}
           detailTitle={filePath}
           tail={<DiffStat added={added} removed={0} />}

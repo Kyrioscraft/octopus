@@ -20,6 +20,7 @@ export function FileReadRow({ entry }: ToolCardProps) {
         <ToolRowHeader
           verb="读取"
           running={running}
+          cancelled={entry.status === "cancelled"}
           detail={fileName || "(unknown)"}
           detailTitle={filePath}
         />

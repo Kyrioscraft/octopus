@@ -382,6 +382,30 @@ export class TurnEventAccumulator {
   }
 
   /**
+   * Mark still-pending tool events as CANCELLED (call when the user stops the
+   * turn): their results never arrived because the run was aborted, so they
+   * must not read "done". Entries that already have a result keep their real
+   * status. Recurses into nested subagent accumulators.
+   */
+  finalizeCancelled(): void {
+    for (const ev of this.events) {
+      if (ev.type === "tool" && (ev.entry.status === "pending" || ev.entry.status === "running")) {
+        ev.entry = { ...ev.entry, status: "cancelled" };
+      }
+    }
+    // Recurse: each streaming subagent's own accumulator finalizes its nested
+    // timeline, and the parent loop below re-syncs the nested snapshots.
+    for (const { innerAcc, eventIdx } of this.subagentIndex.values()) {
+      innerAcc.finalizeCancelled();
+      const ev = this.events[eventIdx];
+      if (ev?.type === "subagent" && ev.status === "streaming") {
+        ev.status = "cancelled";
+        ev.events = innerAcc.snapshot();
+      }
+    }
+  }
+
+  /**
    * Mark any still-pending tool events as errored (call when the turn ends
    * with an error). Recurses into nested subagent accumulators.
    */

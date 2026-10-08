@@ -102,11 +102,18 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
   // App.useApp (not the static Modal.confirm) so the dialog inherits the
   // ConfigProvider theme/locale.
   const { modal } = App.useApp();
-  const {
-    threads, setThreads, activeThreadId, setActiveThreadId,
-    workspaces, setWorkspaces, activeWorkspaceId, setActiveWorkspaceId,
-    runningThreads,
-  } = useChatStore();
+  // Selector-based subscriptions — the sidebar renders ~35 thread rows; a bare
+  // useChatStore() re-rendered it on EVERY store change including the per-token
+  // `companionMsgs` mirror during streaming.
+  const threads = useChatStore((s) => s.threads);
+  const setThreads = useChatStore((s) => s.setThreads);
+  const activeThreadId = useChatStore((s) => s.activeThreadId);
+  const setActiveThreadId = useChatStore((s) => s.setActiveThreadId);
+  const workspaces = useChatStore((s) => s.workspaces);
+  const setWorkspaces = useChatStore((s) => s.setWorkspaces);
+  const activeWorkspaceId = useChatStore((s) => s.activeWorkspaceId);
+  const setActiveWorkspaceId = useChatStore((s) => s.setActiveWorkspaceId);
+  const runningThreads = useChatStore((s) => s.runningThreads);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const themeMode = useThemeStore((s) => s.mode);
   const setThemeMode = useThemeStore((s) => s.setMode);

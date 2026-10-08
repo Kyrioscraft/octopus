@@ -30,11 +30,18 @@ const sdk = new OctopusClient();
  */
 export function ChatPage() {
   const [searchParams] = useSearchParams();
-  const {
-    threads, activeThreadId, setActiveThreadId, setThreads,
-    activeWorkspaceId,
-    companionOpen, setCompanionOpen, openCompanionTab, companionTabs,
-  } = useChatStore();
+  // Selector-based subscriptions — a bare useChatStore() re-renders this whole
+  // page on EVERY store change, including the per-token `companionMsgs` mirror
+  // during streaming (a major crash driver on long runs).
+  const threads = useChatStore((s) => s.threads);
+  const activeThreadId = useChatStore((s) => s.activeThreadId);
+  const setActiveThreadId = useChatStore((s) => s.setActiveThreadId);
+  const setThreads = useChatStore((s) => s.setThreads);
+  const activeWorkspaceId = useChatStore((s) => s.activeWorkspaceId);
+  const companionOpen = useChatStore((s) => s.companionOpen);
+  const setCompanionOpen = useChatStore((s) => s.setCompanionOpen);
+  const openCompanionTab = useChatStore((s) => s.openCompanionTab);
+  const companionTabs = useChatStore((s) => s.companionTabs);
 
   const endRef = useRef<HTMLDivElement>(null);
   const { scrollContainerRef, isStuck, scrollToBottom } = useStickToBottom();
@@ -194,27 +201,37 @@ export function ChatPage() {
               // Let clicks through the gradient's transparent region.
               pointerEvents: "none",
             }}>
-              {/* "Back to bottom" pill — floats centered just above the composer
-                  when the user has scrolled up. */}
+              {/* "Back to bottom" pill — floats centered above the composer when
+                  the user has scrolled up. zcode-style: a compact round icon
+                  button on a solid elevated surface — noticeable, but quiet. */}
               {!isStuck && (
                 <button
                   type="button"
-                  className="icon-btn focus-ring"
+                  className="focus-ring"
                   onClick={() => scrollToBottom({ force: true, smooth: true })}
                   aria-label="回到底部"
                   title="回到底部"
                   style={{
                     position: "absolute",
-                    top: -10,
+                    // Well above the composer's top edge — inside the clear gap
+                    // between the last message line and the input box.
+                    top: -48,
                     left: "50%",
                     transform: "translateX(-50%)",
-                    width: 34,
+                    zIndex: 6,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    width: 28,
                     height: 28,
-                    borderRadius: "var(--radius-full)",
+                    borderRadius: "50%",
                     background: "var(--bg-elevated)",
                     border: "1px solid var(--border-default)",
-                    boxShadow: "var(--shadow-md)",
+                    boxShadow: "var(--shadow-lg)",
+                    color: "var(--text-secondary)",
+                    cursor: "pointer",
                     pointerEvents: "auto",
+                    padding: 0,
                   }}
                 >
                   {/* Inline down-arrow SVG (project uses custom SVG icons, not @ant-design/icons) */}

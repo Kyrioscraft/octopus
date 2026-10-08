@@ -97,8 +97,9 @@ export interface SubagentEvent extends BaseTurnEvent {
   description: string;
   /** Nested internal timeline (reuses TurnEvent → supports recursion). */
   events: TurnEvent[];
-  /** Lifecycle: streaming (in progress) or done (result returned to main agent). */
-  status: "streaming" | "done";
+  /** Lifecycle: streaming (in progress), done (result returned), or
+   *  cancelled (the user stopped the run while this subagent was working). */
+  status: "streaming" | "done" | "cancelled";
   /** Final result, for the collapsed summary. */
   result?: string;
 }

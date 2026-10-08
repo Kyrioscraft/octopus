@@ -80,6 +80,7 @@ export function FileEditRow({ entry }: ToolCardProps) {
         <ToolRowHeader
           verb="编辑"
           running={running}
+          cancelled={entry.status === "cancelled"}
           detail={fileName || "(unknown)"}
           detailTitle={filePath}
           tail={<DiffStat added={added} removed={removed} />}

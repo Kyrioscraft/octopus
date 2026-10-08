@@ -31,7 +31,8 @@ export function MessageList({
 }) {
   return (
     // The large bottom inset reserves room for the composer, which floats over
-    // the transcript (see pages/Chat.tsx). Keep the two in step.
+    // the transcript (see pages/Chat.tsx): composer ~110px tall + its 14px
+    // bottom padding + the busy-dots' 56px stand-off margin ≈ this value.
     <div style={{ padding: "24px 24px 148px" }}>
       <div style={{ maxWidth: "var(--content-max)", width: "100%", margin: "0 auto" }}>
         {msgs.map((m) => (
@@ -48,6 +49,9 @@ export function MessageList({
               gap: 4,
               height: 24,
               paddingLeft: 2,
+              // Breathing room between the dots and the floating composer below.
+              marginTop: 16,
+              marginBottom: 36,
               animation: "fadeIn var(--dur-3) var(--ease-out)",
             }}
           >

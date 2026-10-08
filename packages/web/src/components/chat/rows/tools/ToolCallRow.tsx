@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { Collapse } from "antd";
 import {
+  CircleSlash,
   CircleX,
 } from "lucide-react";
 import type { ToolCallEntry } from "./types.js";
@@ -39,10 +40,12 @@ export interface ToolCallRowProps {
  *
  * The tool's own type icon is ALWAYS shown (muted while done/settled — the
  * running state is signalled by the shimmer on the tool name and the rail's
- * pulsing dot, so no spinner here). Error → CircleX.
+ * pulsing dot, so no spinner here). Error → CircleX; cancelled (user stopped
+ * the run mid-call) → CircleSlash.
  */
 function RowIcon({ name, status }: { name: string; status: ToolCallEntry["status"] }) {
   if (status === "error") return <CircleX style={{ color: "var(--color-error-500)" }} />;
+  if (status === "cancelled") return <CircleSlash style={{ color: "var(--text-disabled)" }} />;
   return (
     <span style={{ color: "var(--text-tertiary)", display: "inline-flex", alignItems: "center" }}>
       {getToolIcon(name)}
@@ -84,9 +87,14 @@ export function ToolCallRow({ entry, header, body, defaultExpanded }: ToolCallRo
       </span>
       {header ?? (
         // Running/pending: shimmer the tool name so the active row stands out;
-        // done/error: plain label.
+        // done/error/cancelled: plain label (cancelled also gets a suffix).
         entry.status === "running" || entry.status === "pending" ? (
           <ShimmerText text={displayName} fontSize={12.5} />
+        ) : entry.status === "cancelled" ? (
+          <span>
+            {displayName}
+            <span style={{ color: "var(--text-disabled)" }}> · 已取消</span>
+          </span>
         ) : (
           <span>{displayName}</span>
         )
@@ -146,12 +154,15 @@ const bodyLabelStyle: React.CSSProperties = {
 export function ToolRowHeader({
   verb,
   running = false,
+  cancelled = false,
   detail,
   detailTitle,
   tail,
 }: {
   verb: string;
   running?: boolean;
+  /** Renders 「<verb> · 已取消」 — the user stopped the run mid-call. */
+  cancelled?: boolean;
   /** Monospace detail (a file name, a command). */
   detail?: string;
   /** Tooltip for the detail — usually the untruncated path. */
@@ -165,6 +176,9 @@ export function ToolRowHeader({
         <ShimmerText text={verb} fontSize={12.5} />
       ) : (
         <span style={{ color: "var(--text-tertiary)" }}>{verb}</span>
+      )}
+      {cancelled && (
+        <span style={{ color: "var(--text-disabled)" }}>· 已取消</span>
       )}
       <span style={{ color: "var(--text-disabled)" }}>·</span>
       {detail && (

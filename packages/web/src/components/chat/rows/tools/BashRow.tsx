@@ -26,6 +26,9 @@ export function BashRow({ entry }: ToolCardProps) {
           ) : (
             <span style={{ color: "var(--text-tertiary)" }}>执行</span>
           )}
+          {entry.status === "cancelled" && (
+            <span style={{ color: "var(--text-disabled)" }}>· 已取消</span>
+          )}
           <span style={{ color: "var(--text-disabled)" }}>·</span>
           <code
             title={command}

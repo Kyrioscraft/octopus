@@ -577,6 +577,16 @@ body {
   animation: dotPulse 1.4s var(--ease) infinite;
 }
 .trace-dot.is-error { background: var(--color-error-500); }
+/* Cancelled (user stopped the run): hollow grey — distinct from done (solid
+   grey) so a stopped turn reads at a glance. */
+.trace-dot.is-cancelled {
+  background: transparent;
+  border: 1.5px solid var(--text-disabled);
+  width: 7px;
+  height: 7px;
+  margin-top: 11.5px;
+  margin-left: -0.5px;
+}
 
 /* Row header: hover fills the row so it reads as clickable. */
 .trace-head {

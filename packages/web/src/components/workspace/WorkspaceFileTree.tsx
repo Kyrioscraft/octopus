@@ -29,7 +29,10 @@ import { useChatStore } from "../../stores/chat.js";
 const sdk = new OctopusClient();
 
 export function WorkspaceFileTree() {
-  const { workspaces, activeWorkspaceId } = useChatStore();
+  // Selector-based — the companion panel subtree must not re-render on every
+  // streaming store write (companionMsgs mirror).
+  const workspaces = useChatStore((s) => s.workspaces);
+  const activeWorkspaceId = useChatStore((s) => s.activeWorkspaceId);
   const activeWorkspace = useMemo(
     () => workspaces.find((w) => w.id === activeWorkspaceId) ?? null,
     [workspaces, activeWorkspaceId],

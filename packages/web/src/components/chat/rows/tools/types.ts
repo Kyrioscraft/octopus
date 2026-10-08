@@ -8,11 +8,11 @@
  * have to deal with the two-message split.
  *
  * Equivalent to yuxi's flattened tool-call model: one entry per invocation,
- * with status tracking (pending → done/error) and the result back-filled from
- * the matching ToolMessage.
+ * with status tracking (pending → done/error/cancelled) and the result
+ * back-filled from the matching ToolMessage.
  */
 
-export type ToolCallStatus = "pending" | "running" | "done" | "error";
+export type ToolCallStatus = "pending" | "running" | "done" | "error" | "cancelled";
 
 export interface ToolCallEntry {
   /** LangChain tool_call_id — used to pair the AI tool_call with its ToolMessage result. */
@@ -21,7 +21,10 @@ export interface ToolCallEntry {
   name: string;
   /** Parsed tool arguments (already an object on the wire — LangChain parses the JSON). */
   args: Record<string, unknown>;
-  /** Lifecycle status. `pending` = AI emitted the call, result not yet received. */
+  /**
+   * Lifecycle status. `pending` = AI emitted the call, result not yet received.
+   * `cancelled` = the user stopped the turn while this call was in flight.
+   */
   status: ToolCallStatus;
   /** ToolMessage.content, back-filled when the matching `type:"tool"` chunk arrives. */
   result?: string;
