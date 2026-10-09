@@ -170,6 +170,8 @@ export function InputBar({
   commands,
   onSlashSelect,
   onSystemCommand,
+  workspaceTrigger,
+  onWorkspaceTriggerClick,
 }: {
   text: string;
   setText: (v: string) => void;
@@ -191,6 +193,11 @@ export function InputBar({
   commands: SlashCommandEntry[];
   onSlashSelect: (cmd: SlashCommandEntry) => void;
   onSystemCommand: (cmd: SlashCommandEntry) => void;
+  /** No-workspace trigger state (deepseek-harness style): the whole card
+   *  becomes a dashed click target that opens the workspace picker instead of
+   *  accepting input — a conversation needs a workspace before it can start. */
+  workspaceTrigger?: boolean;
+  onWorkspaceTriggerClick?: () => void;
 }) {
   // ---- Slash-command state ----
   const [slashMenuVisible, setSlashMenuVisible] = useState(false);
@@ -288,15 +295,30 @@ export function InputBar({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`composer${dragging ? " is-dragging" : ""}`}
+      onClick={workspaceTrigger ? onWorkspaceTriggerClick : undefined}
+      onKeyDown={workspaceTrigger
+        ? (e) => {
+            // Keyboard parity with dsh: Enter/space on the card opens the picker.
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              onWorkspaceTriggerClick?.();
+            }
+          }
+        : undefined}
+      className={`composer${dragging ? " is-dragging" : ""}${workspaceTrigger ? " is-ws-trigger" : ""}`}
+      role={workspaceTrigger ? "button" : undefined}
+      aria-label={workspaceTrigger ? "选择工作区" : undefined}
+      tabIndex={workspaceTrigger ? 0 : undefined}
       style={{
         position: "relative",
         display: "flex", flexDirection: "column",
         background: "var(--bg-elevated)",
-        border: "1px solid var(--border-default)",
+        border: workspaceTrigger ? "1px dashed var(--border-strong)" : "1px solid var(--border-default)",
         borderRadius: "var(--radius-lg)",
         padding: "10px 10px 8px",
-        boxShadow: "var(--shadow-md)",
+        boxShadow: workspaceTrigger ? "none" : "var(--shadow-md)",
+        cursor: workspaceTrigger ? "pointer" : undefined,
+        transition: "border-color var(--dur-2) var(--ease), box-shadow var(--dur-2) var(--ease)",
       }}
     >
       {/* Slash-command autocomplete menu (above the textarea) */}
@@ -330,24 +352,30 @@ export function InputBar({
 
       {/* Textarea */}
       <TextArea
-        value={text} onChange={(e) => handleTextChange(e.target.value)}
+        value={workspaceTrigger ? "" : text}
+        onChange={(e) => handleTextChange(e.target.value)}
         onKeyDown={onKey}
         onPaste={handlePaste}
-        placeholder={ACCESS_MODES[accessMode].placeholder}
+        placeholder={workspaceTrigger ? "选择一个工作区开始" : ACCESS_MODES[accessMode].placeholder}
         autoSize={showStart ? { minRows: 3, maxRows: 8 } : { minRows: 2, maxRows: 8 }}
-        disabled={busy}
+        disabled={busy || workspaceTrigger}
         variant="borderless"
         style={{
           flex: 1, resize: "none", fontSize: "var(--text-md)", fontFamily: "inherit",
           lineHeight: 1.6, padding: "2px 4px", background: "transparent",
+          cursor: workspaceTrigger ? "pointer" : undefined,
         }}
-        autoFocus
+        autoFocus={!workspaceTrigger}
       />
 
       {/* Bottom toolbar row — all controls live here, send button rightmost */}
       <div style={{
         display: "flex", alignItems: "center", gap: 6,
         marginTop: 8, flexShrink: 0,
+        // Trigger state: controls stay visible but inert — picking a workspace
+        // is the only meaningful action on this card.
+        opacity: workspaceTrigger ? 0.55 : 1,
+        pointerEvents: workspaceTrigger ? "none" : undefined,
       }}>
         {/* Left group: + attachments (unified picker — images, docs, anything),
             access mode */}

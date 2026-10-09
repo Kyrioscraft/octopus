@@ -170,8 +170,12 @@ export function Sidebar({ collapsed = false }: { collapsed?: boolean }) {
 
   const loadThreads = useCallback(async () => {
     try {
-      // Scope the list to the active workspace when one is selected.
-      const scope = activeWorkspaceId ? { workspaceId: activeWorkspaceId } : undefined;
+      // With an active workspace: only its conversations. With none: ONLY
+      // unbound conversations — removed workspaces' history stays recoverable
+      // (reopen the folder) but no longer leaks into this list.
+      const scope = activeWorkspaceId
+        ? { workspaceId: activeWorkspaceId }
+        : { workspaceId: "unbound" as const };
       setThreads(await sdk.listThreads(scope));
     } catch { /* */ }
   }, [setThreads, activeWorkspaceId]);

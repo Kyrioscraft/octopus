@@ -43,6 +43,7 @@ import {
   relativePath,
   resolveSafePath,
   threadOutputsDir,
+  userWorkspacesDir,
   validateSegment,
   workspaceDir,
   browsableRoots,
@@ -691,15 +692,34 @@ export function uploadFile(
 // =============================================================================
 
 /**
- * Given a user + optional workspace id, return the directory the agent should
- * treat as its `cwd`. Falls back to the user's default workspace so every
- * conversation has a writable home.
+ * Resolve the directory the agent should operate in for a conversation.
+ *
+ * Explicit workspace id: its bound directory (removed/hidden rows still
+ * resolve — history threads keep working). Sandbox: falls back to the demo
+ * project (no real sandbox backend yet).
+ *
+ * `allowUnbound` (used by the chat route): with NO workspace id, return the
+ * user's shared `default` directory WITHOUT creating any workspace row — the
+ * conversation is then "unbound" (`workspace_id = null`). This replaces the
+ * old silent DemoProject creation, which accumulated invisible workspace rows
+ * for conversations the user believed had no workspace. Returns
+ * `workspace: null` in that case; callers must tolerate a null workspace.
  */
-export function resolveAgentCwd(userId: string, workspaceId?: string | null): {
+export function resolveAgentCwd(
+  userId: string,
+  workspaceId?: string | null,
+  opts?: { allowUnbound?: boolean },
+): {
   cwd: string;
+  /** The bound workspace row, or a synthetic "unbound" pseudo-row (id null). */
   workspace: WorkspaceRow;
+  /** The workspace id to persist on threads/attachments — null when unbound.
+   *  (Explicit twin of `workspace.id`, which is typed non-null.) */
+  workspaceId: string | null;
   /** True when the requested workspace was a sandbox and we fell back. */
   fellBack?: boolean;
+  /** True when no workspace was requested and the unbound default dir was used. */
+  unbound?: boolean;
 } {
   if (workspaceId) {
     const row = getWorkspace(userId, workspaceId);
@@ -712,15 +732,47 @@ export function resolveAgentCwd(userId: string, workspaceId?: string | null): {
         );
         const demo = getOrCreateDemoProject(userId);
         ensureDir(demo.path);
-        return { cwd: demo.path, workspace: demo, fellBack: true };
+        return { cwd: demo.path, workspace: demo, workspaceId: demo.id, fellBack: true };
       }
       ensureDir(row.path);
-      return { cwd: row.path, workspace: row };
+      return { cwd: row.path, workspace: row, workspaceId: row.id };
     }
+  }
+  // No workspace requested. In unbound-tolerant callers this is a first-class
+  // state: a user-level shared directory, NO workspace row created. The
+  // pseudo-row carries `id: null` so downstream `workspace.id ?? null` writes
+  // an unbound thread, and `environment: "local"` keeps graph building happy.
+  if (opts?.allowUnbound && !workspaceId) {
+    const dir = join(userWorkspacesDir(userId), "default");
+    ensureDir(dir);
+    return {
+      cwd: dir,
+      workspace: {
+        id: null as unknown as string,
+        userId,
+        name: "（未关联）",
+        path: dir,
+        environment: "local",
+        createdAt: "",
+        updatedAt: "",
+      },
+      workspaceId: null,
+      unbound: true,
+    };
   }
   const def = getOrCreateDemoProject(userId);
   ensureDir(def.path);
-  return { cwd: def.path, workspace: def };
+  return { cwd: def.path, workspace: def, workspaceId: def.id };
+}
+
+/**
+ * The unbound conversation's outputs directory (mirrors the per-workspace
+ * layout under the user's `default/` dir — no workspace row involved).
+ */
+export function ensureUnboundThreadOutputs(userId: string, threadId: string): string {
+  const dir = join(userWorkspacesDir(userId), "default", "outputs", threadId);
+  ensureDir(dir);
+  return dir;
 }
 
 /** Ensure a thread's outputs directory exists and return its path. */
@@ -745,15 +797,19 @@ export function ensureThreadOutputs(
  * subdir prevents same-name overwrites between turns while keeping the
  * original filename visible to the agent (it appears in read_file paths and
  * model-facing attachment notes).
+ *
+ * `workspaceId === null` is the unbound conversation state: the file goes to
+ * the user's shared `default` directory (the same root resolveAgentCwd uses),
+ * so attachments never silently create or reference a workspace row.
  */
 export function uploadChatAttachment(
   userId: string,
-  workspaceId: string,
+  workspaceId: string | null,
   fileName: string,
   data: Buffer,
 ): UploadResult {
   validateSegment(fileName);
-  const { root } = requireRoot(userId, workspaceId);
+  const root = unboundAttachmentRoot(userId, workspaceId);
   const parentRel = `attachments/${uuid().slice(0, 8)}`;
   const childRel = `${parentRel}/${fileName}`;
   const abs = resolveSafePath(root, childRel);
@@ -767,15 +823,25 @@ export function uploadChatAttachment(
 }
 
 /** Resolve a chat attachment ref to an absolute path inside the workspace
- * root, verifying existence. Throws when the path escapes the root. */
+ * root (unbound conversations resolve against the user `default` dir),
+ * verifying existence. Throws when the path escapes the root. */
 export function resolveChatAttachmentPath(
   userId: string,
-  workspaceId: string,
+  workspaceId: string | null,
   rel: string,
 ): string {
-  const { root } = requireRoot(userId, workspaceId);
+  const root = unboundAttachmentRoot(userId, workspaceId);
   const abs = resolveSafePath(root, rel);
   if (!existsSyncSafe(abs)) throw new NotFoundError("附件不存在");
   return abs;
+}
+
+/** Attachment root for a chat: the workspace's dir, or the user `default`
+ * dir when the conversation is unbound (`workspaceId === null`). */
+function unboundAttachmentRoot(userId: string, workspaceId: string | null): string {
+  if (workspaceId) return requireRoot(userId, workspaceId).root;
+  const dir = join(userWorkspacesDir(userId), "default");
+  ensureDir(dir);
+  return dir;
 }
 

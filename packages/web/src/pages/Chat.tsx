@@ -10,6 +10,7 @@ import { ChatHeader } from "../components/chat/ChatHeader.js";
 import { StartScreen } from "../components/chat/input/StartScreen.js";
 import { MessageList } from "../components/chat/messages/MessageList.js";
 import { InputBar } from "../components/chat/input/InputBar.js";
+import { WorkspaceChipRow } from "../components/workspace/WorkspaceChipRow.js";
 import { GREETINGS } from "../components/chat/constants.js";
 import type { SubagentEvent } from "../components/chat/turn/types.js";
 
@@ -47,7 +48,11 @@ export function ChatPage() {
   const { scrollContainerRef, isStuck, scrollToBottom } = useStickToBottom();
 
   const listThreads = useCallback(async () => {
-    const scope = activeWorkspaceId ? { workspaceId: activeWorkspaceId } : undefined;
+    // Same scoping as the sidebar: an active workspace lists its own threads;
+    // no workspace lists ONLY unbound ones (never removed workspaces' history).
+    const scope = activeWorkspaceId
+      ? { workspaceId: activeWorkspaceId }
+      : { workspaceId: "unbound" as const };
     try { setThreads(await sdk.listThreads(scope)); } catch { /* */ }
   }, [setThreads, activeWorkspaceId]);
 
@@ -58,6 +63,20 @@ export function ChatPage() {
     [threads, activeThreadId],
   );
   const sendWorkspaceId = threadWorkspaceId ?? activeWorkspaceId;
+
+  // A brand-new task with no workspace selected puts the start screen's
+  // composer into the dashed trigger state: input is gated until the user
+  // picks one (existing threads are always already bound or explicitly
+  // unbound, so the gate only applies to the fresh-chat view).
+  const needsWorkspace = !activeThreadId && !activeWorkspaceId;
+
+  // How the trigger state opens the picker. The chip row owns the menu, so the
+  // composer card just forwards clicks to it via a custom window event — both
+  // live in different subtrees and lifting the menu state here would couple
+  // InputBar to the selector's internals.
+  const openWorkspacePicker = useCallback(() => {
+    window.dispatchEvent(new CustomEvent("octopus:open-workspace-picker"));
+  }, []);
 
   const [greeting] = useState(() => GREETINGS[Math.floor(Math.random() * GREETINGS.length)]);
 
@@ -139,6 +158,8 @@ export function ChatPage() {
       commands={chat.commands}
       onSlashSelect={chat.onSlashSelect}
       onSystemCommand={chat.handleSystemCommand}
+      workspaceTrigger={chat.ask ? false : needsWorkspace}
+      onWorkspaceTriggerClick={openWorkspacePicker}
     />
   );
 
@@ -167,7 +188,18 @@ export function ChatPage() {
               <StartScreen
                 greeting={greeting}
                 inputArea={inputArea}
-                onPickExample={(q) => chat.send(q)}
+                // Hero workspace selector (deepseek-harness style) — only on the
+                // fresh-chat view; a bound thread needs no switcher.
+                workspaceRow={
+                  <WorkspaceChipRow pickerOpenEvent="octopus:open-workspace-picker" />
+                }
+                onPickExample={(q) => {
+                  // Suggestion cards seed the composer with a prompt — sending
+                  // one without a workspace would strand the thread unbound, so
+                  // route the click to the picker instead.
+                  if (needsWorkspace) openWorkspacePicker();
+                  else chat.send(q);
+                }}
               />
             ) : (
               <MessageList
@@ -244,7 +276,9 @@ export function ChatPage() {
                 {inputArea}
                 <div style={{ textAlign: "center", paddingTop: 7 }}>
                   <span style={{ fontSize: "var(--text-2xs)", color: "var(--text-tertiary)" }}>
-                    当前智能体：ChatbotAgent · 请注意辨别内容的可靠性
+                    {activeWorkspaceId
+                      ? "当前智能体：ChatbotAgent · 请注意辨别内容的可靠性"
+                      : "未关联工作区 · 对话保存在「未关联」分组，文件类工具使用默认目录"}
                   </span>
                 </div>
               </div>

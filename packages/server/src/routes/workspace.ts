@@ -34,6 +34,11 @@ import {
   writeFile,
 } from "../services/workspace.service.js";
 import type { WorkspaceCreateInput, WorkspaceUpdateInput } from "../services/workspace.service.js";
+import {
+  PickerCancelledError,
+  PickerUnavailableError,
+  pickHostDirectory,
+} from "../services/directory_picker.js";
 
 export const workspaceRouter = new Hono();
 
@@ -86,6 +91,29 @@ workspaceRouter.get("/browse", getOptionalUser, (c) => {
   try {
     return c.json(listHostDirs(path));
   } catch (err) {
+    return handleError(c, err);
+  }
+});
+
+/**
+ * Open the OS-native "choose a folder" dialog on the server host and return
+ * the picked absolute path. The browser cannot read host paths, so the local
+ * server process shows the real dialog (deepseek-harness desktop style).
+ * Long-poll style: the request stays open until the user closes the dialog.
+ */
+workspaceRouter.post("/pick-directory", getOptionalUser, async (c) => {
+  try {
+    const path = await pickHostDirectory();
+    return c.json({ path });
+  } catch (err) {
+    if (err instanceof PickerCancelledError) {
+      // 409: dialog closed without a pick — the UI stays as-is (client treats
+      // this message as a silent no-op).
+      return c.json({ error: "cancelled", message: "已取消选择" }, 409);
+    }
+    if (err instanceof PickerUnavailableError) {
+      return c.json({ error: "picker_unavailable", message: (err as Error).message }, 501);
+    }
     return handleError(c, err);
   }
 });

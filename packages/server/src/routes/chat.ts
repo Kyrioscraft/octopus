@@ -49,6 +49,7 @@ import {
 import { createThread, getThread, updateThreadAccessMode, addThreadPermissionRule, getThreadPermissionRules, insertThreadEventAtomic, listThreadEvents, getMaxThreadEventSeq } from "../db/index.js";
 import {
   ensureThreadOutputs,
+  ensureUnboundThreadOutputs,
   resolveAgentCwd,
   uploadChatAttachment,
   resolveChatAttachmentPath,
@@ -77,7 +78,7 @@ interface AttachmentRefWire {
 function resolveRequestAttachments(
   c: Context,
   userId: string,
-  workspaceId: string,
+  workspaceId: string | null,
   refs: AttachmentRefWire[] | undefined,
 ): { ok: true; value: import("../services/chat.service.js").ResolvedAttachment[] } | { ok: false; response: Response } {
   if (!refs || refs.length === 0) return { ok: true, value: [] };
@@ -432,11 +433,19 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
   const existing = threadId ? getThread(threadId) : undefined;
   const isNewThread = !existing || existing.messages.length === 0;
   // Resolve the workspace: prefer the request's workspace_id, else reuse the
-  // thread's existing binding, else fall back to the user's default workspace.
+  // thread's existing binding. With NEITHER, the conversation is "unbound":
+  // the agent runs in the user's shared default directory and the thread keeps
+  // workspace_id = null (visible in the sidebar's 未关联 group) — no hidden
+  // DemoProject row is created behind the user's back.
   // resolveAgentCwd also yields the dir the agent should treat as cwd.
   const requestedWsId =
     body.workspace_id ?? existing?.workspaceId ?? undefined;
-  const { cwd: agentCwd, workspace } = resolveAgentCwd(userId, requestedWsId ?? null);
+  const { cwd: agentCwd, workspace } = resolveAgentCwd(userId, requestedWsId ?? null, {
+    allowUnbound: true,
+  });
+  // Unbound conversations carry a pseudo-workspace with id null — the thread
+  // row stores workspace_id = NULL and appears in the sidebar's 未关联 group.
+  const workspaceIdForThread: string | null = workspace.id;
   // Bundled ripgrep binary directory (null when the binary is missing) —
   // prepended to the shell backend's PATH so bare `rg` works in execute.
   const rgDir = getRipgrepDir();
@@ -469,7 +478,7 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       id: threadId,
       userId,
       agentId: body.agent_id,
-      workspaceId: workspace.id,
+      workspaceId: workspaceIdForThread,
       accessMode,
     });
   } else if (!existing) {
@@ -477,7 +486,7 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       id: threadId,
       userId,
       agentId: body.agent_id,
-      workspaceId: workspace.id,
+      workspaceId: workspaceIdForThread,
       accessMode,
     });
   } else {
@@ -488,14 +497,20 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
       setThreadAccessMode(threadId, accessMode);
     }
   }
-  // Make sure this conversation has an outputs/ directory inside the workspace.
-  ensureThreadOutputs(userId, workspace.id, threadId);
+  // Make sure this conversation has an outputs/ directory — inside the bound
+  // workspace, or under the user's default dir for unbound conversations.
+  if (workspaceIdForThread) {
+    ensureThreadOutputs(userId, workspaceIdForThread, threadId);
+  } else {
+    ensureUnboundThreadOutputs(userId, threadId);
+  }
 
   // Resolve attachments against the workspace root BEFORE anything else — a
   // bad ref (traversal / missing file) fails the request with a clear error
   // instead of poisoning the persisted turn. absPath is stripped when the
   // refs are persisted/emitted; the graph input expansion reads the file.
-  const attachmentResult = resolveRequestAttachments(c, userId, workspace.id, body.attachments);
+  // Unbound conversations resolve against the user default dir (null id).
+  const attachmentResult = resolveRequestAttachments(c, userId, workspaceIdForThread, body.attachments);
   if (!attachmentResult.ok) return attachmentResult.response;
   const resolvedAttachments = attachmentResult.value;
 
@@ -671,8 +686,10 @@ chatRouter.post("/agent", getOptionalUser, async (c) => {
  * Multipart upload of a chat attachment. The file lands in the workspace's
  * `attachments/<uuid>/<filename>` area and is referenced by workspace-relative
  * path in the subsequent POST /agent call. `workspace_id` is optional — the
- * same resolution as /agent applies (request → thread binding → user default),
- * except there is no thread yet at pick time, so it's request → user default.
+ * same resolution as /agent applies (request → thread binding → unbound user
+ * default), except there is no thread yet at pick time, so it's request →
+ * unbound. Unbound uploads return `workspaceId: null` so the client doesn't
+ * back-fill a binding into a later /agent call.
  */
 chatRouter.post("/attachments", getOptionalUser, async (c) => {
   const userId = c.var.user.sub;
@@ -691,15 +708,15 @@ chatRouter.post("/attachments", getOptionalUser, async (c) => {
     ? body["workspace_id"]
     : undefined;
   // Match POST /agent's workspace resolution minus the thread binding — at
-  // pick time the thread may not exist yet, so: request → user default.
-  const { workspace } = resolveAgentCwd(userId, workspaceId ?? null);
+  // pick time the thread may not exist yet, so: request → unbound.
+  const { workspace, workspaceId: resolvedWsId } = resolveAgentCwd(userId, workspaceId ?? null, { allowUnbound: true });
   try {
     const buf = Buffer.from(await file.arrayBuffer());
     if (buf.byteLength > MAX) {
       return c.json({ error: "too_large", message: "文件超过 100MB 限制" }, 413);
     }
-    const result = uploadChatAttachment(userId, workspace.id, file.name || "upload", buf);
-    return c.json({ ...result, workspaceId: workspace.id }, 201);
+    const result = uploadChatAttachment(userId, resolvedWsId, file.name || "upload", buf);
+    return c.json({ ...result, workspaceId: resolvedWsId }, 201);
   } catch (err) {
     if (err instanceof PathTraversalError || err instanceof NotFoundError) {
       return c.json({ error: "not_found", message: (err as Error).message }, 404);
@@ -726,9 +743,11 @@ chatRouter.post("/thread/:id/resume", getOptionalUser, async (c) => {
   const requestId = getLogContext()?.request_id ?? uuid().slice(0, 8);
 
   const config = loadConfig();
-  // Resume in the same workspace the thread was bound to at creation.
+  // Resume in the same workspace the thread was bound to at creation. Unbound
+  // threads keep the unbound cwd — without allowUnbound they would silently
+  // fall back to (and create) a DemoProject workspace mid-conversation.
   const existingThread = getThread(threadId);
-  const { cwd: agentCwd, workspace } = resolveAgentCwd(userId, existingThread?.workspaceId ?? null);
+  const { cwd: agentCwd, workspace } = resolveAgentCwd(userId, existingThread?.workspaceId ?? null, { allowUnbound: true });
   // Bundled ripgrep binary directory (null when the binary is missing) —
   // prepended to the shell backend's PATH so bare `rg` works in execute.
   const rgDir = getRipgrepDir();

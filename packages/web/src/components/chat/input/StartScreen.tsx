@@ -4,13 +4,16 @@ import { CodeXml, BookOpen, Bug, FileSearch } from "lucide-react";
 /**
  * The start screen — shown when there are no messages (a fresh conversation).
  *
- * Centered layout: the Octopus mark, a random greeting, the composer (passed in
- * as a slot so this component doesn't need to know about input state), a grid of
- * suggestion cards, and a small disclaimer.
+ * Centered layout: the Octopus mark, a random greeting, the workspace chip row
+ * (optional — hero workspace selector), the composer (passed in as a slot so
+ * this component doesn't need to know about input state), a grid of suggestion
+ * cards, and a small disclaimer.
  *
  * `inputArea` is a render slot: the parent decides whether to show the normal
  * input bar or the AskPanel (when an ask_user_question interrupt is active).
- * `onPickExample` fires when a suggestion card is clicked.
+ * `workspaceRow` is likewise a slot (the WorkspaceChipRow selector) so this
+ * component stays purely presentational. `onPickExample` fires when a
+ * suggestion card is clicked.
  */
 const SUGGESTIONS: { icon: ReactNode; title: string; hint: string; prompt: string }[] = [
   {
@@ -42,10 +45,12 @@ const SUGGESTIONS: { icon: ReactNode; title: string; hint: string; prompt: strin
 export function StartScreen({
   greeting,
   inputArea,
+  workspaceRow,
   onPickExample,
 }: {
   greeting: string;
   inputArea: ReactNode;
+  workspaceRow?: ReactNode;
   onPickExample: (q: string) => void;
 }) {
   return (
@@ -73,10 +78,11 @@ export function StartScreen({
         <h1 style={{
           fontSize: "var(--text-xl)", fontWeight: 600, letterSpacing: "-0.02em",
           color: "var(--gray-1000)",
-          marginBottom: 28, lineHeight: 1.35,
+          marginBottom: 12, lineHeight: 1.35,
         }}>
           {greeting}
         </h1>
+        {workspaceRow}
         {inputArea}
 
         {/* Suggestion cards — the modern agent empty state. A 2x2 grid, so each

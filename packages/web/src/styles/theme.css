@@ -623,6 +623,11 @@ body {
   border-style: dashed;
   background: color-mix(in srgb, var(--accent-solid) 4%, var(--bg-elevated));
 }
+/* No-workspace trigger card (start screen): the whole composer is the click
+   target for the workspace picker; hover echoes the drag state without the fill. */
+.composer.is-ws-trigger:hover {
+  border-color: var(--accent-solid);
+}
 .composer-drop {
   position: absolute;
   inset: 0;

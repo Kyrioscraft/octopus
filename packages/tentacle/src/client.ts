@@ -603,6 +603,18 @@ export class OctopusClient {
     return this.#get<HostBrowseResult>(`/api/workspace/browse${qs}`);
   }
 
+  /**
+   * Open the OS-native "choose a folder" dialog on the server host (the same
+   * machine the browser runs on for local installs) and return the picked
+   * absolute path. The request long-polls until the user closes the dialog.
+   * Throws when the dialog cannot be shown (headless host) or the user
+   * cancelled — callers should fall back to {@link browseHostDirs} UI then.
+   */
+  async pickHostDirectory(): Promise<string> {
+    const res = await this.#post<{ path: string }>("/api/workspace/pick-directory", {});
+    return res.path;
+  }
+
   /** Create a new workspace. */
   async createWorkspace(body: WorkspaceWriteRequest): Promise<Workspace> {
     const res = await this.#post<{ workspace: Workspace }>("/api/workspace", body);
