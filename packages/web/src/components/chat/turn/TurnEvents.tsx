@@ -1,15 +1,23 @@
-import { useState } from "react";
-import type { TurnEvent, ToolEvent } from "./types.js";
+import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import type { TurnEvent } from "./types.js";
 import type { TurnItem } from "./project.js";
 import { EventRow } from "./EventRow.js";
-import { ToolCallRenderer } from "../rows/tools/ToolCallRenderer.js";
 import { useDisplaySettingsStore } from "../../../stores/display.js";
 import { projectTurnParts } from "./project.js";
-import { isSearchCall, isFileReadCall } from "../rows/tools/registry.js";
-import { Collapse } from "antd";
-import { ChevronDown, ChevronRight, CircleX, Search } from "lucide-react";
 import { ShimmerText } from "../ShimmerText.js";
 import { Markdown } from "../../widgets/Markdown.js";
+import { WorkTimer } from "../WorkTimer.js";
+
+/**
+ * Timing metadata for one assistant turn, passed down by MessageBubble so the
+ * timer row can act as the WHOLE turn's collapse switch (see below).
+ */
+export interface TurnTimer {
+  startedAtMs?: number;
+  durationMs?: number;
+  running: boolean;
+}
 
 /**
  * The ordered timeline of events for one assistant turn.
@@ -18,18 +26,23 @@ import { Markdown } from "../../widgets/Markdown.js";
  * layer shared by live and history rendering); this file is the presentation
  * layer only.
  *
- * Presentation splits the turn into two kinds of blocks, in order:
- *   - **process** blocks (reasoning / tool calls / subagents) hang off a hairline
- *     vertical rail (`TraceBlock`) — the "work log";
- *   - **text** blocks are the answer, rendered full width with no rail.
- * Keeping them separate is what makes an agent turn readable at a glance: the log
- * is visibly secondary, the reply is not.
+ * Structure: `buildBlocks` splits the events into ordered runs of
+ *   - **process blocks** (reasoning / tool calls / subagents) — the work log,
+ *     each headed by an 「已执行工具」 summary that collapses just that block;
+ *   - **text blocks** — the answer, full width.
+ *
+ * The turn-level timer row (when `timer` is provided, i.e. on the main
+ * timeline) is the GLOBAL switch: while streaming the log is open; once the
+ * turn finishes (and `autoCollapseTrace` is on) everything folds under the
+ * timer row and only the final answer text stays outside. Clicking the timer
+ * row expands the whole process again. Nested lists without a `timer` (the
+ * subagent side panel) render expanded with no switch.
  */
-
 export function TurnEvents({
   events,
   isActive,
   onOpenSubagent,
+  timer,
 }: {
   events: TurnEvent[];
   /** Whether the turn is still streaming (drives per-event default expansion). */
@@ -38,16 +51,36 @@ export function TurnEvents({
    *  Forwarded down to EventRow → SubagentRow. Optional because nested
    *  event lists (inside the side panel) don't need it. */
   onOpenSubagent?: (event: import("./types.js").SubagentEvent) => void;
+  /** Turn timing — present on the main timeline, absent in nested panels. */
+  timer?: TurnTimer;
 }) {
   const showAllReasoning = useDisplaySettingsStore((s) => s.showFullReasoning);
+  const autoCollapse = useDisplaySettingsStore((s) => s.autoCollapseTrace);
+  // null → follow the turn's state; boolean → the user toggled the timer row.
+  const [override, setOverride] = useState<boolean | null>(null);
+
   if (events.length === 0) return null;
   const items = projectTurnParts(events, { showAllReasoning });
   const blocks = buildBlocks(items);
+  if (blocks.length === 0) return null;
+
+  const hasTimer = !!timer;
+  // Whole-turn collapse: only after the turn settles (a running turn always
+  // shows its log), gated by the setting, with the manual toggle winning.
+  const turnCollapsed = !!timer && !timer.running && autoCollapse && override !== true;
+
+  // The answer the folded state keeps outside: the LAST text block.
+  const lastText = [...blocks].reverse().find((b) => b.kind === "text");
+  const failed = blocks.reduce((n, b) => (b.kind === "process" ? n + countFailures(b.items) : n), 0);
+  const cancelled = blocks.reduce((n, b) => (b.kind === "process" ? n + countCancelled(b.items) : n), 0);
 
   return (
     <div
       style={{
-        marginTop: 2,
+        // Full column width: without this, the flex parent (MessageBubble's
+        // align-items: flex-start) shrinks this container to its widest child,
+        // and the timer row's divider would track the text content length.
+        width: "100%",
         maxWidth: "100%",
         minWidth: 0,
         display: "flex",
@@ -55,17 +88,34 @@ export function TurnEvents({
         gap: 10,
       }}
     >
-      {blocks.map((block) =>
-        block.kind === "text" ? (
-          <AnswerBlock key={block.id} text={block.text} />
-        ) : (
-          <TraceBlock
-            key={block.id}
-            items={block.items}
-            isActive={isActive}
-            onOpenSubagent={onOpenSubagent}
-          />
-        ),
+      {hasTimer && (
+        <WorkTimer
+          startedAtMs={timer!.startedAtMs}
+          durationMs={timer!.durationMs}
+          running={timer!.running}
+          expanded={!turnCollapsed}
+          onToggle={() => setOverride(turnCollapsed)}
+          failed={failed}
+          cancelled={cancelled}
+        />
+      )}
+
+      {turnCollapsed ? (
+        // Folded: timer row + only the final answer text.
+        lastText?.kind === "text" && <AnswerBlock text={lastText.text} />
+      ) : (
+        blocks.map((block) =>
+          block.kind === "text" ? (
+            <AnswerBlock key={block.id} text={block.text} />
+          ) : (
+            <ProcessBlock
+              key={block.id}
+              items={block.items}
+              isActive={isActive}
+              onOpenSubagent={onOpenSubagent}
+            />
+          ),
+        )
       )}
     </div>
   );
@@ -106,10 +156,10 @@ function buildBlocks(items: TurnItem[]): Block[] {
 }
 
 /* ---------------------------------------------------------------------------
- * The two block renderers
+ * The three block renderers
  * ------------------------------------------------------------------------- */
 
-/** The answer: full width, no rail, no chrome. */
+/** The answer: full width, no chrome. */
 function AnswerBlock({ text }: { text: string }) {
   return (
     <div
@@ -127,21 +177,14 @@ function AnswerBlock({ text }: { text: string }) {
 }
 
 /**
- * A run of process events: folded it is one quiet line, expanded it is a railed
- * log.
- *
- * Disclosure: while the turn streams the log is open (that's the live feedback);
- * once it stops it folds to `已完成 · 5 步` unless the user has toggled this
- * particular block, which always wins. On history replay the block mounts already
- * finished, i.e. folded. Controlled by the `autoCollapseTrace` display setting.
- *
- * Geometry: the summary and every entry's text share the same 16px left inset, so
- * folding/unfolding doesn't shift the text, and the rail (drawn by `.trace-body`)
- * runs through the dots' column rather than out at the column edge. A folded block
- * has no rail at all — a short orphan line segment was what made the old trace
- * look broken.
+ * A run of process events (reasoning / tools / subagents), headed by a summary
+ * that collapses just this block. The header tracks THIS block's own liveness:
+ * 「正在执行工具」(shimmer) while any of its entries is in flight, flipping to
+ * 「已执行工具」 when the last member settles — per block, not per turn. The
+ * block stays expanded through that flip; folding the whole turn is the Timer
+ * row's job. Entries render as plain rows — no rail, no status dots.
  */
-function TraceBlock({
+function ProcessBlock({
   items,
   isActive,
   onOpenSubagent,
@@ -150,154 +193,116 @@ function TraceBlock({
   isActive?: boolean;
   onOpenSubagent?: (event: import("./types.js").SubagentEvent) => void;
 }) {
-  const autoCollapse = useDisplaySettingsStore((s) => s.autoCollapseTrace);
-  // null → follow the turn's state; boolean → the user overrode it.
-  const [override, setOverride] = useState<boolean | null>(null);
+  // Per-block running detection — drives the header shimmer/text. Collapse does
+  // NOT follow the block's own completion; it follows the turn Timer (turnCollapsed).
+  const running = blockHasRunning(items);
+  // null → follow the derived state; boolean → the user toggled this block.
+  const [userOpen, setUserOpen] = useState<boolean | null>(null);
+  const [wasRunning, setWasRunning] = useState<boolean>(running);
+  // Streaming: the block mounts open so in-flight tools are directly visible,
+  // and STAYS open — completing the tools only flips the header to
+  // 「已执行工具」; folding is the Timer row's job (turnCollapsed).
+  const [autoOpen, setAutoOpen] = useState<boolean>(running);
 
-  const expanded = override ?? (isActive || !autoCollapse);
+  useEffect(() => {
+    if (running !== wasRunning) setWasRunning(running);
+  }, [running, wasRunning]);
 
-  const steps = countSteps(items);
+  const open = userOpen ?? autoOpen;
   const failed = countFailures(items);
   const cancelled = countCancelled(items);
-  // Per-entry liveness: only when THIS block still has an in-flight entry
-  // (a tool awaiting its result, an open reasoning episode, a streaming
-  // subagent) does the block read "执行中". A block whose work is done reads
-  // 已完成 even while the turn keeps streaming (e.g. the model is writing the
-  // final answer) — the old whole-turn flag kept every block "running".
-  const running = blockRunning(items);
 
   return (
-    <div className="trace-block">
+    <div>
       <button
         type="button"
-        className="trace-summary focus-ring"
-        aria-expanded={expanded}
-        onClick={() => setOverride(!expanded)}
+        className="focus-ring"
+        aria-expanded={open}
+        onClick={() => setUserOpen(!open)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 5,
+          padding: 0,
+          border: "none",
+          borderRadius: "var(--radius-sm)",
+          background: "transparent",
+          cursor: "pointer",
+          font: "inherit",
+          fontSize: "var(--text-sm)",
+          color: "var(--text-tertiary)",
+          textAlign: "left",
+          transition: "color var(--dur-1) var(--ease)",
+        }}
       >
-        <span className="chev">{expanded ? <ChevronDown /> : <ChevronRight />}</span>
+        <span style={{ display: "flex", fontSize: 14, color: "var(--text-disabled)", flexShrink: 0 }}>
+          {open ? <ChevronDown /> : <ChevronRight />}
+        </span>
         {running ? (
-          <ShimmerText text="执行中" fontSize={12.5} fontWeight={500} />
+          <ShimmerText text="正在执行工具" fontSize={14} fontWeight={500} />
         ) : (
-          <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>
-            {failed > 0 ? "已结束" : cancelled > 0 ? "已中断" : "已完成"}
+          <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>已执行工具</span>
+        )}
+        {failed > 0 && (
+          <span className="tnum" style={{ color: "var(--color-error-500)" }}>
+            · {failed} 个失败
           </span>
         )}
-        <span style={{ color: "var(--text-disabled)" }}>·</span>
-        <span className="tnum">{steps} 步</span>
-        {failed > 0 && (
-          <>
-            <span style={{ color: "var(--text-disabled)" }}>·</span>
-            <span className="tnum" style={{ color: "var(--color-error-500)" }}>
-              {failed} 个失败
-            </span>
-          </>
-        )}
         {cancelled > 0 && (
-          <>
-            <span style={{ color: "var(--text-disabled)" }}>·</span>
-            <span className="tnum" style={{ color: "var(--text-tertiary)" }}>
-              {cancelled} 个已取消
-            </span>
-          </>
+          <span className="tnum">· {cancelled} 个已取消</span>
         )}
       </button>
 
-      {expanded && (
-        <div className="trace-body">
-          {items.map((item) => (
-            <TraceEntry key={itemId(item)} item={item} isActive={isActive} onOpenSubagent={onOpenSubagent} />
-          ))}
+      {open && (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            gap: 4,
+            paddingTop: 4,
+          }}
+        >
+          {/* Exploration groups are flattened: their member tools render as
+              plain EventRows (grouping into a second collapsible layer made
+              the disclosure too deep). */}
+          {items.flatMap((item) =>
+            item.kind === "tool-group"
+              ? item.tools.map((t) => (
+                  <EventRow
+                    key={t.id}
+                    event={t}
+                    isActive={isActive}
+                    onOpenSubagent={onOpenSubagent}
+                  />
+                ))
+              : [
+                  <EventRow
+                    key={item.event.id}
+                    event={item.event}
+                    isActive={isActive}
+                    onOpenSubagent={onOpenSubagent}
+                  />,
+                ],
+          )}
         </div>
       )}
     </div>
   );
 }
 
-/** One rail entry: the status dot in the gutter, then the row itself. */
-function TraceEntry({
-  item,
-  isActive,
-  onOpenSubagent,
-}: {
-  item: TurnItem;
-  isActive?: boolean;
-  onOpenSubagent?: (event: import("./types.js").SubagentEvent) => void;
-}) {
-  if (item.kind === "tool-group") {
-    return (
-      <div className="trace-entry">
-        <span className={`trace-dot${groupDotClass(item.tools)}`} />
-        <div className="trace-entry-body">
-          <ToolGroupBar tools={item.tools} />
-        </div>
-      </div>
-    );
-  }
+/* ---------------------------------------------------------------------------
+ * Summary counts
+ * ------------------------------------------------------------------------- */
 
-  const event = item.event;
-  if (event.type === "text") return null;
-
-  // Per-entry status: each dot reflects THAT entry's own lifecycle, never the
-  // whole turn's. A closed reasoning episode / settled tool / done subagent
-  // reads settled even while the turn is still streaming elsewhere.
-  let dotClass = "";
-  if (event.type === "tool") {
-    dotClass = toolDotClass(event.entry.status);
-  } else if (event.type === "subagent") {
-    dotClass =
-      event.status === "streaming"
-        ? " is-running"
-        : event.status === "cancelled"
-          ? " is-cancelled"
-          : "";
-  } else if (event.type === "reasoning") {
-    // Live only while the episode is open (endedAt unset). The old rule
-    // pulsed every reasoning dot for the whole streaming turn.
-    dotClass = event.endedAt === undefined ? " is-running" : "";
-  }
-
-  return (
-    <div className="trace-entry">
-      <span className={`trace-dot${dotClass}`} />
-      <div className="trace-entry-body">
-        <EventRow event={event} isActive={isActive} onOpenSubagent={onOpenSubagent} />
-      </div>
-    </div>
-  );
-}
-
-/** Dot class for a single tool entry status. */
-function toolDotClass(status: string): string {
-  if (status === "error") return " is-error";
-  if (status === "cancelled") return " is-cancelled";
-  if (status !== "done") return " is-running";
-  return "";
-}
-
-/** Dot class for a contiguous exploration group: worst-case of its members. */
-function groupDotClass(tools: { entry: { status: string } }[]): string {
-  if (tools.some((t) => t.entry.status === "error")) return " is-error";
-  if (tools.some((t) => t.entry.status === "cancelled")) return " is-cancelled";
-  if (tools.some((t) => t.entry.status !== "done" && t.entry.status !== "error")) return " is-running";
-  return "";
-}
-
-/** Does this block still have an in-flight entry? Drives the summary line. */
-function blockRunning(items: TurnItem[]): boolean {
+function countFailures(items: TurnItem[]): number {
+  let n = 0;
   for (const item of items) {
-    if (item.kind === "tool-group") {
-      if (item.tools.some((t) => t.entry.status !== "done" && t.entry.status !== "error" && t.entry.status !== "cancelled")) return true;
-      continue;
-    }
-    const e = item.event;
-    if (e.type === "tool" && e.entry.status !== "done" && e.entry.status !== "error" && e.entry.status !== "cancelled") return true;
-    if (e.type === "subagent" && e.status === "streaming") return true;
-    if (e.type === "reasoning" && e.endedAt === undefined) return true;
+    if (item.kind === "tool-group") n += item.tools.filter((t) => t.entry.status === "error").length;
+    else if (item.event.type === "tool" && item.event.entry.status === "error") n += 1;
   }
-  return false;
+  return n;
 }
 
-/** Number of user-cancelled entries in this block (tools + subagents). */
 function countCancelled(items: TurnItem[]): number {
   let n = 0;
   for (const item of items) {
@@ -312,131 +317,17 @@ function countCancelled(items: TurnItem[]): number {
   return n;
 }
 
-/* ---------------------------------------------------------------------------
- * Summary counts
- * ------------------------------------------------------------------------- */
-
-function countSteps(items: TurnItem[]): number {
-  let n = 0;
+/** Does this block still have an in-flight entry? Drives its header state. */
+function blockHasRunning(items: TurnItem[]): boolean {
   for (const item of items) {
-    if (item.kind === "tool-group") n += item.tools.length;
-    else {
-      const t = item.event.type;
-      if (t === "tool" || t === "reasoning" || t === "subagent") n += 1;
+    if (item.kind === "tool-group") {
+      if (item.tools.some((t) => t.entry.status !== "done" && t.entry.status !== "error" && t.entry.status !== "cancelled")) return true;
+      continue;
     }
+    const e = item.event;
+    if (e.type === "tool" && e.entry.status !== "done" && e.entry.status !== "error" && e.entry.status !== "cancelled") return true;
+    if (e.type === "subagent" && e.status === "streaming") return true;
+    if (e.type === "reasoning" && e.endedAt === undefined) return true;
   }
-  return n;
-}
-
-function countFailures(items: TurnItem[]): number {
-  let n = 0;
-  for (const item of items) {
-    if (item.kind === "tool-group") n += item.tools.filter((t) => t.entry.status === "error").length;
-    else if (item.event.type === "tool" && item.event.entry.status === "error") n += 1;
-  }
-  return n;
-}
-
-/**
- * 折叠态计数文案:"搜索了 X 项 · 读取了 Y 个文件"(为零的一半省略;
- * 双零时组内只有目录列举等 → "探索了目录")。
- */
-function explorationSummary(tools: ToolEvent[]): string {
-  const searches = tools.filter((t) => isSearchCall(t.entry)).length;
-  const reads = tools.filter((t) => isFileReadCall(t.entry)).length;
-  const parts: string[] = [];
-  if (searches > 0) parts.push(searches === 1 ? "搜索了 1 项" : `搜索了 ${searches} 项`);
-  if (reads > 0) parts.push(reads === 1 ? "读取了 1 个文件" : `读取了 ${reads} 个文件`);
-  return parts.length > 0 ? parts.join(" · ") : "探索了目录";
-}
-
-/**
- * A collapsible group row for a contiguous run of exploration calls.
- *
- * Folded (default): a single tool-row-style line — status icon + "探索" label
- * (ShimmerText while any member is in flight) + counts. No Loader spinner: the
- * running state lives in the shimmer, same as tool rows.
- *
- * Expanded: the member calls as standard tool rows, each collapsed by default.
- * The group's own indentation comes from the surrounding rail.
- */
-export function ToolGroupBar({ tools }: { tools: ToolEvent[] }) {
-  // Always collapsed by default — user clicks to expand.
-  const [expanded, setExpanded] = useState<boolean>(false);
-
-  const done = tools.filter((t) => t.entry.status === "done").length;
-  const errored = tools.filter((t) => t.entry.status === "error").length;
-  const pending = tools.length - done - errored;
-
-  const leadIcon =
-    errored > 0 ? (
-      <CircleX style={{ color: "var(--color-error-500)" }} />
-    ) : (
-      <Search style={{ fontSize: 13, color: "var(--text-tertiary)" }} />
-    );
-
-  return (
-    <div className={`collapsible-row${expanded ? " is-expanded" : ""}`}>
-      <Collapse
-        ghost
-        size="small"
-        activeKey={expanded ? ["g"] : []}
-        onChange={(keys) => setExpanded(keys.length > 0)}
-        expandIconPosition="end"
-        style={{ background: "transparent" }}
-        items={[
-          {
-            key: "g",
-            label: (
-              <span
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  minWidth: 0,
-                  // Same type treatment as ToolCallRow's header, so "探索" and a
-                  // tool row's display name read as the same kind of thing.
-                  fontSize: 12.5,
-                  fontWeight: 500,
-                  color: "var(--text-tertiary)",
-                }}
-              >
-                <span style={{ display: "inline-flex", alignItems: "center" }}>{leadIcon}</span>
-                {pending > 0 ? <ShimmerText text="探索" fontSize={12.5} /> : <span>探索</span>}
-                <span style={{ color: "var(--text-disabled)" }}>·</span>
-                <span
-                  style={{
-                    color: "var(--text-secondary)",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {explorationSummary(tools)}
-                </span>
-              </span>
-            ),
-            children: (
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: 4,
-                  paddingLeft: 10,
-                  paddingTop: 2,
-                  paddingBottom: 4,
-                  borderLeft: "1px solid var(--border-subtle)",
-                  marginLeft: 4,
-                }}
-              >
-                {tools.map((t) => (
-                  <ToolCallRenderer key={t.id} entry={t.entry} />
-                ))}
-              </div>
-            ),
-          },
-        ]}
-      />
-    </div>
-  );
+  return false;
 }

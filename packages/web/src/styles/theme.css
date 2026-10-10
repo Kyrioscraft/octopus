@@ -496,97 +496,11 @@ body {
 /* =============================================================================
  * Agent trace — the execution log (reasoning + tool calls) of one turn.
  *
- * Folded, a block is a single quiet line. Expanded, the entries hang off a
- * hairline rail. The rail is drawn by `.trace-body` at the dot column's centre
- * (x = 3px) and the dots are ordinary flex children sitting at x = 0..6, so the
- * dots are *geometrically* on the line — the previous version positioned both with
- * hand-computed negative offsets from two different containing blocks, which left
- * the summary dots 17px off the rail.
+ * The old vertical rail + status dots were removed: process entries now render
+ * as plain rows under an 「已执行工具」 block summary, and the turn's timer row
+ * (WorkTimer) is the whole-turn collapse switch. Only the row-level affordances
+ * below remain.
  * ===========================================================================*/
-.trace-block { display: flex; flex-direction: column; }
-
-/* Folded header: chevron in the gutter, label at the same 16px inset as the
-   entries' text, so toggling never shifts the text. The whole line is the target. */
-.trace-summary {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  width: 100%;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  cursor: pointer;
-  font: inherit;
-  font-size: var(--text-sm);
-  color: var(--text-tertiary);
-  text-align: left;
-  transition: background-color var(--dur-1) var(--ease), color var(--dur-1) var(--ease);
-}
-.trace-summary:hover { background: var(--bg-hover); color: var(--text-secondary); }
-.trace-summary .chev {
-  flex: 0 0 11px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 14px;
-  color: var(--text-disabled);
-}
-
-/* The rail: one continuous line spanning the entries, inset at both ends so it
-   connects the first and last dots instead of overshooting them. */
-.trace-body {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 2px 0;
-}
-.trace-body::before {
-  content: "";
-  position: absolute;
-  left: 3px;
-  top: 12px;
-  bottom: 12px;
-  width: 1px;
-  background: var(--border-strong);
-}
-
-.trace-entry {
-  position: relative;
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-.trace-entry-body { flex: 1; min-width: 0; }
-
-.trace-dot {
-  position: relative;
-  z-index: 1; /* paints the dot over the rail */
-  flex: 0 0 6px;
-  width: 6px;
-  height: 6px;
-  /* Centres the dot on the row's first text line (header text centre ≈ 15px). */
-  margin-top: 12px;
-  border-radius: var(--radius-full);
-  background: var(--border-strong);
-}
-.trace-dot.is-running {
-  background: var(--accent-solid);
-  animation: dotPulse 1.4s var(--ease) infinite;
-}
-.trace-dot.is-error { background: var(--color-error-500); }
-/* Cancelled (user stopped the run): hollow grey — distinct from done (solid
-   grey) so a stopped turn reads at a glance. */
-.trace-dot.is-cancelled {
-  background: transparent;
-  border: 1.5px solid var(--text-disabled);
-  width: 7px;
-  height: 7px;
-  margin-top: 11.5px;
-  margin-left: -0.5px;
-}
 
 /* Row header: hover fills the row so it reads as clickable. */
 .trace-head {

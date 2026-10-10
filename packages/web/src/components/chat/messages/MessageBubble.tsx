@@ -52,54 +52,62 @@ export const MessageBubble = memo(function MessageBubble({
     >
       {/* Reasoning + reply + tool calls.
           For assistant turns we render an ordered event sequence (TurnEvents)
-          that preserves real execution order (reasoning → tool → reasoning →
-          tool → reply) instead of the old type-grouped stacking. User messages
-          keep the simple bubble. TurnEvents itself handles progressive disclosure
-          (a finished turn folds its trail to one line). */}
-      {!isUser && (
-        <WorkTimer
-          startedAtMs={msg.startedAtMs}
-          durationMs={msg.workDurationMs}
-          running={msg.status === "streaming"}
-        />
-      )}
+          that preserves real execution order. The turn's work timer travels
+          with it: the timer row is the whole turn's collapse switch (finished
+          turns fold their process log under it, keeping only the final answer
+          outside). User messages keep the simple bubble. */}
       {!isUser && msg.events && msg.events.length > 0 ? (
         <TurnEvents
           events={msg.events}
           isActive={msg.status === "streaming"}
           onOpenSubagent={onOpenSubagent}
+          timer={{
+            startedAtMs: msg.startedAtMs,
+            durationMs: msg.workDurationMs,
+            running: msg.status === "streaming",
+          }}
         />
       ) : (
-        /* Fallback bubble for user messages, or assistant turns that predate the
-           events model (empty timeline). */
-        <div style={{
-          maxWidth: isUser ? "78%" : "100%",
-          padding: isUser ? "10px 14px" : "0",
-          borderRadius: isUser ? "var(--radius-lg)" : 0,
-          fontSize: "var(--text-md)", lineHeight: "25px",
-          wordBreak: "break-word",
-          ...(isUser
-            ? {
-                whiteSpace: "pre-wrap",
-                background: "var(--bg-muted)",
-                color: "var(--text-primary)",
-              }
-            : { color: "var(--text-primary)" }),
-        }}>
-          {isUser ? (
-            msg.content
-          ) : msg.content ? (
-            <Markdown content={msg.content} />
-          ) : (
-            // Empty streaming bubble renders nothing — the work-timer meta line
-            // at the top of the turn already signals the busy state.
-            ""
+        <>
+          {/* Non-timeline turns still show the plain timer line. */}
+          {!isUser && (
+            <WorkTimer
+              startedAtMs={msg.startedAtMs}
+              durationMs={msg.workDurationMs}
+              running={msg.status === "streaming"}
+            />
           )}
-          {/* User attachments — thumbnails / file cards below the text. */}
-          {isUser && msg.attachments && msg.attachments.length > 0 && (
-            <MessageAttachments attachments={msg.attachments} workspaceId={workspaceId} />
-          )}
-        </div>
+          {/* Fallback bubble for user messages, or assistant turns that predate the
+             events model (empty timeline). */}
+          <div style={{
+            maxWidth: isUser ? "78%" : "100%",
+            padding: isUser ? "10px 14px" : "0",
+            borderRadius: isUser ? "var(--radius-lg)" : 0,
+            fontSize: "var(--text-md)", lineHeight: "25px",
+            wordBreak: "break-word",
+            ...(isUser
+              ? {
+                  whiteSpace: "pre-wrap",
+                  background: "var(--bg-muted)",
+                  color: "var(--text-primary)",
+                }
+              : { color: "var(--text-primary)" }),
+          }}>
+            {isUser ? (
+              msg.content
+            ) : msg.content ? (
+              <Markdown content={msg.content} />
+            ) : (
+              // Empty streaming bubble renders nothing — the work-timer meta line
+              // at the top of the turn already signals the busy state.
+              ""
+            )}
+            {/* User attachments — thumbnails / file cards below the text. */}
+            {isUser && msg.attachments && msg.attachments.length > 0 && (
+              <MessageAttachments attachments={msg.attachments} workspaceId={workspaceId} />
+            )}
+          </div>
+        </>
       )}
 
       {/* Copy action — finished messages only: revealed on row hover. During

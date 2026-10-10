@@ -9,6 +9,9 @@
 
 import type { AgentEvent, AgentRunInput } from "./protocol.js";
 import type { SubagentRegistryEntry } from "../agent/index.js";
+import { getLogger } from "../logging.js";
+
+const logger = getLogger("engine.langchain-adapter");
 
 // =============================================================================
 // Stream adapter — wraps a raw LangGraph stream into AgentEvent[]
@@ -372,6 +375,14 @@ export async function* wrapAgentStream(
   const taskIndexToId = new Map<number, string>();
   const taskStarted = new Set<string>();
 
+  // ---- terminal-output stats (truncation forensics) -----------------------
+  // A provider-side cut (`finish_reason=length` or a dropped wire) produces a
+  // stream that ENDS normally here — long reasoning, zero tool calls, zero
+  // visible text — and the turn would be reported as cleanly finished. The
+  // counts below are the evidence the chat service needs to tell the two
+  // apart (deepseek-harness "max-tokens is sticky" principle).
+  const stats = { reasoningChars: 0, textChars: 0, toolCallCount: 0, lastFinishReason: null as string | null };
+
   for await (const chunk of eventStream) {
     const unpacked = unpackChunk(chunk);
     if (!unpacked) continue;
@@ -612,10 +623,12 @@ export async function* wrapAgentStream(
     openMessage.set(ctxKey, messageId);
     if (reasoning.length > 0) {
       ac.reasoningAcc.set(messageId, (ac.reasoningAcc.get(messageId) ?? "") + reasoning);
+      stats.reasoningChars += reasoning.length;
       yield { type: "reasoning.delta", messageId, ...(agentNs ? { agentNs } : {}), delta: reasoning };
     }
     if (text.length > 0) {
       ac.textAcc.set(messageId, (ac.textAcc.get(messageId) ?? "") + text);
+      stats.textChars += text.length;
       yield { type: "text.delta", messageId, ...(agentNs ? { agentNs } : {}), delta: text };
     }
   }
@@ -626,4 +639,29 @@ export async function* wrapAgentStream(
   for (const ctxKey of [...agentCtxs.keys()]) {
     yield* flushEnded(ctxKey);
   }
+
+  // Truncation forensics: the LAST model response ended with substantial
+  // reasoning but produced neither a visible answer nor a tool call. This is
+  // the signature of a provider-side cut (finish_reason=length — reasoning
+  // tokens count toward max_tokens — or a silently dropped stream). Log it
+  // here and let the chat service turn the diagnostics event into a visible
+  // turn error instead of a silent, empty "finished".
+  stats.toolCallCount = [...agentCtxs.values()].reduce((n, c) => n + c.announced.size, 0);
+  const looksTruncated =
+    stats.reasoningChars > 1000 && stats.toolCallCount === 0 && stats.textChars === 0;
+  if (looksTruncated) {
+    logger.warn(
+      `[turn-truncated?] stream ended with reasoningChars=${stats.reasoningChars} ` +
+        `textChars=${stats.textChars} toolCallCount=${stats.toolCallCount} ` +
+        `finishReason=${JSON.stringify(stats.lastFinishReason)} — long thinking with zero ` +
+        "output usually means the provider cut the response (max_tokens ceiling or dropped stream)",
+    );
+  }
+  yield {
+    type: "turn.diagnostics",
+    finishReason: stats.lastFinishReason,
+    reasoningChars: stats.reasoningChars,
+    textChars: stats.textChars,
+    toolCallCount: stats.toolCallCount,
+  };
 }

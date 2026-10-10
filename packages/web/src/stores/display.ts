@@ -19,9 +19,11 @@ interface DisplaySettingsState {
 
   /**
    * Fold a turn's execution trail (reasoning + tool calls) away once the turn
-   * finishes. true (default) → the trail expands while the agent works and
-   * collapses to a "已完成 · N 步" line when it stops; a manual toggle still wins
-   * for that block. false → trails stay wherever the user left them.
+   * finishes. true (default) → the timer row ("已工作 Ns") becomes the whole
+   * turn's collapse switch: while streaming the log is open; on finish only the
+   * final answer stays outside, with the process folded under the timer row. A
+   * manual toggle of the timer row wins for that turn. false → the log stays
+   * expanded after the turn finishes.
    */
   autoCollapseTrace: boolean;
   setAutoCollapseTrace: (v: boolean) => void;

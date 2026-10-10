@@ -276,7 +276,7 @@ function AppearanceCard({
               完成后折叠执行过程
             </div>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--text-tertiary)" }}>
-              智能体工作时展开工具调用与思考，结束时收成一行「已完成 · N 步」摘要
+              智能体工作时展示工具调用与思考，结束后仅保留最终回复，过程收在用时一栏下
             </div>
           </div>
           <Switch

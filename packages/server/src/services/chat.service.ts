@@ -520,6 +520,12 @@ export async function checkAndHandleInterrupts(
  * assistant text for partial-save. Content events pass through verbatim — the
  * engine already emits the typed protocol shape; `seq` is assigned by the
  * route's run-registry wrapper.
+ *
+ * `turn.diagnostics` is intercepted (not forwarded): it carries the LAST model
+ * response's wire-level terminal stats, and a truncation signature there
+ * (long reasoning, zero tool calls, zero text — deepseek-harness
+ * "max-tokens is sticky" semantics) is recorded on `turnTruncated` so the
+ * caller can fail the turn with `turn.error` instead of silently finishing.
  */
 function processAgentEvent(
   event: AgentEvent,
@@ -529,7 +535,50 @@ function processAgentEvent(
   if (event.type === "text.delta") {
     accumulate(event.delta);
   }
+  if (event.type === "turn.diagnostics") {
+    lastDiagnostics = event;
+    if (
+      event.reasoningChars > 1000 &&
+      event.toolCallCount === 0 &&
+      event.textChars === 0
+    ) {
+      turnTruncated = {
+        finishReason: event.finishReason,
+        reasoningChars: event.reasoningChars,
+      };
+      logger.warn(
+        `[turn-truncated] finish_reason=${JSON.stringify(event.finishReason)} ` +
+          `reasoningChars=${event.reasoningChars} textChars=${event.textChars} ` +
+          `toolCallCount=${event.toolCallCount} — model produced long thinking with no ` +
+          "output; treating the turn as truncated instead of cleanly finished",
+      );
+    } else {
+      logger.info(
+        `[turn-diagnostics] finish_reason=${JSON.stringify(event.finishReason)} ` +
+          `reasoningChars=${event.reasoningChars} textChars=${event.textChars} ` +
+          `toolCallCount=${event.toolCallCount}`,
+      );
+    }
+    return;
+  }
   emit(event);
+}
+
+/**
+ * Diagnostics of the LAST model response in the current turn (set by
+ * processAgentEvent). Reset per streamChat/streamResume call.
+ */
+let lastDiagnostics: Extract<AgentEvent, { type: "turn.diagnostics" }> | null = null;
+/**
+ * Set when the diagnostics carried a truncation signature — the turn must
+ * surface as turn.error, never as a clean turn.finished.
+ */
+let turnTruncated: { finishReason: string | null; reasoningChars: number } | null = null;
+
+/** Reset the per-turn diagnostics state at the start of a stream. */
+function resetTurnDiagnostics(): void {
+  lastDiagnostics = null;
+  turnTruncated = null;
 }
 
 // =============================================================================
@@ -728,6 +777,7 @@ export async function streamChat(
   let accumulatedContent = "";
   let clientAborted = false;
   const accumulate = (text: string) => { accumulatedContent += text; };
+  resetTurnDiagnostics();
 
   try {
     // 1. turn.started
@@ -835,14 +885,43 @@ export async function streamChat(
     }
 
     // 3. Persist AI messages (skip on abort — partial already saved).
+    //     Also cross-check the persisted final AIMessage's authoritative wire
+    //     finish_reason (LangChain's ChatModelStream copies the last chunk's
+    //     finish_reason into response_metadata) against the in-stream
+    //     diagnostics — covers endpoints whose stream ends without the adapter
+    //     heuristic firing.
+    let wireFinishReason: string | null | undefined = undefined;
     if (!clientAborted) {
       try {
         const state = await input.agent.getState(input.langgraphConfig);
         const stateMessages = state?.values?.messages ?? [];
         saveAiMessages(input.threadId, stateMessages);
+        for (let i = stateMessages.length - 1; i >= 0; i--) {
+          const msg = stateMessages[i];
+          const lc = msg?.lc === 1 || msg?.constructor?.name != null;
+          if (!lc) continue;
+          const type = msg?._getType?.() ?? msg?.type;
+          if (type !== "ai") continue;
+          const meta = msg?.response_metadata ?? {};
+          if (meta.finish_reason != null) {
+            wireFinishReason = String(meta.finish_reason);
+          }
+          break;
+        }
       } catch (err) {
         logger.exception("Failed to save AI messages", err);
       }
+    }
+    if (
+      wireFinishReason != null &&
+      wireFinishReason !== "stop" &&
+      wireFinishReason !== "tool_calls" &&
+      turnTruncated === null
+    ) {
+      logger.warn(
+        `[finish-reason] persisted AIMessage carries finish_reason=${JSON.stringify(wireFinishReason)} ` +
+          "— abnormal wire terminal for the last model response",
+      );
     }
 
     // 4. Check for HITL interrupt
@@ -861,6 +940,27 @@ export async function streamChat(
     //    Stamp the work duration onto the last assistant message first (the
     //    "已工作 Xm" indicator survives history reloads).
     const durationMs = stampWorkDuration(input.threadId, input.startedAt);
+    if (turnTruncated !== null && !hasInterrupt) {
+      // deepseek-harness semantics: a max_tokens cut is sticky — the turn must
+      // NOT be reported as cleanly finished (that's the silent stop observed
+      // on thread_1963d9fb: two 100s+ reasoning streams cut mid-code, zero
+      // tool calls, zero text, then turn.finished). Surface a visible error.
+      const isLength = turnTruncated.finishReason === "length" || wireFinishReason === "length";
+      logger.warn(
+        `[turn-truncated] surfacing turn.error errorType=${isLength ? "max_tokens_truncated" : "empty_truncated_response"} ` +
+          `finishReason=${JSON.stringify(turnTruncated.finishReason)} wireFinishReason=${JSON.stringify(wireFinishReason)} ` +
+          `reasoningChars=${turnTruncated.reasoningChars} thread=${input.threadId} request=${input.requestId}`,
+      );
+      emit({
+        type: "turn.error",
+        errorType: isLength ? "max_tokens_truncated" : "empty_truncated_response",
+        message: isLength
+          ? "模型输出达到 max_tokens 上限被截断（思考内容也计入上限），本轮未产生任何修改。可在设置中调大该模型的 max_tokens，或让模型分步执行以缩短单次思考。"
+          : "模型响应在产出任何结果前中断（疑似网关断流或输出上限截断），本轮未产生任何修改。请重试或让模型分步执行。",
+        threadId: input.threadId,
+      });
+      return;
+    }
     if (!hasInterrupt) {
       emit({
         type: "turn.finished",
@@ -909,6 +1009,7 @@ export async function streamResume(
   emit: Emit,
   abortSignal?: AbortSignal,
 ): Promise<void> {
+  resetTurnDiagnostics();
   // Step 1: Read pre-state to count interrupted actions.
   let actionCount = 1;
   try {
@@ -992,6 +1093,26 @@ export async function streamResume(
     const hasInterrupt = await checkAndHandleInterrupts(
       input.agent, input.langgraphConfig, input.threadId, emit,
     );
+
+    if (turnTruncated !== null && !hasInterrupt) {
+      // Same sticky-truncation rule as streamChat — a resumed turn that was
+      // cut mid-reasoning with zero output must not report clean finish.
+      const isLength = turnTruncated.finishReason === "length";
+      logger.warn(
+        `[turn-truncated] (resume) surfacing turn.error errorType=${isLength ? "max_tokens_truncated" : "empty_truncated_response"} ` +
+          `finishReason=${JSON.stringify(turnTruncated.finishReason)} reasoningChars=${turnTruncated.reasoningChars} ` +
+          `thread=${input.threadId} request=${input.requestId}`,
+      );
+      emit({
+        type: "turn.error",
+        errorType: isLength ? "max_tokens_truncated" : "empty_truncated_response",
+        message: isLength
+          ? "模型输出达到 max_tokens 上限被截断（思考内容也计入上限），本轮未产生任何修改。可在设置中调大该模型的 max_tokens，或让模型分步执行以缩短单次思考。"
+          : "模型响应在产出任何结果前中断（疑似网关断流或输出上限截断），本轮未产生任何修改。请重试或让模型分步执行。",
+        threadId: input.threadId,
+      });
+      return;
+    }
 
     if (!hasInterrupt) {
       const durationMs = stampWorkDuration(input.threadId, input.startedAt);

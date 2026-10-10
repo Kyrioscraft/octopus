@@ -48,7 +48,23 @@ export type AgentEvent =
       description: string;
       subagentName: string;
     }
-  | { type: "subagent.finished"; instanceKey: string };
+  | { type: "subagent.finished"; instanceKey: string }
+  /**
+   * Emitted once when the graph stream closes: wire-level terminal stats of
+   * the LAST model response (deepseek-harness mapStopReason semantics).
+   * `finishReason` is the raw OpenAI `choices[0].finish_reason` (null when
+   * the stream ended without a terminal frame — transport truncation).
+   * `length` means the provider cut the output at the max_tokens ceiling
+   * (reasoning tokens count toward it) — the turn must NOT be reported as
+   * cleanly finished. Transport-only diagnostics; UI clients may ignore it.
+   */
+  | {
+      type: "turn.diagnostics";
+      finishReason: string | null;
+      reasoningChars: number;
+      textChars: number;
+      toolCallCount: number;
+    };
 
 /** Input for running a fresh chat turn through the engine wrapper. */
 export interface AgentRunInput {

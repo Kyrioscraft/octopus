@@ -203,7 +203,19 @@ function _resolveInferenceDefaults(
   const defaults: Record<string, unknown> = {};
 
   if (params["max_tokens"] === undefined) {
-    defaults["max_tokens"] = 16384;
+    // Reasoning tokens COUNT toward max_tokens — a long thinking trace that
+    // hits the ceiling ends with finish_reason=length and (observed on GLM via
+    // newapi, thread_1963d9fb) zero visible output: the turn silently "stops"
+    // right after thinking. 32768 is the floor for reasoning models so a
+    // medium-effort thinking trace + the real answer fit in one response.
+    // OCTOPUS_MAX_TOKENS overrides the floor for every model; per-model
+    // config params still win over both.
+    defaults["max_tokens"] =
+      process.env.OCTOPUS_MAX_TOKENS
+        ? parseInt(process.env.OCTOPUS_MAX_TOKENS, 10) || 16384
+        : _isReasoningModel(modelName)
+          ? 32768
+          : 16384;
   }
 
   if (

@@ -306,6 +306,64 @@ class StreamAttributionRepairer {
 }
 
 /**
+ * Per-request (per SSE stream) terminal-state tracker. The LAST chunk of each
+ * assistant message carries `choices[0].finish_reason`; everything octopus
+ * does downstream (LangGraph stream events) loses it, so a provider-side
+ * truncation (`length`) currently looks identical to a normal completion and
+ * the turn ends silently with zero output (observed: GLM via newapi cutting a
+ * long reasoning stream mid-sentence, then `turn.finished` with no tool calls
+ * and no text). Mirrors deepseek-harness's mapStopReason: surface the wire
+ * finish reason at the single HTTP choke point and log the abnormal ones.
+ */
+class FinishReasonObserver {
+  /** finish_reason recorded for the CURRENT stream (reset per request). */
+  private _finishReason: string | null = null;
+  /** Chunk counter for the current stream — distinguishes "truncated before
+   *  anything arrived" from "stream completed". */
+  private _chunks = 0;
+  /** Monotonic id so log lines can be correlated per model call. */
+  private _requestSeq = 0;
+  private _activeId = 0;
+
+  /** Called from completionWithRetry with the final wire body. */
+  begin(body: any): number {
+    this._finishReason = null;
+    this._chunks = 0;
+    this._activeId = ++this._requestSeq;
+    if (process.env.OCTOPUS_FINISH_TRACE === "1") {
+      logger.info(
+        `[finish-trace] req=${this._activeId} model=${body?.model ?? "?"} ` +
+          `stream=${!!body?.stream} max_tokens=${body?.max_tokens ?? "-"}`,
+      );
+    }
+    return this._activeId;
+  }
+
+  /** Called for every raw SSE data chunk, before any transformation. */
+  observe(data: any): void {
+    this._chunks++;
+    const reason = data?.choices?.[0]?.finish_reason;
+    if (reason != null) this._finishReason = String(reason);
+  }
+
+  /** Called when the raw stream iterable ends — log abnormal terminals. */
+  end(): void {
+    const reason = this._finishReason;
+    if (reason === null || reason === "stop" || reason === "tool_calls") return;
+    // `length` = provider hit max_tokens (reasoning tokens count!); other
+    // values are provider-specific abnormal ends (content_filter etc.).
+    logger.warn(
+      `[finish-reason] req=${this._activeId} finish_reason=${JSON.stringify(reason)} ` +
+        `chunks=${this._chunks}` +
+        (reason === "length"
+          ? " — output truncated at max_tokens ceiling; the turn WILL look " +
+            "completed but only a partial answer was produced"
+          : ""),
+    );
+  }
+}
+
+/**
  * Completions backend with finalized-message tool-call repair.
  *
  * Agent streaming (langgraph's StreamProtocolMessagesHandler sets
@@ -338,6 +396,8 @@ class ChatOpenAICompatibleCompletions extends ChatOpenAICompletions {
    * resets — are visible and the per-message repairer state is sound.
    */
   private _hookRepairer = new StreamAttributionRepairer();
+  /** finish_reason observer for the chunk-conversion path. */
+  private _hookFinishObserver = new FinishReasonObserver();
 
   protected _convertCompletionsDeltaToBaseMessageChunk(
     delta: any,
@@ -348,6 +408,7 @@ class ChatOpenAICompatibleCompletions extends ChatOpenAICompletions {
     const finishReason = rawResponse?.choices?.[0]?.finish_reason;
     if (finishReason != null) {
       this._hookRepairer.reset();
+      this._hookFinishObserver.observe(rawResponse);
     }
     if (Array.isArray(toolCalls) && toolCalls.length > 0) {
       try {
@@ -384,16 +445,27 @@ class ChatOpenAICompatibleCompletions extends ChatOpenAICompletions {
     // Generator-local repairer → per-stream state, reset at every message
     // boundary (finish_reason), no cross-request leak.
     const repairer = new StreamAttributionRepairer();
+    // Generator-local finish-reason observer: `length` (max_tokens ceiling —
+    // reasoning tokens count toward it) or a missing terminal frame means the
+    // provider cut the response mid-generation; without this the turn ends
+    // looking completed. Logged when the raw stream closes.
+    const finishObserver = new FinishReasonObserver();
+    finishObserver.begin(params);
     const repairedSource = async function* (source: AsyncIterable<any>) {
-      for await (const data of source) {
-        try {
-          repairer.repairChunk(data);
-        } catch (err) {
-          logger.exception("stream tool-call attribution repair failed", err);
+      try {
+        for await (const data of source) {
+          try {
+            repairer.repairChunk(data);
+            finishObserver.observe(data);
+          } catch (err) {
+            logger.exception("stream tool-call attribution repair failed", err);
+          }
+          yield data;
         }
-        yield data;
+      } finally {
+        repairer.flushSummary();
+        finishObserver.end();
       }
-      repairer.flushSummary();
     };
     yield* convertOpenAICompletionsStream(
       repairedSource(streamIterable),
@@ -417,6 +489,7 @@ class ChatOpenAICompatibleCompletions extends ChatOpenAICompletions {
    * misses it — this covers every path.)
    */
   async completionWithRetry(body: any, options: any): Promise<any> {
+    this._hookFinishObserver.begin(body);
     if (body?.stream && body.stream_options) {
       const hasImageUrl =
         Array.isArray(body.messages) &&
