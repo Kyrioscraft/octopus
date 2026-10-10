@@ -12,6 +12,8 @@ For English documentation, see [README.md](./README.md).
 
 Octopus（八爪鱼）是一个 AI 智能体平台，支持多模型对话、工具调用、多智能体协作。通过 MCP（模型上下文协议）集成外部工具，支持自定义技能和子智能体，提供 Web UI、终端 TUI 和命令行三种交互方式。
 
+![Octopus Web 界面](docs/assets/view.png)
+
 ## 亮点
 
 - **多模型** — 支持 Anthropic、OpenAI、DeepSeek、OpenRouter 以及任意 OpenAI 兼容提供商，可按请求动态切换模型。

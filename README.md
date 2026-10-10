@@ -12,6 +12,8 @@
 
 Octopus is an AI agent platform that lets you chat with LLMs, give them tools, and orchestrate multi-agent workflows. It supports multiple model providers, MCP (Model Context Protocol) tools, custom skills, and sub-agents — all manageable through a Web UI, terminal TUI, or CLI.
 
+![Octopus Web UI](docs/assets/view.png)
+
 ## Highlights
 
 - **Multi-model** — Anthropic, OpenAI, DeepSeek, OpenRouter, and any OpenAI-compatible provider. Switch models per request.
