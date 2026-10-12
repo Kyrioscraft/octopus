@@ -150,18 +150,25 @@ const TOOL_DESCRIPTION_OVERRIDES: Record<string, string> = {
 };
 
 /**
- * Replacement schema for `read_file`. The SDK's original marks offset/limit
- * required (via .default()) with limit defaulting to 100 — the model is forced
- * to pass both on every call and reads fragment into 100-line chunks. This
- * schema: only `file_path` required, `offset` optional (0-indexed line),
- * `limit` optional defaulting to 2000 (full-file reads by default).
+ * Default max lines per read_file call.
+ *
+ * The SDK's read_file TOOL implementation destructures `limit = 100` internally
+ * (deepagents dist ~line 1808) — when the model omits `limit`, the tool ignores
+ * our schema default and reads only 100 lines, fragmenting every file into
+ * repeated calls. The preprocess below therefore INJECTS the default into the
+ * parsed input, so the tool receives an explicit limit and one call covers
+ * common files (up to 2000 lines) end to end.
  */
+const READ_FILE_DEFAULT_LIMIT = 2000;
+
 /**
  * Preprocess `read_file` input for weaker models / flaky streaming providers.
  * OpenAI-compatible endpoints (GLM etc.) occasionally deliver tool-call args
  * with alternate key spellings; map the common variants onto `file_path` so
  * zod validation doesn't hard-fail the call (the SDK's original schema had
  * the same `path` → `file_path` normalization — restored here and extended).
+ * Also injects the 2000-line default when the model omits `limit` (see
+ * READ_FILE_DEFAULT_LIMIT).
  */
 function _normalizeReadFileInput(raw: unknown): unknown {
   if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return raw;
@@ -169,6 +176,11 @@ function _normalizeReadFileInput(raw: unknown): unknown {
   if (input["file_path"] === undefined || input["file_path"] === "") {
     const alt = input["path"] ?? input["filePath"] ?? input["filename"];
     if (typeof alt === "string" && alt !== "") input["file_path"] = alt;
+  }
+  // The critical default: without this, the SDK tool's internal `limit = 100`
+  // kicks in whenever the model omits the parameter.
+  if (input["limit"] === undefined || input["limit"] === null || input["limit"] === "") {
+    input["limit"] = READ_FILE_DEFAULT_LIMIT;
   }
   return input;
 }
